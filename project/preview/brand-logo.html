@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --font-sans:'Manrope',system-ui,sans-serif;
+    --bg-base:#0F1E2E; --bg-void:#0A1420; --surface-1:#1C3349;
+    --line-2:#314A64; --fg-1:#EAF1F8; --brand:#2BB3C7; --r-lg:14px;
+  }
+  body { margin:0; width:700px; padding:26px; background:var(--bg-base); display:flex; align-items:center; gap:26px; font-family:var(--font-sans); }
+  .lockup { display:flex; align-items:baseline; }
+  .wm { font-weight:800; font-size:46px; letter-spacing:-1.5px; color:var(--fg-1); }
+  .oemit { align-self:center; margin-left:-2px; margin-bottom:-9px; }
+  .divider { width:1px; align-self:stretch; background:var(--line-2); }
+  .marks { display:flex; gap:14px; align-items:center; }
+  .chip { width:52px; height:52px; border-radius:var(--r-lg); display:grid; place-items:center; }
+  .knock { filter:brightness(0); }
+</style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <radialGradient id="er-blip" cx="0.5" cy="0.5" r="0.5">
+        <stop stop-color="#FF7A87"/><stop offset="1" stop-color="#FF4D5E"/>
+      </radialGradient>
+      <!-- the "o": left half = letter wall (white), right half = first wave, then echoes -->
+      <symbol id="oemit" viewBox="0 0 62 56">
+        <path d="M16 17 A10 10 0 0 0 16 37" stroke="#EAF1F8" stroke-width="6.6" stroke-linecap="round" fill="none"/>
+        <path d="M16 17 A10 10 0 0 1 16 37" stroke="#57D2E2" stroke-width="6.6" stroke-linecap="round" fill="none"/>
+        <path d="M16 9  A18 18 0 0 1 16 45" stroke="#2BB3C7" stroke-opacity="0.55" stroke-width="3.4" stroke-linecap="round" fill="none"/>
+        <path d="M16 2  A25 25 0 0 1 16 52" stroke="#2BB3C7" stroke-opacity="0.30" stroke-width="3.4" stroke-linecap="round" fill="none"/>
+        <circle cx="29" cy="14" r="4.6" fill="#FF4D5E" fill-opacity="0.16"/>
+        <circle cx="29" cy="14" r="2.7" fill="url(#er-blip)"/>
+      </symbol>
+      <!-- square app-icon mark -->
+      <symbol id="mark" viewBox="0 0 48 48">
+        <path d="M13 25 A10 10 0 0 1 23 35" stroke="#57D2E2" stroke-opacity="0.85" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+        <path d="M13 17 A18 18 0 0 1 31 35" stroke="#2BB3C7" stroke-opacity="0.55" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+        <path d="M13 9 A26 26 0 0 1 39 35"  stroke="#2BB3C7" stroke-opacity="0.32" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+        <circle cx="13" cy="35" r="3.4" fill="#57D2E2"/>
+        <circle cx="31" cy="17" r="5" fill="#FF4D5E" fill-opacity="0.16"/>
+        <circle cx="31" cy="17" r="2.8" fill="url(#er-blip)"/>
+      </symbol>
+    </defs>
+  </svg>
+
+  <div class="lockup">
+    <span class="wm">Ech</span>
+    <svg class="oemit" width="62" height="56"><use href="#oemit"/></svg>
+  </div>
+  <div class="divider"></div>
+  <div class="marks">
+    <div class="chip" style="background:var(--bg-void);border:1px solid var(--line-2)"><svg width="32" height="32"><use href="#mark"/></svg></div>
+    <div class="chip" style="background:var(--surface-1);border:1px solid var(--line-2)"><svg width="32" height="32"><use href="#mark"/></svg></div>
+    <div class="chip" style="background:var(--brand)"><svg class="knock" width="32" height="32"><use href="#mark"/></svg></div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Echo Radar — обзор дизайн-системы</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================================
+   ECHO RADAR — Foundations: Color + Type
+   ----------------------------------------------------------------------------
+   Mood: «спокойный диспетчерский центр». Тёмный сине-графитовый фон, холодный
+   циан как акцент бренда. Спокойствие как фон, срочность как точка — только
+   сигналы severity вспыхивают тёплым: алый «залетает», янтарный «растёт».
+
+   Fonts loaded from Google Fonts CDN (both ship full Cyrillic):
+     - Manrope        → UI, headings, body
+     - JetBrains Mono → data, metrics, severity, timestamps, eyebrows
+   NOTE: not bundled locally. See README → Caveats if you need offline files.
+   ============================================================================ */
+
+
+
+:root {
+  /* ---- Type families ---- */
+  --font-sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* ====================================================================
+     COLOR — Backgrounds (graphite navy, cold + desaturated)
+     ==================================================================== */
+  --bg-void:    #0A1420;  /* deepest backdrop, behind panels */
+  --bg-base:    #0F1E2E;  /* app canvas */
+  --bg-raised:  #16293B;  /* large panels / sidebars */
+  --surface-1:  #1C3349;  /* cards */
+  --surface-2:  #244059;  /* raised cards, inputs */
+  --surface-3:  #2F4E6B;  /* hover, pressed surfaces */
+
+  /* ---- Hairlines / borders ---- */
+  --line-1:      #243A50;  /* subtle dividers */
+  --line-2:      #314A64;  /* card borders */
+  --line-strong: #42607E;  /* emphasized borders */
+
+  /* ====================================================================
+     COLOR — Text (cool whites → dim)
+     ==================================================================== */
+  --fg-1: #EAF1F8;  /* primary */
+  --fg-2: #97A9BE;  /* secondary */
+  --fg-3: #5C6E83;  /* tertiary, dim labels */
+  --fg-on-brand: #04141A;  /* ink on cyan */
+  --fg-on-warm:  #1A0A09;  /* ink on amber/crimson fills */
+
+  /* ====================================================================
+     COLOR — Brand (cold cyan = "всё под контролем", radar signal)
+     ==================================================================== */
+  --brand:        #2BB3C7;
+  --brand-bright: #57D2E2;
+  --brand-deep:   #15788A;
+  --brand-ghost:  rgba(43,179,199,0.12);
+  --brand-line:   rgba(43,179,199,0.32);
+
+  /* ====================================================================
+     COLOR — Severity (warm urgency — the "точка" against calm)
+     ==================================================================== */
+  --sev-critical:        #FF4D5E;  /* «залетает» — crimson */
+  --sev-critical-bright: #FF7A87;
+  --sev-critical-ghost:  rgba(255,77,94,0.14);
+  --sev-critical-line:   rgba(255,77,94,0.38);
+
+  --sev-rising:        #FFB23E;    /* «растёт» — amber */
+  --sev-rising-bright: #FFC871;
+  --sev-rising-ghost:  rgba(255,178,62,0.14);
+  --sev-rising-line:   rgba(255,178,62,0.36);
+
+  --sev-calm:        #34D8A0;       /* «под контролем» / позитив — used sparingly */
+  --sev-calm-ghost:  rgba(52,216,160,0.13);
+  --sev-calm-line:   rgba(52,216,160,0.34);
+
+  /* ---- Tonality (sentiment) ---- */
+  --tone-negative: var(--sev-critical);
+  --tone-neutral:  #7E91A6;
+  --tone-positive: var(--sev-calm);
+
+  /* ---- Platform marks ---- */
+  --pf-instagram: #E1306C;
+  --pf-tiktok:    #EAF1F8;
+
+  /* ====================================================================
+     RADII
+     ==================================================================== */
+  --r-xs:   4px;
+  --r-sm:   6px;
+  --r-md:  10px;
+  --r-lg:  14px;
+  --r-xl:  20px;
+  --r-pill: 999px;
+
+  /* ====================================================================
+     SPACING (4px base)
+     ==================================================================== */
+  --s-1:  4px;
+  --s-2:  8px;
+  --s-3:  12px;
+  --s-4:  16px;
+  --s-5:  20px;
+  --s-6:  24px;
+  --s-8:  32px;
+  --s-10: 40px;
+  --s-12: 48px;
+  --s-16: 64px;
+  --s-20: 80px;
+
+  /* ====================================================================
+     ELEVATION — shadows on dark + signal glows
+     ==================================================================== */
+  --shadow-1: 0 1px 2px rgba(0,0,0,0.45);
+  --shadow-2: 0 6px 20px -6px rgba(0,0,0,0.55);
+  --shadow-3: 0 22px 54px -16px rgba(0,0,0,0.70);
+
+  /* glows = a calm radar pulse or a warm severity flare */
+  --glow-brand:    0 0 0 1px var(--brand-line),        0 0 26px -6px rgba(43,179,199,0.50);
+  --glow-critical: 0 0 0 1px var(--sev-critical-line),  0 0 24px -4px rgba(255,77,94,0.55);
+  --glow-rising:   0 0 0 1px var(--sev-rising-line),    0 0 24px -6px rgba(255,178,62,0.45);
+
+  /* ====================================================================
+     MOTION
+     ==================================================================== */
+  --ease-out:  cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur-mid:  220ms;
+  --dur-slow: 420ms;
+
+  /* ====================================================================
+     TYPE SCALE  (sizes / line-heights / tracking)
+     ==================================================================== */
+  --display:    700 44px/1.04 var(--font-sans);   --display-ls: -0.022em;
+  --h1:         800 34px/1.08 var(--font-sans);   --h1-ls: -0.02em;
+  --h2:         700 26px/1.14 var(--font-sans);   --h2-ls: -0.016em;
+  --h3:         700 20px/1.22 var(--font-sans);   --h3-ls: -0.012em;
+  --h4:         600 16px/1.30 var(--font-sans);   --h4-ls: -0.006em;
+  --body-lg:    500 17px/1.55 var(--font-sans);
+  --body:       500 15px/1.55 var(--font-sans);
+  --small:      500 13px/1.5  var(--font-sans);
+  --eyebrow:    600 12px/1.1  var(--font-mono);   --eyebrow-ls: 0.16em;
+  --metric:     600 15px/1    var(--font-mono);
+  --metric-lg:  600 28px/1    var(--font-mono);   --metric-lg-ls: -0.01em;
+  --mono-sm:    500 12px/1.4  var(--font-mono);
+}
+
+/* ============================================================================
+   SEMANTIC HELPERS — apply directly as classes
+   ============================================================================ */
+.echo-display { font: var(--display); letter-spacing: var(--display-ls); color: var(--fg-1); }
+.echo-h1 { font: var(--h1); letter-spacing: var(--h1-ls); color: var(--fg-1); }
+.echo-h2 { font: var(--h2); letter-spacing: var(--h2-ls); color: var(--fg-1); }
+.echo-h3 { font: var(--h3); letter-spacing: var(--h3-ls); color: var(--fg-1); }
+.echo-h4 { font: var(--h4); letter-spacing: var(--h4-ls); color: var(--fg-1); }
+.echo-body-lg { font: var(--body-lg); color: var(--fg-2); }
+.echo-body { font: var(--body); color: var(--fg-2); }
+.echo-small { font: var(--small); color: var(--fg-3); }
+
+/* eyebrow / label — mono, uppercase, tracked-out: the instrument-panel voice */
+.echo-eyebrow {
+  font: var(--eyebrow);
+  letter-spacing: var(--eyebrow-ls);
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+/* metric — mono tabular numerals for scores, counts, timestamps */
+.echo-metric { font: var(--metric); font-variant-numeric: tabular-nums; color: var(--fg-1); }
+.echo-metric-lg { font: var(--metric-lg); letter-spacing: var(--metric-lg-ls); font-variant-numeric: tabular-nums; color: var(--fg-1); }
+
+/* ============================================================================
+   BASE (optional reset — opt in by adding class "echo" to <body>)
+   ============================================================================ */
+.echo {
+  background: var(--bg-base);
+  color: var(--fg-2);
+  font: var(--body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+.echo *,
+.echo *::before,
+.echo *::after { box-sizing: border-box; }
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg-base);color:var(--fg-2);font-family:var(--font-sans);-webkit-font-smoothing:antialiased;
+background-image:radial-gradient(900px 460px at 80% -6%, rgba(43,179,199,.10), transparent 60%)}
+.wrap{max-width:1000px;margin:0 auto;padding:0 28px}
+.eb{font-family:var(--font-mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:#57D2E2;font-weight:600;margin-bottom:22px}
+.wm{font-weight:800;letter-spacing:-1px;color:#EAF1F8;font-size:34px}
+.ov-hero{position:relative;text-align:center;padding:90px 28px 70px;overflow:hidden;border-bottom:1px solid var(--line-1)}
+.ov-scope{position:absolute;left:50%;top:-120px;transform:translateX(-50%);pointer-events:none}
+.ov-scope span{position:absolute;left:50%;top:0;transform:translateX(-50%);border-radius:50%;border:1px solid rgba(43,179,199,.12)}
+.ov-scope span:nth-child(1){width:260px;height:260px}.ov-scope span:nth-child(2){width:440px;height:440px}.ov-scope span:nth-child(3){width:640px;height:640px}.ov-scope span:nth-child(4){width:860px;height:860px}
+.ov-lock{display:inline-flex;align-items:baseline;position:relative}
+.ov-h1{position:relative;font-weight:800;font-size:40px;letter-spacing:-.02em;color:#EAF1F8;margin:26px 0 0}
+.ov-lead{position:relative;max-width:600px;margin:16px auto 0;font-size:16px;line-height:1.6;color:var(--fg-2)}
+.ov-sec{max-width:1000px;margin:0 auto;padding:56px 28px;border-bottom:1px solid var(--line-1)}
+.ov-logos{display:flex;align-items:center;gap:40px;flex-wrap:wrap}
+.ov-logobig{display:flex;align-items:baseline}
+.ov-chips{display:flex;gap:14px}.chip{width:60px;height:60px;border-radius:15px;display:grid;place-items:center}
+.ov-row{display:flex;gap:10px}
+.sw{flex:1;height:92px;border-radius:10px;border:1px solid var(--line-1);padding:12px;display:flex;flex-direction:column;justify-content:flex-end;font-family:var(--font-mono);font-size:12px}
+.sw span:first-child{font-weight:600}.sw.big{flex:2}
+.ov-type{display:flex;flex-direction:column;gap:18px}
+.tl{display:flex;align-items:baseline;gap:18px}.tg{flex:none;width:150px;font-family:var(--font-mono);font-size:11px;color:#5C6E83}
+.ov-comp{display:flex;gap:30px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin-bottom:24px}
+.ov-buttons{display:flex;gap:10px;flex-wrap:wrap}
+.b{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-sans);font-weight:700;font-size:14px;padding:10px 16px;border-radius:10px;border:1px solid transparent;cursor:pointer;white-space:nowrap}
+.b .i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.b.sm{font-size:13px;padding:9px 14px}
+.prim{background:#2BB3C7;color:#04141A;box-shadow:var(--glow-brand)}
+.sec{background:#244059;color:#EAF1F8;border-color:#42607E}
+.gh{background:transparent;color:#97A9BE;border-color:#314A64}
+.dng{background:rgba(255,77,94,.14);color:#FF7A87;border-color:rgba(255,77,94,.38)}
+.ov-gauges{display:flex;gap:18px}
+.ga{display:flex;flex-direction:column;align-items:center;gap:9px}
+.gauge{position:relative;width:84px;height:84px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--c) calc(var(--v)*1%), #2F4E6B 0)}
+.gauge::before{content:"";position:absolute;width:64px;height:64px;border-radius:50%;background:var(--bg-base)}
+.gauge span{position:relative;font-family:var(--font-mono);font-weight:700;font-size:24px;font-variant-numeric:tabular-nums}
+.gl{font-family:var(--font-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:600}
+.ov-mention{max-width:560px;background:var(--surface-1);border:1px solid var(--line-2);border-left:3px solid #FF4D5E;border-radius:14px;overflow:hidden;box-shadow:var(--shadow-2)}
+.mh{display:flex;align-items:center;gap:11px;padding:14px 16px;border-bottom:1px solid var(--line-1)}
+.mpf{width:34px;height:34px;border-radius:8px;display:grid;place-items:center;flex:none}
+.mbadge{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;font-weight:600;color:#FF7A87;background:rgba(255,77,94,.14);border:1px solid rgba(255,77,94,.38);padding:4px 9px;border-radius:999px}
+.mbadge .bd{width:6px;height:6px;border-radius:999px;background:#FF4D5E}
+.msev{font-family:var(--font-mono);font-weight:700;font-size:24px;color:#FF7A87}
+.mtext{margin:0;padding:14px 16px;font-size:14.5px;line-height:1.55;color:#EAF1F8}
+.mdraft{margin:0 16px 14px;background:var(--bg-raised);border:1px solid var(--line-2);border-radius:10px;padding:12px 14px}
+.dl{display:inline-flex;align-items:center;gap:7px;font-family:var(--font-mono);font-size:11px;letter-spacing:.12em;color:#57D2E2;font-weight:600}
+.dl svg{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mdraft p{margin:8px 0 0;font-size:13.5px;line-height:1.55;color:var(--fg-2)}
+.macts{display:flex;gap:10px;padding:0 16px 16px}
+.ov-pf{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.pf{background:var(--surface-1);border:1px solid var(--line-2);border-radius:12px;padding:18px;display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center}
+.pfm{width:44px;height:44px;border-radius:11px;display:grid;place-items:center;border:1px solid var(--line-2)}
+.pfm .ig{width:22px;height:22px;fill:none;stroke:#E1306C;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.pf b{font-size:13px;color:#EAF1F8}
+.st{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:#5C6E83}.st.v1{color:#57D2E2}
+.ov-kits{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.kit{display:flex;flex-direction:column;gap:8px;background:var(--surface-1);border:1px solid var(--line-2);border-radius:16px;padding:24px;text-decoration:none;transition:border-color .15s, transform .15s}
+.kit:hover{border-color:var(--brand-line);transform:translateY(-2px)}
+.kit-t{font-size:19px;font-weight:800;color:#EAF1F8;letter-spacing:-.01em}
+.kit-d{font-size:13.5px;line-height:1.5;color:var(--fg-3)}
+.kit-go{margin-top:6px;font-family:var(--font-mono);font-size:12px;letter-spacing:.08em;color:#57D2E2;font-weight:600}
+.ov-foot{text-align:center;padding:40px}
+@media(max-width:760px){.ov-pf,.ov-kits{grid-template-columns:1fr 1fr}.ov-comp{flex-direction:column;align-items:flex-start}}
+
+</style>
+</head>
+<body class="echo">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<radialGradient id="blip" cx=".5" cy=".5" r=".5"><stop stop-color="#FF7A87"/><stop offset="1" stop-color="#FF4D5E"/></radialGradient>
+<symbol id="emit-o" viewBox="0 0 62 56">
+<path d="M16 17 A10 10 0 0 0 16 37" stroke="currentColor" stroke-width="6.6" stroke-linecap="round" fill="none"/>
+<path d="M16 17 A10 10 0 0 1 16 37" stroke="#57D2E2" stroke-width="6.6" stroke-linecap="round" fill="none"/>
+<path d="M16 9 A18 18 0 0 1 16 45" stroke="#2BB3C7" stroke-opacity=".55" stroke-width="3.4" stroke-linecap="round" fill="none"/>
+<path d="M16 2 A25 25 0 0 1 16 52" stroke="#2BB3C7" stroke-opacity=".30" stroke-width="3.4" stroke-linecap="round" fill="none"/>
+<circle cx="29" cy="14" r="2.7" fill="url(#blip)"/></symbol>
+<symbol id="mark" viewBox="0 0 48 48">
+<path d="M13 25 A10 10 0 0 1 23 35" stroke="#57D2E2" stroke-opacity=".85" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+<path d="M13 17 A18 18 0 0 1 31 35" stroke="#2BB3C7" stroke-opacity=".55" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+<path d="M13 9 A26 26 0 0 1 39 35" stroke="#2BB3C7" stroke-opacity=".32" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+<circle cx="13" cy="35" r="3.4" fill="#57D2E2"/><circle cx="31" cy="17" r="2.8" fill="url(#blip)"/></symbol>
+<symbol id="send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></symbol>
+<symbol id="pencil" viewBox="0 0 24 24"><path d="M21.17 6.81a1 1 0 0 0-3.98-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z"/><path d="m15 5 4 4"/></symbol>
+<symbol id="xi" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+<symbol id="flame" viewBox="0 0 24 24"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></symbol>
+<symbol id="spark" viewBox="0 0 24 24"><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.14-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.14 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0z"/></symbol>
+<symbol id="music" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
+<symbol id="ig" viewBox="0 0 24 24"><rect width="20" height="20" x="2" y="2" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></symbol>
+</defs></svg>
+
+<header class="ov-hero">
+  <div class="ov-scope"><span></span><span></span><span></span><span></span></div>
+  <div class="ov-lock"><span class="wm">Ech</span><svg width="58" height="52" viewBox="0 0 62 56" style="align-self:center;margin-left:-2px;margin-bottom:-9px;color:#EAF1F8"><use href="#emit-o"/></svg></div>
+  <h1 class="ov-h1">Дизайн-система</h1>
+  <p class="ov-lead">Спокойный диспетчерский центр: холодный циан держит эфир под контролем, тёплый severity вспыхивает только там, где сигнал реально разгоняется. Спокойствие — фон, срочность — точка.</p>
+</header>
+
+<section class="ov-sec">
+  <div class="eb">Логотип</div>
+  <div class="ov-logos">
+    <div class="ov-logobig"><span class="wm" style="font-size:48px">Ech</span><svg width="66" height="60" viewBox="0 0 62 56" style="align-self:center;margin-left:-2px;margin-bottom:-11px;color:#EAF1F8"><use href="#emit-o"/></svg></div>
+    <div class="ov-chips">
+      <span class="chip" style="background:#0A1420;border:1px solid #314A64"><svg width="34" height="34"><use href="#mark"/></svg></span>
+      <span class="chip" style="background:#1C3349;border:1px solid #314A64"><svg width="34" height="34"><use href="#mark"/></svg></span>
+      <span class="chip" style="background:#2BB3C7"><svg width="34" height="34" style="filter:brightness(0)"><use href="#mark"/></svg></span>
+    </div>
+  </div>
+</section>
+
+<section class="ov-sec">
+  <div class="eb">Цвет</div>
+  <div class="ov-row"><div class="sw" style="background:#0A1420"><span style="color:#EAF1F8">void</span><span style="color:#5C6E83;opacity:.8">#0A1420</span></div><div class="sw" style="background:#0F1E2E"><span style="color:#EAF1F8">base</span><span style="color:#5C6E83;opacity:.8">#0F1E2E</span></div><div class="sw" style="background:#16293B"><span style="color:#EAF1F8">raised</span><span style="color:#5C6E83;opacity:.8">#16293B</span></div><div class="sw" style="background:#1C3349"><span style="color:#EAF1F8">surface-1</span><span style="color:#5C6E83;opacity:.8">#1C3349</span></div><div class="sw" style="background:#244059"><span style="color:#EAF1F8">surface-2</span><span style="color:#5C6E83;opacity:.8">#244059</span></div><div class="sw" style="background:#2F4E6B"><span style="color:#EAF1F8">surface-3</span><span style="color:#5C6E83;opacity:.8">#2F4E6B</span></div></div>
+  <div class="ov-row" style="margin-top:12px">
+    <div class="sw big" style="background:#2BB3C7"><span style="color:#04141A">brand · холодный циан</span><span style="color:#04141A;opacity:.7">#2BB3C7</span></div>
+    <div class="sw" style="background:#FF4D5E"><span style="color:#1A0A09">залетает</span><span style="color:#1A0A09;opacity:.8">#FF4D5E</span></div><div class="sw" style="background:#FFB23E"><span style="color:#1A0A09">растёт</span><span style="color:#1A0A09;opacity:.8">#FFB23E</span></div><div class="sw" style="background:#34D8A0"><span style="color:#04140E">под контролем</span><span style="color:#04140E;opacity:.8">#34D8A0</span></div>
+  </div>
+</section>
+
+<section class="ov-sec">
+  <div class="eb">Типографика</div>
+  <div class="ov-type">
+    <div class="tl"><span class="tg">display · Manrope 800</span><span class="echo-display">Ловите на разгоне</span></div>
+    <div class="tl"><span class="tg">h2 · 700</span><span class="echo-h2">Карточка упоминания</span></div>
+    <div class="tl"><span class="tg">body · 500</span><span class="echo-body" style="max-width:520px">Echo Radar предсказывает виральность и отдаёт готовый черновик ответа на одобрение.</span></div>
+    <div class="tl"><span class="tg">mono · данные</span><span style="font-family:var(--font-mono);font-variant-numeric:tabular-nums"><span style="color:#FF7A87;font-weight:700;font-size:22px">87</span> <span style="color:#97A9BE">/100</span> &nbsp; <span style="color:#34D8A0">+340/мин</span> &nbsp; <span style="color:#5C6E83">12:04 · @user123</span></span></div>
+  </div>
+</section>
+
+<section class="ov-sec">
+  <div class="eb">Компоненты</div>
+  <div class="ov-comp">
+    <div class="ov-buttons">
+      <button class="b prim"><svg class="i"><use href="#send"/></svg>Одобрить и отправить</button>
+      <button class="b sec"><svg class="i"><use href="#pencil"/></svg>Править</button>
+      <button class="b gh"><svg class="i"><use href="#xi"/></svg>Отклонить</button>
+      <button class="b dng"><svg class="i"><use href="#flame"/></svg>В PR — срочно</button>
+    </div>
+    <div class="ov-gauges">
+      <div class="ga"><div class="gauge" style="--c:#FF4D5E;--v:87"><span style="color:#FF7A87">87</span></div><span class="gl" style="color:#FF7A87">Залетает</span></div>
+      <div class="ga"><div class="gauge" style="--c:#FFB23E;--v:54"><span style="color:#FFC871">54</span></div><span class="gl" style="color:#FFC871">Растёт</span></div>
+      <div class="ga"><div class="gauge" style="--c:#2BB3C7;--v:21"><span style="color:#57D2E2">21</span></div><span class="gl" style="color:#57D2E2">Под контролем</span></div>
+    </div>
+  </div>
+
+  <div class="ov-mention">
+    <div class="mh">
+      <span class="mpf"><svg viewBox="0 0 24 24" fill="#EAF1F8" width="22" height="22"><path d="M12.53.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/></svg></span>
+      <div style="flex:1"><div style="font-size:13.5px;font-weight:700;color:#EAF1F8">@user123</div><div style="font-family:var(--font-mono);font-size:11px;color:#5C6E83">TikTok · 12 400 подписчиков · 12:04</div></div>
+      <span class="mbadge"><span class="bd"></span>Залетает</span><span class="msev">87</span>
+    </div>
+    <p class="mtext">«Заказала ужин, привезли через 2 часа и всё холодное. Это они так со всеми? Снимаю на видео 👇»</p>
+    <div class="mdraft"><span class="dl"><svg width="13" height="13" style="color:#57D2E2"><use href="#music"/></svg>ЧЕРНОВИК ОТВЕТА</span><p>Здравствуйте, простите за испорченный ужин — это не норма. Пришлите номер заказа в личные сообщения, вернём деньги и разберёмся с курьером сегодня.</p></div>
+    <div class="macts"><button class="b prim sm">Одобрить и отправить</button><button class="b sec sm">Править</button></div>
+  </div>
+</section>
+
+<section class="ov-sec">
+  <div class="eb">Площадки</div>
+  <div class="ov-pf">
+    <div class="pf"><span class="pfm" style="background:rgba(225,48,108,.14);border-color:rgba(225,48,108,.4)"><svg viewBox="0 0 24 24" fill="none" stroke="#E1306C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><rect width="20" height="20" x="2" y="2" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg></span><b>Instagram</b><span class="st v1">v1 · в эфире</span></div>
+    <div class="pf"><span class="pfm" style="background:#0A1420"><svg viewBox="0 0 24 24" fill="#EAF1F8" width="22" height="22"><path d="M12.53.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/></svg></span><b>TikTok</b><span class="st v1">v1 · в эфире</span></div>
+    <div class="pf"><span class="pfm" style="background:#0A1420"><svg viewBox="0 0 24 24" fill="#EAF1F8" width="20" height="20"><path d="M18.24 2.25h3.31l-7.23 8.26 8.5 11.24H16.17l-5.21-6.82L4.99 21.75H1.68l7.73-8.84L1.25 2.25H8.08l4.71 6.23zm-1.16 17.52h1.83L7.08 4.13H5.12z"/></svg></span><b>Twitter / X</b><span class="st">скоро</span></div>
+    <div class="pf"><span class="pfm" style="background:rgba(41,169,235,.14);border-color:rgba(41,169,235,.4)"><svg viewBox="0 0 24 24" fill="#29A9EB" width="22" height="22"><path d="M21.94 4.76 18.9 19.06c-.23 1.01-.83 1.26-1.68.79l-4.64-3.42-2.24 2.16c-.25.25-.46.46-.94.46l.33-4.77 8.67-7.83c.38-.34-.08-.53-.59-.19L6.83 13.2l-4.62-1.44c-1-.32-1.02-1 .21-1.48l18.05-6.96c.84-.31 1.57.2 1.47 1.44z"/></svg></span><b>Telegram</b><span class="st">скоро</span></div>
+  </div>
+</section>
+
+<section class="ov-sec">
+  <div class="eb">UI-киты · откройте целиком</div>
+  <div class="ov-kits">
+    <a class="kit" href="ui_kits/app/index.html">
+      <div class="kit-t">Приложение</div>
+      <div class="kit-d">Диспетчерский инбокс: полосы PR/SMM, severity, черновики ответов, зонды</div>
+      <span class="kit-go">Открыть →</span>
+    </a>
+    <a class="kit" href="ui_kits/website/index.html">
+      <div class="kit-t">Лендинг</div>
+      <div class="kit-d">Маркетинговый сайт: hero-радар, severity, конвейер, тарифы</div>
+      <span class="kit-go">Открыть →</span>
+    </a>
+  </div>
+</section>
+
+<footer class="ov-foot"><span style="font-family:var(--font-mono);font-size:12px;color:#5C6E83">© 2026 Echo Radar · дизайн-система</span></footer>
+
+</body>
+</html>

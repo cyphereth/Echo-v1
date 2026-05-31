@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --bg-base:#0F1E2E; --bg-void:#0A1420; --surface-1:#1C3349; --line-2:#314A64;
+    --fg-1:#EAF1F8; --fg-3:#5C6E83; --brand:#2BB3C7; --brand-bright:#57D2E2;
+    --font-sans:'Manrope',sans-serif; --font-mono:'JetBrains Mono',monospace; }
+  body { margin:0; width:700px; padding:18px; background:var(--bg-base); font-family:var(--font-sans);
+    display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .cell { position:relative; height:152px; background:var(--surface-1); border:1px solid var(--line-2);
+    border-radius:14px; display:grid; place-items:center; }
+  .tag { position:absolute; top:11px; left:13px; display:flex; align-items:center; gap:8px; }
+  .badge { font-family:var(--font-mono); font-weight:600; font-size:11px; color:var(--brand-bright);
+    background:rgba(43,179,199,.12); border:1px solid rgba(43,179,199,.32); border-radius:6px; width:20px; height:20px; display:grid; place-items:center; }
+  .name { font-family:var(--font-mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--fg-3); }
+  .wm { font-weight:800; letter-spacing:-1px; color:var(--fg-1); }
+  .knock { color:var(--fg-1); }
+</style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+    <radialGradient id="blip" cx="0.5" cy="0.5" r="0.5"><stop stop-color="#FF7A87"/><stop offset="1" stop-color="#FF4D5E"/></radialGradient>
+    <symbol id="emit-o" viewBox="0 0 62 56">
+      <path d="M16 17 A10 10 0 0 0 16 37" stroke="currentColor" stroke-width="6.6" stroke-linecap="round" fill="none"/>
+      <path d="M16 17 A10 10 0 0 1 16 37" stroke="#57D2E2" stroke-width="6.6" stroke-linecap="round" fill="none"/>
+      <path d="M16 9 A18 18 0 0 1 16 45" stroke="#2BB3C7" stroke-opacity=".55" stroke-width="3.4" stroke-linecap="round" fill="none"/>
+      <path d="M16 2 A25 25 0 0 1 16 52" stroke="#2BB3C7" stroke-opacity=".30" stroke-width="3.4" stroke-linecap="round" fill="none"/>
+      <circle cx="29" cy="14" r="2.7" fill="url(#blip)"/>
+    </symbol>
+    <symbol id="mark" viewBox="0 0 48 48">
+      <path d="M13 25 A10 10 0 0 1 23 35" stroke="#57D2E2" stroke-opacity=".85" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+      <path d="M13 17 A18 18 0 0 1 31 35" stroke="#2BB3C7" stroke-opacity=".55" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+      <path d="M13 9 A26 26 0 0 1 39 35" stroke="#2BB3C7" stroke-opacity=".32" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+      <circle cx="13" cy="35" r="3.4" fill="#57D2E2"/>
+      <circle cx="31" cy="17" r="2.8" fill="url(#blip)"/>
+    </symbol>
+    <symbol id="emit-trail" viewBox="0 0 40 48">
+      <path d="M4 17 A7 7 0 0 1 4 31" stroke="#57D2E2" stroke-opacity=".9" stroke-width="2.6" stroke-linecap="round" fill="none"/>
+      <path d="M4 10 A14 14 0 0 1 4 38" stroke="#2BB3C7" stroke-opacity=".55" stroke-width="2.6" stroke-linecap="round" fill="none"/>
+      <path d="M4 3 A21 21 0 0 1 4 45" stroke="#2BB3C7" stroke-opacity=".30" stroke-width="2.6" stroke-linecap="round" fill="none"/>
+      <circle cx="13" cy="14" r="2.4" fill="url(#blip)"/>
+    </symbol>
+  </defs></svg>
+
+  <!-- A: текущий — волны из буквы o -->
+  <div class="cell">
+    <div class="tag"><span class="badge">A</span><span class="name">Текущий · o вещает</span></div>
+    <div style="display:flex; align-items:baseline;">
+      <span class="wm knock" style="font-size:38px;">Ech</span>
+      <svg width="52" height="47" viewBox="0 0 62 56" style="align-self:center; margin-left:-2px; margin-bottom:-8px; color:#EAF1F8;"><use href="#emit-o"/></svg>
+    </div>
+  </div>
+
+  <!-- B: иконка + слово -->
+  <div class="cell">
+    <div class="tag"><span class="badge">B</span><span class="name">Иконка + слово</span></div>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <svg width="42" height="42"><use href="#mark"/></svg>
+      <span class="wm" style="font-size:34px;">Echo</span>
+    </div>
+  </div>
+
+  <!-- C: волны за словом -->
+  <div class="cell">
+    <div class="tag"><span class="badge">C</span><span class="name">Волны за словом</span></div>
+    <div style="display:flex; align-items:center;">
+      <span class="wm" style="font-size:34px;">Echo</span>
+      <svg width="40" height="44" viewBox="0 0 40 48" style="margin-left:-2px;"><use href="#emit-trail"/></svg>
+    </div>
+  </div>
+
+  <!-- D: бейдж — знак над словом -->
+  <div class="cell">
+    <div class="tag"><span class="badge">D</span><span class="name">Бейдж · стек</span></div>
+    <div style="display:flex; flex-direction:column; align-items:center; gap:9px;">
+      <svg width="38" height="38"><use href="#mark"/></svg>
+      <span style="font-weight:800; font-size:16px; letter-spacing:.34em; color:var(--fg-1); padding-left:.34em;">ECHO</span>
+    </div>
+  </div>
+</body>
+</html>

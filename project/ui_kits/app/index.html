@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Echo Radar — диспетчерский инбокс</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+/* ============================================================================
+   ECHO RADAR — Foundations: Color + Type
+   ----------------------------------------------------------------------------
+   Mood: «спокойный диспетчерский центр». Тёмный сине-графитовый фон, холодный
+   циан как акцент бренда. Спокойствие как фон, срочность как точка — только
+   сигналы severity вспыхивают тёплым: алый «залетает», янтарный «растёт».
+
+   Fonts loaded from Google Fonts CDN (both ship full Cyrillic):
+     - Manrope        → UI, headings, body
+     - JetBrains Mono → data, metrics, severity, timestamps, eyebrows
+   NOTE: not bundled locally. See README → Caveats if you need offline files.
+   ============================================================================ */
+
+
+
+:root {
+  /* ---- Type families ---- */
+  --font-sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* ====================================================================
+     COLOR — Backgrounds (graphite navy, cold + desaturated)
+     ==================================================================== */
+  --bg-void:    #0A1420;  /* deepest backdrop, behind panels */
+  --bg-base:    #0F1E2E;  /* app canvas */
+  --bg-raised:  #16293B;  /* large panels / sidebars */
+  --surface-1:  #1C3349;  /* cards */
+  --surface-2:  #244059;  /* raised cards, inputs */
+  --surface-3:  #2F4E6B;  /* hover, pressed surfaces */
+
+  /* ---- Hairlines / borders ---- */
+  --line-1:      #243A50;  /* subtle dividers */
+  --line-2:      #314A64;  /* card borders */
+  --line-strong: #42607E;  /* emphasized borders */
+
+  /* ====================================================================
+     COLOR — Text (cool whites → dim)
+     ==================================================================== */
+  --fg-1: #EAF1F8;  /* primary */
+  --fg-2: #97A9BE;  /* secondary */
+  --fg-3: #5C6E83;  /* tertiary, dim labels */
+  --fg-on-brand: #04141A;  /* ink on cyan */
+  --fg-on-warm:  #1A0A09;  /* ink on amber/crimson fills */
+
+  /* ====================================================================
+     COLOR — Brand (cold cyan = "всё под контролем", radar signal)
+     ==================================================================== */
+  --brand:        #2BB3C7;
+  --brand-bright: #57D2E2;
+  --brand-deep:   #15788A;
+  --brand-ghost:  rgba(43,179,199,0.12);
+  --brand-line:   rgba(43,179,199,0.32);
+
+  /* ====================================================================
+     COLOR — Severity (warm urgency — the "точка" against calm)
+     ==================================================================== */
+  --sev-critical:        #FF4D5E;  /* «залетает» — crimson */
+  --sev-critical-bright: #FF7A87;
+  --sev-critical-ghost:  rgba(255,77,94,0.14);
+  --sev-critical-line:   rgba(255,77,94,0.38);
+
+  --sev-rising:        #FFB23E;    /* «растёт» — amber */
+  --sev-rising-bright: #FFC871;
+  --sev-rising-ghost:  rgba(255,178,62,0.14);
+  --sev-rising-line:   rgba(255,178,62,0.36);
+
+  --sev-calm:        #34D8A0;       /* «под контролем» / позитив — used sparingly */
+  --sev-calm-ghost:  rgba(52,216,160,0.13);
+  --sev-calm-line:   rgba(52,216,160,0.34);
+
+  /* ---- Tonality (sentiment) ---- */
+  --tone-negative: var(--sev-critical);
+  --tone-neutral:  #7E91A6;
+  --tone-positive: var(--sev-calm);
+
+  /* ---- Platform marks ---- */
+  --pf-instagram: #E1306C;
+  --pf-tiktok:    #EAF1F8;
+
+  /* ====================================================================
+     RADII
+     ==================================================================== */
+  --r-xs:   4px;
+  --r-sm:   6px;
+  --r-md:  10px;
+  --r-lg:  14px;
+  --r-xl:  20px;
+  --r-pill: 999px;
+
+  /* ====================================================================
+     SPACING (4px base)
+     ==================================================================== */
+  --s-1:  4px;
+  --s-2:  8px;
+  --s-3:  12px;
+  --s-4:  16px;
+  --s-5:  20px;
+  --s-6:  24px;
+  --s-8:  32px;
+  --s-10: 40px;
+  --s-12: 48px;
+  --s-16: 64px;
+  --s-20: 80px;
+
+  /* ====================================================================
+     ELEVATION — shadows on dark + signal glows
+     ==================================================================== */
+  --shadow-1: 0 1px 2px rgba(0,0,0,0.45);
+  --shadow-2: 0 6px 20px -6px rgba(0,0,0,0.55);
+  --shadow-3: 0 22px 54px -16px rgba(0,0,0,0.70);
+
+  /* glows = a calm radar pulse or a warm severity flare */
+  --glow-brand:    0 0 0 1px var(--brand-line),        0 0 26px -6px rgba(43,179,199,0.50);
+  --glow-critical: 0 0 0 1px var(--sev-critical-line),  0 0 24px -4px rgba(255,77,94,0.55);
+  --glow-rising:   0 0 0 1px var(--sev-rising-line),    0 0 24px -6px rgba(255,178,62,0.45);
+
+  /* ====================================================================
+     MOTION
+     ==================================================================== */
+  --ease-out:  cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur-mid:  220ms;
+  --dur-slow: 420ms;
+
+  /* ====================================================================
+     TYPE SCALE  (sizes / line-heights / tracking)
+     ==================================================================== */
+  --display:    700 44px/1.04 var(--font-sans);   --display-ls: -0.022em;
+  --h1:         800 34px/1.08 var(--font-sans);   --h1-ls: -0.02em;
+  --h2:         700 26px/1.14 var(--font-sans);   --h2-ls: -0.016em;
+  --h3:         700 20px/1.22 var(--font-sans);   --h3-ls: -0.012em;
+  --h4:         600 16px/1.30 var(--font-sans);   --h4-ls: -0.006em;
+  --body-lg:    500 17px/1.55 var(--font-sans);
+  --body:       500 15px/1.55 var(--font-sans);
+  --small:      500 13px/1.5  var(--font-sans);
+  --eyebrow:    600 12px/1.1  var(--font-mono);   --eyebrow-ls: 0.16em;
+  --metric:     600 15px/1    var(--font-mono);
+  --metric-lg:  600 28px/1    var(--font-mono);   --metric-lg-ls: -0.01em;
+  --mono-sm:    500 12px/1.4  var(--font-mono);
+}
+
+/* ============================================================================
+   SEMANTIC HELPERS — apply directly as classes
+   ============================================================================ */
+.echo-display { font: var(--display); letter-spacing: var(--display-ls); color: var(--fg-1); }
+.echo-h1 { font: var(--h1); letter-spacing: var(--h1-ls); color: var(--fg-1); }
+.echo-h2 { font: var(--h2); letter-spacing: var(--h2-ls); color: var(--fg-1); }
+.echo-h3 { font: var(--h3); letter-spacing: var(--h3-ls); color: var(--fg-1); }
+.echo-h4 { font: var(--h4); letter-spacing: var(--h4-ls); color: var(--fg-1); }
+.echo-body-lg { font: var(--body-lg); color: var(--fg-2); }
+.echo-body { font: var(--body); color: var(--fg-2); }
+.echo-small { font: var(--small); color: var(--fg-3); }
+
+/* eyebrow / label — mono, uppercase, tracked-out: the instrument-panel voice */
+.echo-eyebrow {
+  font: var(--eyebrow);
+  letter-spacing: var(--eyebrow-ls);
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+/* metric — mono tabular numerals for scores, counts, timestamps */
+.echo-metric { font: var(--metric); font-variant-numeric: tabular-nums; color: var(--fg-1); }
+.echo-metric-lg { font: var(--metric-lg); letter-spacing: var(--metric-lg-ls); font-variant-numeric: tabular-nums; color: var(--fg-1); }
+
+/* ============================================================================
+   BASE (optional reset — opt in by adding class "echo" to <body>)
+   ============================================================================ */
+.echo {
+  background: var(--bg-base);
+  color: var(--fg-2);
+  font: var(--body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+.echo *,
+.echo *::before,
+.echo *::after { box-sizing: border-box; }
+/* ============================================================================
+   Echo Radar — App UI kit · styles (consumes tokens from colors_and_type.css)
+   ============================================================================ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg-void); color: var(--fg-2); font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased; overflow: hidden; }
+#root { height: 100vh; }
+button { font-family: inherit; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--line-strong); background-clip: padding-box; }
+
+.er-app { display: grid; grid-template-columns: 232px 1fr; height: 100vh; }
+
+/* ---- Sidebar ---- */
+.er-sidebar { background: var(--bg-raised); border-right: 1px solid var(--line-1); display: flex; flex-direction: column; min-height: 0; }
+.er-nav { display: flex; align-items: center; gap: 11px; width: 100%; padding: 9px 12px; border: none;
+  background: transparent; color: var(--fg-2); font-size: 14px; font-weight: 600; border-radius: var(--r-md);
+  cursor: pointer; transition: background var(--dur-fast), color var(--dur-fast); }
+.er-nav:hover { background: var(--surface-1); color: var(--fg-1); }
+.er-nav[data-active="1"] { background: var(--brand-ghost); color: var(--brand-bright); box-shadow: inset 0 0 0 1px var(--brand-line); }
+.er-nav-badge { font-family: var(--font-mono); font-size: 11px; font-weight: 700; background: var(--sev-critical); color: #fff; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; display: grid; place-items: center; }
+.er-status { display: flex; align-items: center; gap: 10px; padding: 11px 12px; background: var(--surface-1); border: 1px solid var(--line-2); border-radius: var(--r-md); margin-bottom: 10px; }
+.er-pulse { width: 9px; height: 9px; border-radius: 999px; background: var(--sev-calm); box-shadow: 0 0 0 0 var(--sev-calm-line); animation: erpulse 2.4s var(--ease-out) infinite; flex: none; }
+@keyframes erpulse { 0% { box-shadow: 0 0 0 0 rgba(52,216,160,.5); } 70% { box-shadow: 0 0 0 7px rgba(52,216,160,0); } 100% { box-shadow: 0 0 0 0 rgba(52,216,160,0); } }
+.er-account { display: flex; align-items: center; gap: 10px; padding: 8px 6px; }
+
+/* ---- Main / topbar ---- */
+.er-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-base); }
+.er-topbar { display: flex; align-items: center; gap: 16px; height: 60px; padding: 0 18px; border-bottom: 1px solid var(--line-1); flex: none; }
+.er-brandsel { display: flex; align-items: center; gap: 10px; background: var(--surface-1); border: 1px solid var(--line-2); border-radius: var(--r-md); padding: 6px 12px 6px 7px; cursor: pointer; white-space: nowrap; flex: none; }
+.er-brandsel:hover { border-color: var(--line-strong); }
+.er-monogram { width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, var(--brand-deep), #123); color: var(--brand-bright); font-family: var(--font-mono); font-weight: 700; font-size: 13px; display: grid; place-items: center; flex: none; }
+.er-topgrow { flex: 1; white-space: nowrap; min-width: 0; }
+.er-search { display: flex; align-items: center; gap: 9px; background: var(--surface-1); border: 1px solid var(--line-2); border-radius: var(--r-md); padding: 9px 14px; width: 280px; white-space: nowrap; flex: none; }
+.er-icbtn { position: relative; width: 38px; height: 38px; border-radius: var(--r-md); border: 1px solid var(--line-2); background: var(--surface-1); display: grid; place-items: center; cursor: pointer; }
+.er-icbtn:hover { border-color: var(--line-strong); background: var(--surface-2); }
+.er-bell-dot { position: absolute; top: 9px; right: 10px; width: 7px; height: 7px; border-radius: 999px; background: var(--sev-critical); box-shadow: 0 0 0 2px var(--surface-1); }
+
+/* ---- Scope bar ---- */
+.er-scope { display: flex; align-items: center; gap: 18px; height: 46px; padding: 0 22px; border-bottom: 1px solid var(--line-1); background: var(--bg-raised); flex: none; }
+.er-scope-live { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; font-weight: 600; color: var(--sev-calm); }
+.er-scope-div { width: 1px; height: 18px; background: var(--line-2); }
+
+/* ---- Workspace ---- */
+.er-workspace { flex: 1; display: flex; min-height: 0; }
+.er-inbox { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 18px; min-width: 0; overflow: hidden; }
+.er-lane-col { display: flex; flex-direction: column; min-height: 0; }
+.er-lane-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 12px; }
+.er-count { font-family: var(--font-mono); font-size: 12px; font-weight: 700; background: var(--surface-2); padding: 2px 8px; border-radius: 999px; }
+.er-lane-list { display: flex; flex-direction: column; gap: 11px; overflow-y: auto; padding: 2px 4px 16px; flex: 1; }
+.er-empty { font-family: var(--font-mono); font-size: 12.5px; color: var(--fg-3); text-align: center; padding: 30px; }
+
+/* ---- Mention row ---- */
+.er-row { text-align: left; width: 100%; background: var(--surface-1); border: 1px solid var(--line-2);
+  border-left: 3px solid var(--line-strong); border-radius: var(--r-lg); padding: 13px 14px; cursor: pointer;
+  display: flex; flex-direction: column; gap: 10px; transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast); }
+.er-row:hover { background: var(--surface-2); }
+.er-row[data-selected="1"] { background: var(--surface-2); box-shadow: 0 0 0 1px var(--brand-line), var(--shadow-2); }
+.er-row-top { display: flex; align-items: center; gap: 11px; }
+.er-row-text { font-size: 13.5px; line-height: 1.5; color: var(--fg-1); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.er-row-foot { display: flex; align-items: center; gap: 12px; }
+.er-flag { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 11px; font-weight: 600; }
+.er-dot-live { width: 7px; height: 7px; border-radius: 999px; background: var(--brand); display: inline-block; }
+.er-humor { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .04em; color: var(--sev-rising); background: var(--sev-rising-ghost); border: 1px solid var(--sev-rising-line); padding: 3px 7px; border-radius: 999px; }
+.er-human { width: 46px; height: 46px; border-radius: 50%; border: 1px dashed var(--line-strong); display: grid; place-items: center; flex: none; }
+
+/* ---- Detail ---- */
+.er-detail { width: 446px; flex: none; border-left: 1px solid var(--line-1); background: var(--bg-raised); display: flex; flex-direction: column; min-height: 0; }
+.er-detail-scroll { flex: 1; overflow-y: auto; padding: 20px; }
+.er-detail-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.er-quote { margin: 0 0 16px; font-size: 15px; line-height: 1.55; color: var(--fg-1); padding: 14px 16px; background: var(--surface-1); border: 1px solid var(--line-2); border-left: 3px solid var(--brand-line); border-radius: var(--r-md); }
+.er-meta-row { display: flex; gap: 10px; margin-bottom: 16px; }
+.er-score { flex: 1; background: var(--surface-1); border: 1px solid var(--line-2); border-radius: var(--r-md); padding: 9px 12px; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.er-score span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.er-snap { background: var(--surface-1); border: 1px solid var(--line-2); border-radius: var(--r-lg); padding: 14px 16px; margin-bottom: 16px; }
+.er-snap-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.er-snap-foot { display: flex; gap: 10px; margin-top: 12px; }
+.er-draft { background: var(--surface-1); border: 1px solid var(--line-2); border-radius: var(--r-lg); padding: 14px 16px; }
+.er-draft-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.er-draft-body { margin: 0; font-size: 14px; line-height: 1.6; color: var(--fg-2); }
+.er-textarea { width: 100%; background: var(--bg-base); border: 1px solid var(--brand-line); border-radius: var(--r-md); padding: 11px 13px; color: var(--fg-1); font-family: var(--font-sans); font-size: 14px; line-height: 1.6; resize: vertical; outline: none; box-shadow: 0 0 0 3px var(--brand-ghost); }
+.er-gate { display: flex; gap: 12px; background: var(--sev-rising-ghost); border: 1px solid var(--sev-rising-line); border-radius: var(--r-lg); padding: 14px 16px; }
+.er-tg { margin-top: 12px; border-top: 1px solid var(--line-1); padding-top: 12px; }
+.er-tg-toggle { display: flex; align-items: center; gap: 9px; width: 100%; background: transparent; border: none; cursor: pointer; color: var(--fg-2); font-size: 13px; font-weight: 600; padding: 2px; }
+.er-tg-card { margin-top: 10px; background: var(--bg-base); border: 1px solid var(--line-2); border-radius: var(--r-md); padding: 12px 14px; }
+.er-actions { display: flex; gap: 10px; padding: 14px 18px; border-top: 1px solid var(--line-1); background: var(--bg-raised); flex: none; }
+.er-sent { display: flex; align-items: center; gap: 9px; width: 100%; justify-content: center; font-size: 13.5px; font-weight: 600; color: var(--sev-calm); padding: 8px; }
+
+/* ---- Probes ---- */
+.er-probes { flex: 1; overflow-y: auto; padding: 22px; display: flex; flex-direction: column; gap: 18px; max-width: 920px; width: 100%; margin: 0 auto; }
+.er-onb { background: var(--surface-1); border: 1px solid var(--line-2); border-radius: var(--r-xl); padding: 20px; }
+.er-onb-ic { width: 34px; height: 34px; border-radius: 9px; background: var(--brand-ghost); border: 1px solid var(--brand-line); display: grid; place-items: center; flex: none; }
+.er-onb-input { display: flex; align-items: center; gap: 10px; background: var(--bg-base); border: 1px solid var(--line-2); border-radius: var(--r-md); padding: 7px 7px 7px 13px; }
+.er-chip-ai { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-mono); font-size: 12.5px; color: var(--brand-bright); background: var(--brand-ghost); border: 1px solid var(--brand-line); border-radius: 999px; padding: 6px 12px; cursor: pointer; white-space: nowrap; }
+.er-chip-ai[data-added="1"] { color: var(--sev-calm); background: var(--sev-calm-ghost); border-color: var(--sev-calm-line); }
+.er-probe-list { background: var(--surface-1); border: 1px solid var(--line-2); border-radius: var(--r-xl); overflow: hidden; }
+.er-probe-listhead { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; border-bottom: 1px solid var(--line-1); }
+.er-probe-row { display: flex; align-items: center; gap: 14px; padding: 13px 18px; border-bottom: 1px solid var(--line-1); }
+.er-probe-row:last-child { border-bottom: none; }
+.er-probe-row:hover { background: var(--surface-2); }
+.er-probe-kind { font-family: var(--font-mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3); background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 999px; padding: 4px 9px; width: 128px; text-align: center; flex: none; white-space: nowrap; }
+.er-probe-int { display: inline-flex; align-items: center; gap: 6px; width: 86px; }
+.er-probe-last { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-2); width: 84px; }
+
+/* ---- Toast ---- */
+.er-toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px;
+  background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: var(--r-md); padding: 12px 18px;
+  font-size: 13.5px; font-weight: 600; color: var(--fg-1); box-shadow: var(--shadow-3); animation: ertoast .3s var(--ease-out); z-index: 50; }
+@keyframes ertoast { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+.er-btn:hover { filter: brightness(1.08); }
+.er-btn:active { transform: scale(.98); }
+
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+
+/* ===== data ===== */
+// ============================================================================
+// Echo Radar — App UI kit · demo data
+// One account per brand (v1). Monitored brand: «Папа Пицца» (доставка еды).
+// Mentions carry severity (virality 0–100), phase, tone, confidence, lane, draft.
+// ============================================================================
+
+const BRAND = { name: 'Папа Пицца', handle: '@papapizza', monogram: 'ПП', probes: 4 };
+
+// severity → warm signal color + russian label
+function sevTone(s) {
+  if (s >= 75) return { key: 'critical', color: '#FF4D5E', bright: '#FF7A87', ghost: 'rgba(255,77,94,.14)', line: 'rgba(255,77,94,.38)', label: 'Залетает' };
+  if (s >= 45) return { key: 'rising',   color: '#FFB23E', bright: '#FFC871', ghost: 'rgba(255,178,62,.14)', line: 'rgba(255,178,62,.36)', label: 'Растёт' };
+  return { key: 'calm', color: '#2BB3C7', bright: '#57D2E2', ghost: 'rgba(43,179,199,.12)', line: 'rgba(43,179,199,.32)', label: 'Под контролем' };
+}
+const PHASE = {
+  rising:    { label: 'растёт',  icon: 'trendingUp',   color: '#FFC871' },
+  declining: { label: 'затухает',icon: 'trendingDown', color: '#7E91A6' },
+  unknown:   { label: 'не ясно', icon: 'activity',     color: '#7E91A6' },
+};
+const TONE = {
+  negative: { label: 'Негатив',   color: '#FF7A87' },
+  neutral:  { label: 'Нейтрально',color: '#97A9BE' },
+  positive: { label: 'Позитив',   color: '#34D8A0' },
+};
+
+const DATA = [
+  {
+    id: 'm1', platform: 'tiktok', author: 'user123', followers: 12400, ago: '14 мин',
+    text: 'Заказала ужин, привезли через 2 часа и всё холодное. Это они так со всеми? Снимаю на видео 👇',
+    severity: 87, phase: 'rising', tone: 'negative', confidence: 0.94, category: 'viral_negative',
+    lane: 'PR', hot: true, views: [800, 1200, 2100, 3400, 4800], peakViews: '4.8k', rate: '+340/мин',
+    draft: 'Здравствуйте, простите за испорченный ужин — это не норма. Пришлите номер заказа в личные сообщения, вернём деньги и разберёмся с курьером сегодня.',
+    status: 'new',
+  },
+  {
+    id: 'm2', platform: 'instagram', author: 'kirill.reviews', followers: 3200, ago: '32 мин',
+    text: 'Опять опоздали на час, третий заказ подряд. Холодная пицца, как обычно. Больше не закажу.',
+    severity: 64, phase: 'rising', tone: 'negative', confidence: 0.88, category: 'complaint',
+    lane: 'PR', hot: true, views: [200, 400, 700, 1100, 1500], peakViews: '1.5k', rate: '+90/мин',
+    draft: 'Кирилл, это наша вина и так быть не должно. Напишите номер последнего заказа — компенсируем доставку и передадим в курьерскую службу вашего района.',
+    status: 'new',
+  },
+  {
+    id: 'm5', platform: 'instagram', author: 'an_user_77', followers: 120, ago: '3 ч',
+    text: 'ну отличная у вас доставка, как всегда 🙃 спасибо что испортили вечер',
+    severity: 33, phase: 'unknown', tone: 'negative', confidence: 0.41, category: 'complaint',
+    lane: 'none', hot: false, views: [40, 60, 75, 80, 84], peakViews: '84', rate: '+2/мин',
+    draft: null, // confidence-гейт: < 0.6 → решает человек
+    status: 'human',
+  },
+  {
+    id: 'm6', platform: 'tiktok', author: 'foodcritic.msk', followers: 21000, ago: '5 ч',
+    text: 'Разбирали доставки города. У этих — то густо, то пусто. Сегодня вот привезли вовремя, удивили.',
+    severity: 41, phase: 'declining', tone: 'neutral', confidence: 0.82, category: 'neutral',
+    lane: 'PR', hot: false, views: [3000, 5200, 5000, 4600, 4200], peakViews: '5.2k ↓', rate: '−110/мин',
+    draft: 'Спасибо за разбор! Работаем над стабильностью — если попадёте на сбой, пишите в директ, разберём конкретный заказ.',
+    status: 'sent',
+  },
+  {
+    id: 'm3', platform: 'instagram', author: 'olya_moscow', followers: 880, ago: '1 ч',
+    text: 'Спасибо! Курьер был супервежливый и привёз раньше срока, пицца горячая 🍕 редкость сейчас',
+    opportunity: 71, severity: 18, phase: 'rising', tone: 'positive', confidence: 0.91, category: 'positive',
+    lane: 'SMM', hot: false, views: [120, 240, 360, 500, 640], peakViews: '640', rate: '+30/мин',
+    draft: 'Оля, спасибо на добром слове! Передали курьеру — ему будет приятно. Можно репостнуть ваш отзыв в наши истории?',
+    status: 'new',
+  },
+  {
+    id: 'm4', platform: 'tiktok', author: 'prank.memes', followers: 45000, ago: '2 ч',
+    text: 'когда заказал пиццу и она приехала быстрее чем бывшая ответила на сообщение 💀 #папапицца',
+    severity: 58, phase: 'rising', tone: 'positive', confidence: 0.79, category: 'humor',
+    lane: 'SMM', hot: true, views: [1200, 3000, 5800, 9000, 13000], peakViews: '13k', rate: '+600/мин',
+    humor: true,
+    draft: 'Главное — приоритеты у человека на месте 🍕 (ответ юмористический — публикуется только вручную SMM)',
+    status: 'new',
+  },
+  {
+    id: 'm7', platform: 'instagram', author: 'lena.himki', followers: 540, ago: '6 ч',
+    text: 'А вы в Химки доставляете? И до скольки работает кухня в выходные?',
+    severity: 22, phase: 'unknown', tone: 'neutral', confidence: 0.9, category: 'neutral',
+    lane: 'SMM', hot: false, views: [60, 90, 110, 120, 128], peakViews: '128', rate: '+4/мин',
+    draft: 'Да, Химки в зоне доставки! По выходным кухня работает до 23:30. Адрес подскажем точное время — напишите район в директ.',
+    status: 'new',
+  },
+];
+
+
+/* ===== icons ===== */
+// ============================================================================
+// Echo Radar — App UI kit · icons (Lucide path data) + platform glyphs + logo
+// ============================================================================
+
+const STROKE_ICONS = {
+  inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  radio: '<path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/>',
+  building: '<path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/>',
+  settings: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+  bell: '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>',
+  send: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
+  pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
+  x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  flame: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+  trendingUp: '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>',
+  trendingDown: '<polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/>',
+  activity: '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  chevronRight: '<path d="m9 18 6-6-6-6"/>',
+  chevronDown: '<path d="m6 9 6 6 6-6"/>',
+  externalLink: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  sparkles: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .962 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.962 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>',
+  shieldCheck: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  eye: '<path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/>',
+  music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  filter: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
+  zap: '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+  dot: '<circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>',
+  instagram: '<rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/>',
+};
+
+const FILL_ICONS = {
+  tiktok: '<path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/>',
+  twitter: '<path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>',
+  telegram: '<path d="M21.94 4.76 18.9 19.06c-.23 1.01-.83 1.26-1.68.79l-4.64-3.42-2.24 2.16c-.25.25-.46.46-.94.46l.33-4.77 8.67-7.83c.38-.34-.08-.53-.59-.19L6.83 13.2l-4.62-1.44c-1-.32-1.02-1 .21-1.48l18.05-6.96c.84-.31 1.57.2 1.47 1.44z"/>',
+};
+
+function Icon({ name, size = 18, stroke = 2, color, style, className }) {
+  const base = { width: size, height: size, color, ...(style || {}) };
+  if (FILL_ICONS[name]) {
+    return <svg viewBox="0 0 24 24" fill="currentColor" className={className} style={base}
+      dangerouslySetInnerHTML={{ __html: FILL_ICONS[name] }} />;
+  }
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={stroke}
+    strokeLinecap="round" strokeLinejoin="round" className={className} style={base}
+    dangerouslySetInnerHTML={{ __html: STROKE_ICONS[name] || '' }} />;
+}
+
+// Logo: «Ech» + the broadcasting "o" (left wall white, right wall = first wave)
+function EchoWordmark({ size = 22, color = '#EAF1F8' }) {
+  const f = size; // px font-size for "Ech"
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'baseline', fontFamily: 'var(--font-sans)' }}>
+      <span style={{ fontWeight: 800, fontSize: f, letterSpacing: '-0.04em', color }}>Ech</span>
+      <svg width={f * 1.35} height={f * 1.22} viewBox="0 0 62 56" style={{ marginLeft: -f * 0.04, alignSelf: 'center', marginBottom: -f * 0.19 }}>
+        <defs>
+          <radialGradient id="wm-blip" cx="0.5" cy="0.5" r="0.5">
+            <stop stopColor="#FF7A87" /><stop offset="1" stopColor="#FF4D5E" />
+          </radialGradient>
+        </defs>
+        <path d="M16 17 A10 10 0 0 0 16 37" stroke={color} strokeWidth="6.6" strokeLinecap="round" fill="none" />
+        <path d="M16 17 A10 10 0 0 1 16 37" stroke="#57D2E2" strokeWidth="6.6" strokeLinecap="round" fill="none" />
+        <path d="M16 9 A18 18 0 0 1 16 45" stroke="#2BB3C7" strokeOpacity="0.55" strokeWidth="3.4" strokeLinecap="round" fill="none" />
+        <path d="M16 2 A25 25 0 0 1 16 52" stroke="#2BB3C7" strokeOpacity="0.30" strokeWidth="3.4" strokeLinecap="round" fill="none" />
+        <circle cx="29" cy="14" r="2.7" fill="url(#wm-blip)" />
+      </svg>
+    </span>
+  );
+}
+
+
+/* ===== primitives ===== */
+// ============================================================================
+// Echo Radar — App UI kit · primitives
+// ============================================================================
+
+function Button({ children, variant = 'secondary', icon, size = 'md', onClick, style }) {
+  const pad = size === 'sm' ? '7px 12px' : size === 'lg' ? '12px 20px' : '10px 16px';
+  const fs = size === 'sm' ? 13 : 14;
+  const variants = {
+    primary:   { background: 'var(--brand)', color: 'var(--fg-on-brand)', border: '1px solid transparent', boxShadow: 'var(--glow-brand)' },
+    secondary: { background: 'var(--surface-2)', color: 'var(--fg-1)', border: '1px solid var(--line-strong)' },
+    ghost:     { background: 'transparent', color: 'var(--fg-2)', border: '1px solid var(--line-2)' },
+    danger:    { background: 'var(--sev-critical-ghost)', color: 'var(--sev-critical-bright)', border: '1px solid var(--sev-critical-line)' },
+  };
+  return (
+    <button onClick={onClick} className="er-btn" style={{
+      display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'center',
+      fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: fs, padding: pad,
+      borderRadius: 'var(--r-md)', cursor: 'pointer', whiteSpace: 'nowrap', ...variants[variant], ...style,
+    }}>
+      {icon && <Icon name={icon} size={fs + 2} />}{children}
+    </button>
+  );
+}
+
+const PF = {
+  instagram: { glyph: 'instagram', color: '#E1306C', bg: 'rgba(225,48,108,.14)', label: 'Instagram' },
+  tiktok:    { glyph: 'tiktok',    color: '#EAF1F8', bg: '#0A1420',              label: 'TikTok' },
+  twitter:   { glyph: 'twitter',   color: '#EAF1F8', bg: '#0A1420',              label: 'Twitter' },
+  telegram:  { glyph: 'telegram',  color: '#29A9EB', bg: 'rgba(41,169,235,.14)', label: 'Telegram' },
+};
+function PlatformMark({ platform, size = 28 }) {
+  const p = PF[platform] || PF.instagram;
+  return (
+    <span style={{ width: size, height: size, borderRadius: 7, background: p.bg, display: 'grid', placeItems: 'center', flex: 'none', border: '1px solid var(--line-2)' }}>
+      <Icon name={p.glyph} size={size * 0.6} color={p.color} />
+    </span>
+  );
+}
+
+function Avatar({ name, size = 36 }) {
+  const initial = (name || '?')[0].toUpperCase();
+  return (
+    <span style={{ width: size, height: size, borderRadius: '50%', flex: 'none',
+      background: 'linear-gradient(135deg,#2a4258,#162536)', border: '1px solid var(--line-2)',
+      display: 'grid', placeItems: 'center', color: 'var(--fg-2)', fontFamily: 'var(--font-mono)',
+      fontWeight: 600, fontSize: size * 0.4 }}>{initial}</span>
+  );
+}
+
+// Ring gauge — full track + colored progress arc (unmistakably a meter)
+function SeverityRing({ value, size = 76, stroke = 8, tone }) {
+  const t = tone || sevTone(value);
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const off = c * (1 - value / 100);
+  return (
+    <span style={{ position: 'relative', width: size, height: size, flex: 'none', display: 'inline-grid', placeItems: 'center' }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="var(--surface-3)" strokeWidth={stroke} />
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={t.color} strokeWidth={stroke}
+          strokeLinecap="round" strokeDasharray={c} strokeDashoffset={off}
+          style={{ transition: 'stroke-dashoffset .6s var(--ease-out)' }} />
+      </svg>
+      <span style={{ position: 'absolute', fontFamily: 'var(--font-mono)', fontWeight: 700,
+        fontSize: size * 0.32, color: t.bright, fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+    </span>
+  );
+}
+
+// Sparkline of the snapshot series, tinted by phase
+function Sparkline({ data, color = '#FFB23E', w = 96, h = 30 }) {
+  const max = Math.max(...data), min = Math.min(...data);
+  const span = max - min || 1;
+  const pts = data.map((v, i) => [ (i / (data.length - 1)) * w, h - 3 - ((v - min) / span) * (h - 6) ]);
+  const line = pts.map(p => p.join(',')).join(' ');
+  const area = `0,${h} ${line} ${w},${h}`;
+  const gid = 'spk' + Math.round(color.charCodeAt(1) * 99 + w);
+  return (
+    <svg width={w} height={h} style={{ display: 'block' }}>
+      <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stopColor={color} stopOpacity="0.28" /><stop offset="1" stopColor={color} stopOpacity="0" />
+      </linearGradient></defs>
+      <polygon points={area} fill={`url(#${gid})`} />
+      <polyline points={line} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={pts[pts.length-1][0]} cy={pts[pts.length-1][1]} r="2.6" fill={color} />
+    </svg>
+  );
+}
+
+function Eyebrow({ children, color = 'var(--fg-3)', style }) {
+  return <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '0.16em',
+    textTransform: 'uppercase', fontWeight: 600, color, ...style }}>{children}</span>;
+}
+
+function SeverityBadge({ value }) {
+  const t = sevTone(value);
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'var(--font-mono)',
+      fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600, color: t.bright,
+      background: t.ghost, border: `1px solid ${t.line}`, padding: '4px 9px', borderRadius: 999 }}>
+      <span style={{ width: 6, height: 6, borderRadius: 999, background: t.color }} />{t.label}
+    </span>
+  );
+}
+
+function LaneTag({ lane }) {
+  if (lane === 'PR') return <span className="er-lane" style={{ color: '#FF7A87', background: 'var(--sev-critical-ghost)', borderColor: 'var(--sev-critical-line)' }}>PR · срочно</span>;
+  if (lane === 'SMM') return <span className="er-lane" style={{ color: 'var(--brand-bright)', background: 'var(--brand-ghost)', borderColor: 'var(--brand-line)' }}>SMM</span>;
+  return <span className="er-lane" style={{ color: 'var(--fg-3)', background: 'var(--surface-2)', borderColor: 'var(--line-2)' }}>Решает человек</span>;
+}
+
+
+/* ===== shell ===== */
+// ============================================================================
+// Echo Radar — App UI kit · shell (Sidebar + TopBar)
+// ============================================================================
+
+function NavItem({ icon, label, active, badge, onClick }) {
+  return (
+    <button onClick={onClick} className="er-nav" data-active={active ? '1' : '0'}>
+      <Icon name={icon} size={18} />
+      <span style={{ flex: 1, textAlign: 'left' }}>{label}</span>
+      {badge != null && <span className="er-nav-badge">{badge}</span>}
+    </button>
+  );
+}
+
+function Sidebar({ screen, setScreen, prCount }) {
+  return (
+    <aside className="er-sidebar">
+      <div style={{ padding: '20px 18px 16px' }}>
+        <EchoWordmark size={22} />
+      </div>
+      <nav style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 12px' }}>
+        <NavItem icon="inbox"    label="Инбокс"     active={screen === 'inbox'}  badge={prCount} onClick={() => setScreen('inbox')} />
+        <NavItem icon="radio"    label="Зонды"      active={screen === 'probes'} onClick={() => setScreen('probes')} />
+        <NavItem icon="building" label="Бренд"      active={false} onClick={() => setScreen('inbox')} />
+        <NavItem icon="settings" label="Настройки"  active={false} onClick={() => setScreen('inbox')} />
+      </nav>
+
+      <div style={{ marginTop: 'auto', padding: 12 }}>
+        <div className="er-status">
+          <span className="er-pulse" />
+          <div style={{ lineHeight: 1.3 }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--sev-calm)', fontWeight: 600 }}>Эфир</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>4 зонда на связи</div>
+          </div>
+        </div>
+        <div className="er-account">
+          <Avatar name="Дарья" size={30} />
+          <div style={{ lineHeight: 1.25, flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-1)' }}>Дарья · PR</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{BRAND.name}</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function TopBar({ title, sub }) {
+  return (
+    <header className="er-topbar">
+      <button className="er-brandsel">
+        <span className="er-monogram">{BRAND.monogram}</span>
+        <span style={{ lineHeight: 1.2, textAlign: 'left' }}>
+          <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: 'var(--fg-1)' }}>{BRAND.name}</span>
+          <span style={{ display: 'block', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{BRAND.handle}</span>
+        </span>
+        <Icon name="chevronDown" size={15} color="var(--fg-3)" style={{ marginLeft: 2 }} />
+      </button>
+
+      <div className="er-topgrow">
+        <div style={{ lineHeight: 1.2 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--fg-1)' }}>{title}</div>
+          {sub && <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{sub}</div>}
+        </div>
+      </div>
+
+      <div className="er-search">
+        <Icon name="search" size={15} color="var(--fg-3)" />
+        <span style={{ color: 'var(--fg-3)', fontSize: 13 }}>Поиск по упоминаниям…</span>
+      </div>
+      <button className="er-icbtn"><Icon name="bell" size={17} color="var(--fg-2)" /><span className="er-bell-dot" /></button>
+    </header>
+  );
+}
+
+
+/* ===== inbox ===== */
+// ============================================================================
+// Echo Radar — App UI kit · inbox (lanes + mention rows)
+// ============================================================================
+
+function StatusFlag({ status }) {
+  if (status === 'sent')  return <span className="er-flag" style={{ color: 'var(--sev-calm)' }}><Icon name="check" size={13} />Отправлено</span>;
+  if (status === 'human') return <span className="er-flag" style={{ color: 'var(--fg-3)' }}><Icon name="eye" size={13} />Решает человек</span>;
+  return <span className="er-flag" style={{ color: 'var(--brand-bright)' }}><span className="er-dot-live" />Новое</span>;
+}
+
+function MentionRow({ m, selected, onClick }) {
+  const t = sevTone(m.severity);
+  const phase = PHASE[m.phase];
+  const accent = m.lane === 'none' ? 'var(--line-strong)' : t.color;
+  return (
+    <button className="er-row" data-selected={selected ? '1' : '0'}
+      style={{ borderLeftColor: accent }} onClick={onClick}>
+      <div className="er-row-top">
+        <PlatformMark platform={m.platform} size={30} />
+        <div style={{ flex: 1, minWidth: 0, lineHeight: 1.25 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--fg-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>@{m.author}</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{(m.followers/1000).toFixed(m.followers >= 10000 ? 0 : 1)}k · {m.ago}</div>
+        </div>
+        {m.lane === 'none'
+          ? <span className="er-human"><Icon name="eye" size={16} color="var(--fg-3)" /></span>
+          : <SeverityRing value={m.severity} size={46} stroke={5} tone={t} />}
+      </div>
+
+      <div className="er-row-text">{m.text}</div>
+
+      <div className="er-row-foot">
+        <Sparkline data={m.views} color={phase.color} w={72} h={26} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)', fontSize: 11, color: phase.color, fontWeight: 600 }}>
+            <Icon name={phase.icon} size={13} />{phase.label} · {m.rate}
+          </span>
+          <StatusFlag status={m.status} />
+        </div>
+        {m.humor && <span className="er-humor"><Icon name="sparkles" size={12} />Юмор</span>}
+      </div>
+    </button>
+  );
+}
+
+function LaneColumn({ icon, title, accent, sub, items, selectedId, onSelect }) {
+  return (
+    <section className="er-lane-col">
+      <header className="er-lane-head">
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 9 }}>
+          <Icon name={icon} size={16} color={accent} />
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--fg-1)' }}>{title}</span>
+          <span className="er-count" style={{ color: accent }}>{items.length}</span>
+        </span>
+        <Eyebrow>{sub}</Eyebrow>
+      </header>
+      <div className="er-lane-list">
+        {items.map(m => <MentionRow key={m.id} m={m} selected={selectedId === m.id} onClick={() => onSelect(m.id)} />)}
+        {items.length === 0 && <div className="er-empty">Тихо. Новых сигналов нет.</div>}
+      </div>
+    </section>
+  );
+}
+
+function Inbox({ data, selectedId, onSelect }) {
+  const pr  = data.filter(m => m.lane === 'PR' || m.lane === 'none');
+  const smm = data.filter(m => m.lane === 'SMM');
+  return (
+    <div className="er-inbox">
+      <LaneColumn icon="flame" title="PR · срочное" accent="#FF7A87" sub="высокая виральность"
+        items={pr} selectedId={selectedId} onSelect={onSelect} />
+      <LaneColumn icon="sparkles" title="SMM" accent="var(--brand-bright)" sub="ответы и возможности"
+        items={smm} selectedId={selectedId} onSelect={onSelect} />
+    </div>
+  );
+}
+
+
+/* ===== detail ===== */
+// ============================================================================
+// Echo Radar — App UI kit · detail panel (post, snapshot, draft, actions)
+// ============================================================================
+
+function ScoreChip({ label, value, color }) {
+  return (
+    <div className="er-score">
+      <Eyebrow>{label}</Eyebrow>
+      <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 14, color: color || 'var(--fg-1)', fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+    </div>
+  );
+}
+
+function SnapshotChart({ m }) {
+  const phase = PHASE[m.phase];
+  return (
+    <div className="er-snap">
+      <div className="er-snap-head">
+        <Eyebrow>Динамика просмотров · hot-watch</Eyebrow>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'var(--font-mono)', fontSize: 12, color: phase.color, fontWeight: 600 }}>
+          <Icon name={phase.icon} size={14} />{phase.label}
+        </span>
+      </div>
+      <Sparkline data={m.views} color={phase.color} w={372} h={84} />
+      <div className="er-snap-foot">
+        <ScoreChip label="Пик" value={m.peakViews} />
+        <ScoreChip label="Скорость" value={m.rate} color={phase.color} />
+        <ScoreChip label="Severity" value={`${m.severity}/100`} color={sevTone(m.severity).bright} />
+      </div>
+    </div>
+  );
+}
+
+function TelegramPreview({ m }) {
+  const [open, setOpen] = React.useState(false);
+  const t = sevTone(m.severity);
+  return (
+    <div className="er-tg">
+      <button className="er-tg-toggle" onClick={() => setOpen(o => !o)}>
+        <Icon name="telegram" size={15} color="#29A9EB" />
+        <span style={{ flex: 1, textAlign: 'left' }}>Как уйдёт в Telegram PR</span>
+        <Icon name="chevronDown" size={15} color="var(--fg-3)" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+      </button>
+      {open && (
+        <div className="er-tg-card">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ width: 22, height: 22, borderRadius: '50%', background: '#29A9EB', display: 'grid', placeItems: 'center' }}><Icon name="radio" size={13} color="#fff" /></span>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--fg-1)' }}>Echo Radar bot</span>
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.5 }}>
+            <b style={{ color: t.bright }}>🔴 {t.label} · Severity {m.severity}</b><br />
+            {TONE[m.tone].label} · @{m.author} ({PF[m.platform].label})<br />
+            <span style={{ color: 'var(--fg-3)' }}>«{m.text.slice(0, 70)}…»</span><br />
+            <span style={{ color: 'var(--brand-bright)' }}>Черновик ответа готов → открыть в Echo</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DetailPanel({ m, onAction }) {
+  const [draft, setDraft] = React.useState(m.draft || '');
+  const [editing, setEditing] = React.useState(false);
+  React.useEffect(() => { setDraft(m.draft || ''); setEditing(false); }, [m.id]);
+
+  const t = sevTone(m.severity);
+  const sent = m.status === 'sent';
+  const human = m.status === 'human';
+
+  return (
+    <aside className="er-detail">
+      <div className="er-detail-scroll">
+        {/* header */}
+        <div className="er-detail-head">
+          <PlatformMark platform={m.platform} size={34} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--fg-1)' }}>@{m.author}</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--fg-3)' }}>{PF[m.platform].label} · {m.followers.toLocaleString('ru')} подписчиков · {m.ago}</div>
+          </div>
+          <button className="er-icbtn"><Icon name="externalLink" size={16} color="var(--fg-2)" /></button>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '4px 0 16px' }}>
+          {human ? <span className="er-human" style={{ width: 56, height: 56 }}><Icon name="eye" size={22} color="var(--fg-3)" /></span>
+                 : <SeverityRing value={m.severity} size={64} stroke={7} tone={t} />}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            {human ? <SeverityBadge value={m.severity} /> : <SeverityBadge value={m.severity} />}
+            <LaneTag lane={m.lane} />
+          </div>
+        </div>
+
+        {/* the post */}
+        <blockquote className="er-quote">{m.text}</blockquote>
+
+        <div className="er-meta-row">
+          <ScoreChip label="Тон" value={TONE[m.tone].label} color={TONE[m.tone].color} />
+          <ScoreChip label="Увер." value={m.confidence.toFixed(2)} color={m.confidence < 0.6 ? 'var(--sev-rising)' : 'var(--fg-1)'} />
+          <ScoreChip label="Категория" value={m.category} />
+        </div>
+
+        <SnapshotChart m={m} />
+
+        {/* draft */}
+        {human ? (
+          <div className="er-gate">
+            <Icon name="eye" size={16} color="var(--sev-rising)" />
+            <div>
+              <div style={{ fontWeight: 700, color: 'var(--fg-1)', fontSize: 13.5, marginBottom: 3 }}>Confidence-гейт · решает человек</div>
+              <div style={{ fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.5 }}>Уверенность классификатора {m.confidence.toFixed(2)} ниже порога 0.60 — черновик не предлагается. Оцените тон вручную.</div>
+            </div>
+          </div>
+        ) : (
+          <div className="er-draft">
+            <div className="er-draft-head">
+              <Eyebrow color="var(--brand-bright)" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                <Icon name="sparkles" size={13} />Черновик ответа
+              </Eyebrow>
+              {m.humor && <span className="er-humor"><Icon name="sparkles" size={12} />Юмор · только вручную</span>}
+            </div>
+            {editing
+              ? <textarea className="er-textarea" value={draft} onChange={e => setDraft(e.target.value)} rows={4} autoFocus />
+              : <p className="er-draft-body">{draft}</p>}
+            <TelegramPreview m={m} />
+          </div>
+        )}
+      </div>
+
+      {/* actions */}
+      <div className="er-actions">
+        {sent ? (
+          <div className="er-sent"><Icon name="check" size={16} color="var(--sev-calm)" />Ответ отправлен · правка залогирована</div>
+        ) : human ? (
+          <>
+            <Button variant="danger" icon="flame" onClick={() => onAction(m.id, 'pr')} style={{ flex: 1 }}>В PR — срочно</Button>
+            <Button variant="ghost" icon="x" onClick={() => onAction(m.id, 'reject')}>Шум</Button>
+          </>
+        ) : editing ? (
+          <>
+            <Button variant="primary" icon="check" onClick={() => { setEditing(false); onAction(m.id, 'approve'); }} style={{ flex: 1 }}>Сохранить и отправить</Button>
+            <Button variant="ghost" onClick={() => setEditing(false)}>Отмена</Button>
+          </>
+        ) : (
+          <>
+            <Button variant="primary" icon="send" onClick={() => onAction(m.id, 'approve')} style={{ flex: 1 }}>Одобрить и отправить</Button>
+            <Button variant="secondary" icon="pencil" onClick={() => setEditing(true)}>Править</Button>
+            <Button variant="ghost" icon="x" onClick={() => onAction(m.id, 'reject')} />
+          </>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+
+/* ===== probes ===== */
+// ============================================================================
+// Echo Radar — App UI kit · probes screen (AI onboarding + active probes)
+// ============================================================================
+
+const ACTIVE_PROBES = [
+  { kind: 'keyword', q: 'испорченный заказ', pf: ['instagram','tiktok'], interval: '4 мин', trend: 'up',   last: '12 сек', hot: true,  mentions: 23 },
+  { kind: 'hashtag', q: '#папапицца',        pf: ['instagram','tiktok'], interval: '8 мин', trend: 'flat', last: '1 мин',  hot: false, mentions: 64 },
+  { kind: 'mention', q: '@papapizza',        pf: ['instagram','tiktok'], interval: '6 мин', trend: 'flat', last: '40 сек', hot: false, mentions: 41 },
+  { kind: 'keyword', q: 'холодная пицца',    pf: ['instagram','tiktok'], interval: '12 мин',trend: 'down', last: '3 мин',  hot: false, mentions: 9 },
+];
+const AI_SUGGEST = ['вернули деньги', '#отзывброкен', 'курьер опоздал', 'заказ не привезли', 'долгая доставка'];
+const KIND = { keyword: 'Ключевое слово', hashtag: 'Хэштег', mention: 'Упоминание' };
+
+function ProbesScreen() {
+  const [chips, setChips] = React.useState(AI_SUGGEST.map(q => ({ q, added: false })));
+  const add = (i) => setChips(cs => cs.map((c, j) => j === i ? { ...c, added: true } : c));
+
+  return (
+    <div className="er-probes">
+      {/* what is a probe — plain language */}
+      <div className="er-probes-intro">
+        <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--fg-1)' }}>Зонды</h2>
+        <p style={{ margin: '8px 0 0', fontSize: 14, lineHeight: 1.6, color: 'var(--fg-2)', maxWidth: 640 }}>
+          Зонд — это поисковый запрос по ключевому слову или хэштегу, которым Echo Radar
+          непрерывно ищет упоминания <b style={{ color: 'var(--fg-1)' }}>{BRAND.name}</b> в Instagram и TikTok.
+          Чем точнее зонды — тем меньше шума и точнее severity.
+        </p>
+      </div>
+
+      {/* AI onboarding */}
+      <div className="er-onb">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <span className="er-onb-ic"><Icon name="sparkles" size={16} color="var(--brand-bright)" /></span>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--fg-1)' }}>AI-настройка зондов</div>
+            <div style={{ fontSize: 12.5, color: 'var(--fg-3)' }}>Дайте ссылку на бренд — предложим ключевые слова и хэштеги</div>
+          </div>
+        </div>
+        <div className="er-onb-input">
+          <Icon name="link" size={15} color="var(--fg-3)" />
+          <span style={{ flex: 1, color: 'var(--fg-1)', fontSize: 13.5 }}>papapizza.ru</span>
+          <Button variant="primary" size="sm" icon="sparkles">Разобрать</Button>
+        </div>
+        <Eyebrow style={{ display: 'block', margin: '16px 0 10px' }}>Предложено AI — подтвердите нужные</Eyebrow>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {chips.map((c, i) => (
+            <button key={i} className="er-chip-ai" data-added={c.added ? '1' : '0'} onClick={() => add(i)}>
+              <Icon name={c.added ? 'check' : 'plus'} size={13} />{c.q}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* active probes */}
+      <div className="er-probe-list">
+        <div className="er-probe-listhead">
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 9 }}>
+            <Icon name="radio" size={16} color="var(--brand-bright)" />
+            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--fg-1)' }}>Активные зонды</span>
+            <span className="er-count" style={{ color: 'var(--brand-bright)' }}>{ACTIVE_PROBES.length}</span>
+          </span>
+          <Button variant="ghost" size="sm" icon="plus">Зонд вручную</Button>
+        </div>
+        {ACTIVE_PROBES.map((p, i) => (
+          <div key={i} className="er-probe-row">
+            <span className="er-probe-kind">{KIND[p.kind]}</span>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13.5, color: 'var(--fg-1)', fontWeight: 500 }}>{p.q}</span>
+            </span>
+            <span style={{ display: 'flex', gap: 5 }}>
+              {p.pf.map(pf => <Icon key={pf} name={pf} size={15} color={pf === 'instagram' ? '#E1306C' : 'var(--fg-2)'} />)}
+            </span>
+            <span className="er-probe-int">
+              <Icon name={p.trend === 'up' ? 'trendingUp' : p.trend === 'down' ? 'trendingDown' : 'activity'} size={13}
+                color={p.trend === 'up' ? 'var(--sev-rising)' : 'var(--fg-3)'} />
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-2)' }}>{p.interval}</span>
+            </span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--fg-3)', width: 88, textAlign: 'right' }}>{p.mentions} упом.</span>
+            <span className="er-probe-last">
+              <span className="er-dot-live" style={{ background: p.hot ? 'var(--sev-rising)' : 'var(--sev-calm)' }} />
+              {p.last}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+/* ===== app ===== */
+// ============================================================================
+// Echo Radar — App UI kit · root (state, screens, actions)
+// ============================================================================
+
+function ScopeBar({ data }) {
+  const live = data.filter(m => m.status === 'new').length;
+  const crit = data.filter(m => m.severity >= 75 && m.status === 'new').length;
+  const rise = data.filter(m => m.severity >= 45 && m.severity < 75 && m.status === 'new').length;
+  const Stat = ({ label, value, color }) => (
+    <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 7 }}>
+      <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 16, color, fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+      <Eyebrow>{label}</Eyebrow>
+    </span>
+  );
+  return (
+    <div className="er-scope">
+      <span className="er-scope-live"><span className="er-pulse" />В эфире</span>
+      <span className="er-scope-div" />
+      <Stat label="сигналов" value={live} color="var(--fg-1)" />
+      <Stat label="залетает" value={crit} color="#FF7A87" />
+      <Stat label="растёт" value={rise} color="#FFC871" />
+      <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--fg-3)' }}>
+        синхронизация 12 сек назад
+      </span>
+    </div>
+  );
+}
+
+function App() {
+  const [screen, setScreen] = React.useState('inbox');
+  const [data, setData] = React.useState(DATA);
+  const [selectedId, setSelectedId] = React.useState('m1');
+  const [toast, setToast] = React.useState(null);
+
+  const visible = data.filter(m => m.status !== 'rejected');
+  const selected = data.find(m => m.id === selectedId);
+  const prCount = data.filter(m => (m.lane === 'PR' || m.lane === 'none') && m.status === 'new').length;
+
+  function flash(msg) { setToast(msg); clearTimeout(window.__erT); window.__erT = setTimeout(() => setToast(null), 2600); }
+
+  function onAction(id, action) {
+    setData(d => d.map(m => {
+      if (m.id !== id) return m;
+      if (action === 'approve') return { ...m, status: 'sent' };
+      if (action === 'reject')  return { ...m, status: 'rejected' };
+      if (action === 'pr')      return { ...m, lane: 'PR', status: 'new', humor: false };
+      return m;
+    }));
+    if (action === 'approve') flash('Ответ отправлен · правка залогирована для tone-learning');
+    if (action === 'reject')  { flash('Отклонено как шум'); const next = visible.find(m => m.id !== id); if (next) setSelectedId(next.id); }
+    if (action === 'pr')      flash('Передано в PR — срочно');
+  }
+
+  return (
+    <div className="er-app">
+      <Sidebar screen={screen} setScreen={setScreen} prCount={prCount} />
+      <div className="er-main">
+        <TopBar
+          title={screen === 'inbox' ? 'Инбокс' : 'Зонды'}
+          sub={screen === 'inbox' ? 'две полосы · PR и SMM' : 'ключевые слова и хэштеги, по которым ищем упоминания'} />
+        {screen === 'inbox' ? (
+          <>
+            <ScopeBar data={data} />
+            <div className="er-workspace">
+              <Inbox data={visible} selectedId={selectedId} onSelect={setSelectedId} />
+              {selected
+                ? <DetailPanel m={selected} onAction={onAction} />
+                : <aside className="er-detail"><div className="er-empty" style={{ margin: 'auto' }}>Выберите упоминание</div></aside>}
+            </div>
+          </>
+        ) : <ProbesScreen />}
+      </div>
+      {toast && <div className="er-toast"><Icon name="check" size={15} color="var(--sev-calm)" />{toast}</div>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+
+
+</script>
+</body>
+</html>

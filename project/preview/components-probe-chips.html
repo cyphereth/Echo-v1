@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================================
+   ECHO RADAR — Foundations: Color + Type
+   ----------------------------------------------------------------------------
+   Mood: «спокойный диспетчерский центр». Тёмный сине-графитовый фон, холодный
+   циан как акцент бренда. Спокойствие как фон, срочность как точка — только
+   сигналы severity вспыхивают тёплым: алый «залетает», янтарный «растёт».
+
+   Fonts loaded from Google Fonts CDN (both ship full Cyrillic):
+     - Manrope        → UI, headings, body
+     - JetBrains Mono → data, metrics, severity, timestamps, eyebrows
+   NOTE: not bundled locally. See README → Caveats if you need offline files.
+   ============================================================================ */
+
+
+
+:root {
+  /* ---- Type families ---- */
+  --font-sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* ====================================================================
+     COLOR — Backgrounds (graphite navy, cold + desaturated)
+     ==================================================================== */
+  --bg-void:    #0A1420;  /* deepest backdrop, behind panels */
+  --bg-base:    #0F1E2E;  /* app canvas */
+  --bg-raised:  #16293B;  /* large panels / sidebars */
+  --surface-1:  #1C3349;  /* cards */
+  --surface-2:  #244059;  /* raised cards, inputs */
+  --surface-3:  #2F4E6B;  /* hover, pressed surfaces */
+
+  /* ---- Hairlines / borders ---- */
+  --line-1:      #243A50;  /* subtle dividers */
+  --line-2:      #314A64;  /* card borders */
+  --line-strong: #42607E;  /* emphasized borders */
+
+  /* ====================================================================
+     COLOR — Text (cool whites → dim)
+     ==================================================================== */
+  --fg-1: #EAF1F8;  /* primary */
+  --fg-2: #97A9BE;  /* secondary */
+  --fg-3: #5C6E83;  /* tertiary, dim labels */
+  --fg-on-brand: #04141A;  /* ink on cyan */
+  --fg-on-warm:  #1A0A09;  /* ink on amber/crimson fills */
+
+  /* ====================================================================
+     COLOR — Brand (cold cyan = "всё под контролем", radar signal)
+     ==================================================================== */
+  --brand:        #2BB3C7;
+  --brand-bright: #57D2E2;
+  --brand-deep:   #15788A;
+  --brand-ghost:  rgba(43,179,199,0.12);
+  --brand-line:   rgba(43,179,199,0.32);
+
+  /* ====================================================================
+     COLOR — Severity (warm urgency — the "точка" against calm)
+     ==================================================================== */
+  --sev-critical:        #FF4D5E;  /* «залетает» — crimson */
+  --sev-critical-bright: #FF7A87;
+  --sev-critical-ghost:  rgba(255,77,94,0.14);
+  --sev-critical-line:   rgba(255,77,94,0.38);
+
+  --sev-rising:        #FFB23E;    /* «растёт» — amber */
+  --sev-rising-bright: #FFC871;
+  --sev-rising-ghost:  rgba(255,178,62,0.14);
+  --sev-rising-line:   rgba(255,178,62,0.36);
+
+  --sev-calm:        #34D8A0;       /* «под контролем» / позитив — used sparingly */
+  --sev-calm-ghost:  rgba(52,216,160,0.13);
+  --sev-calm-line:   rgba(52,216,160,0.34);
+
+  /* ---- Tonality (sentiment) ---- */
+  --tone-negative: var(--sev-critical);
+  --tone-neutral:  #7E91A6;
+  --tone-positive: var(--sev-calm);
+
+  /* ---- Platform marks ---- */
+  --pf-instagram: #E1306C;
+  --pf-tiktok:    #EAF1F8;
+
+  /* ====================================================================
+     RADII
+     ==================================================================== */
+  --r-xs:   4px;
+  --r-sm:   6px;
+  --r-md:  10px;
+  --r-lg:  14px;
+  --r-xl:  20px;
+  --r-pill: 999px;
+
+  /* ====================================================================
+     SPACING (4px base)
+     ==================================================================== */
+  --s-1:  4px;
+  --s-2:  8px;
+  --s-3:  12px;
+  --s-4:  16px;
+  --s-5:  20px;
+  --s-6:  24px;
+  --s-8:  32px;
+  --s-10: 40px;
+  --s-12: 48px;
+  --s-16: 64px;
+  --s-20: 80px;
+
+  /* ====================================================================
+     ELEVATION — shadows on dark + signal glows
+     ==================================================================== */
+  --shadow-1: 0 1px 2px rgba(0,0,0,0.45);
+  --shadow-2: 0 6px 20px -6px rgba(0,0,0,0.55);
+  --shadow-3: 0 22px 54px -16px rgba(0,0,0,0.70);
+
+  /* glows = a calm radar pulse or a warm severity flare */
+  --glow-brand:    0 0 0 1px var(--brand-line),        0 0 26px -6px rgba(43,179,199,0.50);
+  --glow-critical: 0 0 0 1px var(--sev-critical-line),  0 0 24px -4px rgba(255,77,94,0.55);
+  --glow-rising:   0 0 0 1px var(--sev-rising-line),    0 0 24px -6px rgba(255,178,62,0.45);
+
+  /* ====================================================================
+     MOTION
+     ==================================================================== */
+  --ease-out:  cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur-mid:  220ms;
+  --dur-slow: 420ms;
+
+  /* ====================================================================
+     TYPE SCALE  (sizes / line-heights / tracking)
+     ==================================================================== */
+  --display:    700 44px/1.04 var(--font-sans);   --display-ls: -0.022em;
+  --h1:         800 34px/1.08 var(--font-sans);   --h1-ls: -0.02em;
+  --h2:         700 26px/1.14 var(--font-sans);   --h2-ls: -0.016em;
+  --h3:         700 20px/1.22 var(--font-sans);   --h3-ls: -0.012em;
+  --h4:         600 16px/1.30 var(--font-sans);   --h4-ls: -0.006em;
+  --body-lg:    500 17px/1.55 var(--font-sans);
+  --body:       500 15px/1.55 var(--font-sans);
+  --small:      500 13px/1.5  var(--font-sans);
+  --eyebrow:    600 12px/1.1  var(--font-mono);   --eyebrow-ls: 0.16em;
+  --metric:     600 15px/1    var(--font-mono);
+  --metric-lg:  600 28px/1    var(--font-mono);   --metric-lg-ls: -0.01em;
+  --mono-sm:    500 12px/1.4  var(--font-mono);
+}
+
+/* ============================================================================
+   SEMANTIC HELPERS — apply directly as classes
+   ============================================================================ */
+.echo-display { font: var(--display); letter-spacing: var(--display-ls); color: var(--fg-1); }
+.echo-h1 { font: var(--h1); letter-spacing: var(--h1-ls); color: var(--fg-1); }
+.echo-h2 { font: var(--h2); letter-spacing: var(--h2-ls); color: var(--fg-1); }
+.echo-h3 { font: var(--h3); letter-spacing: var(--h3-ls); color: var(--fg-1); }
+.echo-h4 { font: var(--h4); letter-spacing: var(--h4-ls); color: var(--fg-1); }
+.echo-body-lg { font: var(--body-lg); color: var(--fg-2); }
+.echo-body { font: var(--body); color: var(--fg-2); }
+.echo-small { font: var(--small); color: var(--fg-3); }
+
+/* eyebrow / label — mono, uppercase, tracked-out: the instrument-panel voice */
+.echo-eyebrow {
+  font: var(--eyebrow);
+  letter-spacing: var(--eyebrow-ls);
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+/* metric — mono tabular numerals for scores, counts, timestamps */
+.echo-metric { font: var(--metric); font-variant-numeric: tabular-nums; color: var(--fg-1); }
+.echo-metric-lg { font: var(--metric-lg); letter-spacing: var(--metric-lg-ls); font-variant-numeric: tabular-nums; color: var(--fg-1); }
+
+/* ============================================================================
+   BASE (optional reset — opt in by adding class "echo" to <body>)
+   ============================================================================ */
+.echo {
+  background: var(--bg-base);
+  color: var(--fg-2);
+  font: var(--body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+.echo *,
+.echo *::before,
+.echo *::after { box-sizing: border-box; }
+</style>
+<style>
+  body { margin: 0; width: 700px; padding: 26px; background: var(--bg-base); display: flex; flex-direction: column; gap: 14px; }
+  .lab { font: var(--eyebrow); letter-spacing: var(--eyebrow-ls); text-transform: uppercase; color: var(--fg-3); }
+  .row { display: flex; gap: 9px; flex-wrap: wrap; align-items: center; }
+  .chip { display: inline-flex; align-items: center; gap: 7px; font: var(--mono-sm); color: var(--fg-1); background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--r-pill); padding: 6px 12px; }
+  .chip .k { color: var(--brand); }
+  .chip .x { color: var(--fg-3); }
+  .chip.ai { border-color: var(--brand-line); background: var(--brand-ghost); color: var(--brand-bright); }
+  .chip.add { color: var(--fg-3); border-style: dashed; }
+</style>
+</head>
+<body class="echo">
+  <span class="lab">Зонды — ключевые слова</span>
+  <div class="row">
+    <span class="chip"><span class="k">#</span>доставкаопоздала<span class="x">×</span></span>
+    <span class="chip"><span class="k">@</span>brandname<span class="x">×</span></span>
+    <span class="chip">испорченный заказ<span class="x">×</span></span>
+    <span class="chip">холодная пицца<span class="x">×</span></span>
+    <span class="chip add">+ добавить</span>
+  </div>
+  <span class="lab" style="margin-top:4px">Предложено AI по сайту бренда</span>
+  <div class="row">
+    <span class="chip ai">+ вернули деньги</span>
+    <span class="chip ai">+ #отзывброкен</span>
+    <span class="chip ai">+ курьер нагрубил</span>
+    <span class="chip ai">+ заказ не привезли</span>
+  </div>
+</body>
+</html>

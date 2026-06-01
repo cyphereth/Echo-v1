@@ -5,12 +5,12 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/brands':    'http://localhost:8000',
-      '/inbox':     'http://localhost:8000',
-      '/mentions':  'http://localhost:8000',
-      '/onboarding':'http://localhost:8000',
-      '/search':    'http://localhost:8000',
-      '/health':    'http://localhost:8000',
+      '/brands':     'http://127.0.0.1:8000',
+      '/inbox':      'http://127.0.0.1:8000',
+      '/mentions':   'http://127.0.0.1:8000',
+      '/onboarding': 'http://127.0.0.1:8000',
+      '/search':     'http://127.0.0.1:8000',
+      '/health':     'http://127.0.0.1:8000',
     },
   },
 })

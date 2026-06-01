@@ -1,0 +1,236 @@
+.page {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.page::-webkit-scrollbar { width: 4px; }
+.page::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 99px; }
+
+/* ── Stat cards ── */
+.statRow {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.statCard {
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 16px 18px;
+}
+
+.statLabel {
+  font-size: 11.5px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+.statValue {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--fg-1);
+  letter-spacing: -0.03em;
+  line-height: 1;
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+}
+
+.statDelta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+/* ── Two-col row ── */
+.row2 {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 12px;
+}
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 18px 20px;
+}
+
+.cardTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg-1);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Line chart ── */
+.chartWrap {
+  position: relative;
+  height: 140px;
+}
+
+.chartLabels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.chartLabel {
+  font-size: 10.5px;
+  color: var(--fg-4);
+  font-family: var(--font-mono);
+}
+
+/* ── Platform bars ── */
+.platformRows {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.platformRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.platformName {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--fg-2);
+  font-weight: 600;
+  width: 92px;
+  flex-shrink: 0;
+}
+
+.barTrack {
+  flex: 1;
+  height: 6px;
+  background: var(--surface-3);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.barFill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.platformVal {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--fg-3);
+  width: 28px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ── Top videos ── */
+.videoList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.videoRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.videoRow:hover { background: var(--surface-3); }
+
+.videoRank {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--fg-4);
+  font-family: var(--font-mono);
+  width: 18px;
+  flex-shrink: 0;
+  padding-top: 1px;
+}
+
+.videoInfo { flex: 1; min-width: 0; }
+
+.videoTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+
+.videoMeta {
+  display: flex;
+  gap: 10px;
+}
+
+.videoStat {
+  font-size: 11px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── Competitor table ── */
+.compTable {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.compRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.compName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-1);
+  flex: 1;
+}
+
+.compStat {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--fg-3);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.pill {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+}

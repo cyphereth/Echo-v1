@@ -302,6 +302,23 @@ def post_action(mention_id: int, body: ActionBody, session: Session = Depends(db
     return {"ok": True}
 
 
+# ── Debug ─────────────────────────────────────────────────────────────────────
+
+@app.get("/debug/tikhub")
+def debug_tikhub(keyword: str = "озон"):
+    provider = _get_provider()
+    try:
+        page = provider.search(keyword, "keyword", None)
+        return {
+            "provider":   provider.__class__.__name__,
+            "token_set":  bool(TIKHUB_TOKEN),
+            "posts_found": len(page.posts),
+            "sample":     [{"id": p.post_id, "text": p.text[:80], "views": p.views} for p in page.posts[:5]],
+        }
+    except Exception as e:
+        return {"error": str(e), "provider": provider.__class__.__name__}
+
+
 # ── Search ────────────────────────────────────────────────────────────────────
 
 @app.get("/search")

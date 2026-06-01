@@ -186,7 +186,12 @@ def _run_collect(brand_id: int) -> dict:
             return {"error": "brand not found"}
 
         provider = _get_provider()
-        probes   = session.query(Probe).filter_by(brand_id=brand_id).all()
+        # When using real TikHub, clear stale/seeded mentions first
+        if TIKHUB_TOKEN:
+            session.query(Mention).filter_by(brand_id=brand_id).delete()
+            session.commit()
+            log.info("Cleared old mentions for brand %d before fresh collect", brand_id)
+        probes = session.query(Probe).filter_by(brand_id=brand_id).all()
 
         # If no probes yet, create from keywords on the fly
         if not probes:
@@ -199,10 +204,12 @@ def _run_collect(brand_id: int) -> dict:
         total = 0
         for probe in probes:
             try:
+                log.info("Collecting probe '%s' via %s", probe.query, provider.__class__.__name__)
                 count = collect_probe(session, probe, provider)
+                log.info("Probe '%s' → %d new mentions", probe.query, count)
                 total += count
             except Exception as e:
-                log.warning("Probe %s failed: %s", probe.id, e)
+                log.warning("Probe '%s' failed: %s", probe.query, e)
 
         # Classify unclassified mentions
         unclassified = session.query(Mention).filter(

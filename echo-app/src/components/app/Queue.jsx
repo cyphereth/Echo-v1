@@ -8,34 +8,36 @@ function fmtNum(n) {
   return String(n);
 }
 
-// Flatten all comments with pending replies into queue items
+function fmtAgo(mins) {
+  if (mins < 60)  return `${mins} мин`;
+  if (mins < 1440) return `${Math.floor(mins / 60)} ч`;
+  return `${Math.floor(mins / 1440)} д`;
+}
+
 function buildQueue() {
   const items = [];
   for (const video of FEED_ITEMS) {
     const pending = video.comments.filter(c => c.suggestedReply || c.pendingReply);
-    if (pending.length > 0) {
-      items.push({ video, comments: pending });
-    }
+    if (pending.length > 0) items.push({ video, comments: pending });
   }
   return items;
 }
 
+// ── Reply card ──────────────────────────────────────────────────────────────
+
 function ReplyCard({ c, onApprove, onSkip }) {
-  const [draft, setDraft]   = useState(c.suggestedReply || c.pendingReply || '');
+  const [draft, setDraft]     = useState(c.suggestedReply || c.pendingReply || '');
   const [editing, setEditing] = useState(false);
-  const [done, setDone]     = useState(false);
+  const [done, setDone]       = useState(false);
   const [doneType, setDoneType] = useState(null);
 
-  function approve() {
-    onApprove(c.id, draft);
-    setDone(true);
-    setDoneType('sent');
-  }
-  function skip() {
-    onSkip(c.id);
-    setDone(true);
-    setDoneType('skipped');
-  }
+  const sentColor = {
+    negative: { bg: 'var(--neg-dim)',     fg: 'var(--neg)' },
+    positive: { bg: 'var(--calm-dim)',    fg: 'var(--calm)' },
+    neutral:  { bg: 'var(--surface-3)',   fg: 'var(--fg-3)' },
+  }[c.sentiment] ?? { bg: 'var(--surface-3)', fg: 'var(--fg-3)' };
+
+  const sentLabel = { negative: 'негатив', positive: 'позитив', neutral: 'нейтрал' }[c.sentiment];
 
   return (
     <div className={styles.card} data-done={done ? '1' : '0'}>
@@ -44,16 +46,22 @@ function ReplyCard({ c, onApprove, onSkip }) {
           <div className={styles.avatar}>{c.author[0].toUpperCase()}</div>
           <span className={styles.author}>{c.author}</span>
           <span className={styles.followers}>{fmtNum(c.followers)} подп.</span>
-          {c.sentiment === 'negative' && (
-            <span className={styles.sentBadge} style={{ background: 'var(--neg-dim)', color: 'var(--neg)' }}>
-              негатив
+          <span className={styles.sentBadge} style={{ background: sentColor.bg, color: sentColor.fg }}>
+            {sentLabel}
+          </span>
+          {c.likes > 0 && (
+            <span className={styles.followers} style={{ marginLeft: 4, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+              <Icon name="zap" size={10} color="var(--fg-4)" />{fmtNum(c.likes)}
             </span>
           )}
+          <span className={styles.followers} style={{ marginLeft: 2, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+            <Icon name="clock" size={10} color="var(--fg-4)" />{fmtAgo(c.minsAgo)}
+          </span>
           {done && (
             <span className={styles.sentBadge} style={{
               background: doneType === 'sent' ? 'var(--calm-dim)' : 'var(--surface-3)',
               color: doneType === 'sent' ? 'var(--calm)' : 'var(--fg-3)',
-              marginLeft: 4,
+              marginLeft: 'auto',
             }}>
               {doneType === 'sent' ? '✓ отправлен' : 'пропущен'}
             </span>
@@ -65,24 +73,17 @@ function ReplyCard({ c, onApprove, onSkip }) {
       {!done && (
         <div className={styles.cardReply}>
           <div className={styles.replyLabel}>
-            <Icon name="sparkles" size={11} />
-            AI-черновик
+            <Icon name="sparkles" size={11} />AI-черновик
           </div>
           {editing ? (
-            <textarea
-              className={styles.replyText}
-              value={draft}
-              onChange={e => setDraft(e.target.value)}
-              autoFocus
-            />
+            <textarea className={styles.replyText} value={draft}
+              onChange={e => setDraft(e.target.value)} autoFocus />
           ) : (
             <p style={{ fontSize: 13, color: 'var(--fg-1)', lineHeight: 1.55, cursor: 'text', padding: '8px 0' }}
-              onClick={() => setEditing(true)}>
-              {draft}
-            </p>
+              onClick={() => setEditing(true)}>{draft}</p>
           )}
           <div className={styles.actions}>
-            <button className={`${styles.btn} ${styles.btnDanger}`} onClick={skip}>
+            <button className={`${styles.btn} ${styles.btnDanger}`} onClick={() => { onSkip(c.id); setDone(true); setDoneType('skipped'); }}>
               <Icon name="x" size={13} />Пропустить
             </button>
             {!editing && (
@@ -90,7 +91,7 @@ function ReplyCard({ c, onApprove, onSkip }) {
                 <Icon name="edit" size={13} />Изменить
               </button>
             )}
-            <button className={`${styles.btn} ${styles.btnPrimary}`} onClick={approve}>
+            <button className={`${styles.btn} ${styles.btnPrimary}`} onClick={() => { onApprove(c.id, draft); setDone(true); setDoneType('sent'); }}>
               <Icon name="send" size={13} />Отправить
             </button>
           </div>
@@ -100,34 +101,55 @@ function ReplyCard({ c, onApprove, onSkip }) {
   );
 }
 
-const LANE_FILTERS = ['all', 'brand', 'competitor', 'niche'];
+// ── Screen ──────────────────────────────────────────────────────────────────
+
+const LANE_FILTERS      = ['all', 'brand', 'competitor', 'niche'];
+const SENTIMENT_FILTERS = ['all', 'negative', 'positive', 'neutral'];
+const SENTIMENT_LABELS  = { all: 'Все', negative: 'Негатив', positive: 'Позитив', neutral: 'Нейтрал' };
+const SORT_OPTIONS      = [
+  { key: 'date',  label: 'По дате',   icon: 'clock' },
+  { key: 'likes', label: 'По лайкам', icon: 'zap' },
+];
 
 export function QueueScreen() {
-  const [laneFilter, setLaneFilter] = useState('all');
-  const [states, setStates] = useState({});
+  const [laneFilter, setLaneFilter]         = useState('all');
+  const [sentFilter, setSentFilter]         = useState('all');
+  const [sortBy, setSortBy]                 = useState('date');
+  const [states, setStates]                 = useState({});
 
-  const raw = buildQueue();
-  const groups = raw.filter(g =>
-    laneFilter === 'all' || g.video.lane === laneFilter
-  );
+  const raw    = buildQueue();
+  const onApprove = (id) => setStates(s => ({ ...s, [id]: 'approved' }));
+  const onSkip    = (id) => setStates(s => ({ ...s, [id]: 'skipped' }));
 
   const totalPending = raw.reduce((sum, g) => sum + g.comments.length, 0);
   const approved     = Object.values(states).filter(s => s === 'approved').length;
   const skipped      = Object.values(states).filter(s => s === 'skipped').length;
+  const pendingLeft  = totalPending - approved - skipped;
 
-  function onApprove(id) { setStates(s => ({ ...s, [id]: 'approved' })); }
-  function onSkip(id)    { setStates(s => ({ ...s, [id]: 'skipped' })); }
+  const groups = raw
+    .filter(g => laneFilter === 'all' || g.video.lane === laneFilter)
+    .map(g => ({
+      ...g,
+      comments: g.comments
+        .filter(c => sentFilter === 'all' || c.sentiment === sentFilter)
+        .sort((a, b) => sortBy === 'likes' ? b.likes - a.likes : a.minsAgo - b.minsAgo),
+    }))
+    .filter(g => g.comments.length > 0);
 
   function approveAll() {
     const ids = {};
-    for (const g of groups) for (const c of g.comments) ids[c.id] = 'approved';
+    for (const g of groups) for (const c of g.comments) if (!states[c.id]) ids[c.id] = 'approved';
+    setStates(s => ({ ...s, ...ids }));
+  }
+  function skipAll() {
+    const ids = {};
+    for (const g of groups) for (const c of g.comments) if (!states[c.id]) ids[c.id] = 'skipped';
     setStates(s => ({ ...s, ...ids }));
   }
 
-  const pendingLeft = totalPending - approved - skipped;
-
   return (
     <div className={styles.page}>
+
       {/* Stats bar */}
       <div className={styles.bar}>
         <span className={styles.barStat}>
@@ -137,24 +159,82 @@ export function QueueScreen() {
         <div className={styles.sep} />
         <span className={styles.barStat}>
           <span className={styles.barVal} style={{ color: 'var(--calm)' }}>{approved}</span>
-          отправлено сегодня
+          отправлено
         </span>
         <div className={styles.sep} />
         <span className={styles.barStat}>
           <span className={styles.barVal}>{skipped}</span>
           пропущено
         </span>
-
-        <div className={styles.filters}>
-          {LANE_FILTERS.map(f => (
-            <button key={f} className={styles.chip} data-active={laneFilter === f ? '1' : '0'}
-              onClick={() => setLaneFilter(f)}>
-              {f === 'all' ? 'Все' : getLaneLabel(f)}
-            </button>
-          ))}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+          {/* Sort toggle */}
+          <div style={{ display: 'flex', background: 'var(--surface-2)', border: '1px solid var(--line-2)', borderRadius: 'var(--r-md)', padding: 3, gap: 2 }}>
+            {SORT_OPTIONS.map(o => (
+              <button key={o.key}
+                onClick={() => setSortBy(o.key)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  padding: '4px 10px', borderRadius: 'var(--r-sm)', fontSize: 12,
+                  fontWeight: 600, border: 'none', cursor: 'pointer', fontFamily: 'var(--font-sans)',
+                  background: sortBy === o.key ? 'var(--surface-3)' : 'none',
+                  color: sortBy === o.key ? 'var(--fg-1)' : 'var(--fg-4)',
+                  transition: 'all 0.12s',
+                }}>
+                <Icon name={o.icon} size={12} color={sortBy === o.key ? 'var(--brand-bright)' : 'var(--fg-4)'} />
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <div className={styles.sep} />
+          {/* Lane filter */}
+          <div className={styles.filters}>
+            {LANE_FILTERS.map(f => (
+              <button key={f} className={styles.chip} data-active={laneFilter === f ? '1' : '0'}
+                onClick={() => setLaneFilter(f)}>
+                {f === 'all' ? 'Все' : getLaneLabel(f)}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
+      {/* Sentiment tabs */}
+      <div style={{ display: 'flex', gap: 0, padding: '0 16px', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
+        {SENTIMENT_FILTERS.map(f => {
+          const count = raw.reduce((s, g) =>
+            s + g.comments.filter(c => f === 'all' || c.sentiment === f).length, 0);
+          const colors = {
+            all:      { active: 'var(--brand)',   dim: 'var(--brand-dim)' },
+            negative: { active: 'var(--neg)',      dim: 'var(--neg-dim)' },
+            positive: { active: 'var(--calm)',     dim: 'var(--calm-dim)' },
+            neutral:  { active: 'var(--fg-3)',     dim: 'var(--surface-2)' },
+          };
+          const c = colors[f];
+          const isActive = sentFilter === f;
+          return (
+            <button key={f}
+              onClick={() => setSentFilter(f)}
+              style={{
+                padding: '10px 16px 9px', fontSize: 13, fontWeight: 600,
+                color: isActive ? 'var(--fg-1)' : 'var(--fg-3)',
+                border: 'none', background: 'none', cursor: 'pointer',
+                borderBottom: `2px solid ${isActive ? c.active : 'transparent'}`,
+                marginBottom: -1, transition: 'all 0.12s',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+              {SENTIMENT_LABELS[f]}
+              <span style={{
+                fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 99,
+                fontFamily: 'var(--font-mono)',
+                background: isActive ? c.dim : 'var(--surface-2)',
+                color: isActive ? c.active : 'var(--fg-4)',
+              }}>{count}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Content */}
       {pendingLeft === 0 && approved === 0 ? (
         <div className={styles.empty}>
           <div style={{ textAlign: 'center' }}>
@@ -163,25 +243,29 @@ export function QueueScreen() {
             <div style={{ fontSize: 13, color: 'var(--fg-4)' }}>Новые ответы появятся когда Echo найдёт упоминания</div>
           </div>
         </div>
+      ) : groups.length === 0 ? (
+        <div className={styles.empty}>
+          <div style={{ textAlign: 'center', color: 'var(--fg-4)', fontSize: 13 }}>
+            Нет комментариев по выбранным фильтрам
+          </div>
+        </div>
       ) : (
         <>
           <div className={styles.list}>
             {groups.map(({ video, comments }) => {
-              const laneColor = getLaneColor(video.lane);
-              const liveComments = comments.filter(c => !states[c.id]);
-              if (liveComments.length === 0 && groups.length > 1) return null;
+              const laneColor  = getLaneColor(video.lane);
+              const liveCount  = comments.filter(c => !states[c.id]).length;
               return (
                 <div key={video.id} className={styles.group}>
                   <div className={styles.groupHeader}>
                     <Icon name={video.platform} size={15} />
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: laneColor, flexShrink: 0 }} />
                     <span className={styles.groupTitle}>{video.title}</span>
-                    <span className={styles.groupCount}>{liveComments.length} ответов</span>
+                    <span className={styles.groupCount}>{liveCount} ожидают</span>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {comments.map(c => (
-                      <ReplyCard key={c.id} c={{ ...c, status: states[c.id] ? 'done' : 'pending' }}
-                        onApprove={onApprove} onSkip={onSkip} />
+                      <ReplyCard key={c.id} c={c} onApprove={onApprove} onSkip={onSkip} />
                     ))}
                   </div>
                 </div>
@@ -194,16 +278,9 @@ export function QueueScreen() {
               <span className={styles.footerText}>
                 <strong style={{ color: 'var(--fg-1)' }}>{pendingLeft}</strong> ответов ждут одобрения
               </span>
-              <button className={`${styles.btn} ${styles.btnGhost}`} onClick={() => {
-                const ids = {};
-                for (const g of groups) for (const c of g.comments) ids[c.id] = 'skipped';
-                setStates(s => ({ ...s, ...ids }));
-              }}>
-                Пропустить все
-              </button>
+              <button className={`${styles.btn} ${styles.btnGhost}`} onClick={skipAll}>Пропустить все</button>
               <button className={`${styles.btn} ${styles.btnPrimary}`} onClick={approveAll}>
-                <Icon name="checkCircle" size={14} />
-                Одобрить все ({pendingLeft})
+                <Icon name="checkCircle" size={14} />Одобрить все ({pendingLeft})
               </button>
             </div>
           )}

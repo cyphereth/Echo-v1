@@ -4,6 +4,7 @@ import { Feed } from '../components/app/Feed';
 import { DetailPanel, EmptyDetail } from '../components/app/Detail';
 import { QueueScreen } from '../components/app/Queue';
 import { AnalyticsScreen } from '../components/app/Analytics';
+import { SettingsScreen } from '../components/app/Settings';
 import { BRAND, FEED_ITEMS } from '../data/mock';
 import styles from '../components/app/shell.module.css';
 
@@ -31,9 +32,7 @@ export default function AppPage() {
         ) : screen === 'analytics' ? (
           <div className={styles.workspace}><AnalyticsScreen /></div>
         ) : (
-          <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--fg-4)', fontFamily: 'var(--font-mono)', fontSize: 13 }}>
-            Настройки — скоро
-          </div>
+          <div className={styles.workspace}><SettingsScreen /></div>
         )}
       </div>
     </div>

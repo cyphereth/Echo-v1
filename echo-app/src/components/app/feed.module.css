@@ -166,3 +166,15 @@
   padding: 2px 7px;
   border-radius: var(--r-sm);
 }
+
+.linkBtn {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  padding: 3px 6px;
+  border-radius: var(--r-sm);
+  color: var(--fg-4);
+  transition: color 0.12s;
+  text-decoration: none;
+}
+.linkBtn:hover { color: var(--brand-bright); }

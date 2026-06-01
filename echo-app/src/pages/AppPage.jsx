@@ -19,8 +19,8 @@ function agoStr(isoString) {
 
 function mentionToItem(m) {
   return {
-    id: m.id,
-    lane:            m.tone === 'negative' ? 'brand' : m.lane === 'none' ? 'brand' : 'brand',
+    id:              m.id,
+    lane:            'brand',
     platform:        m.platform,
     author:          m.author,
     authorFollowers: m.followers,
@@ -28,11 +28,12 @@ function mentionToItem(m) {
     title:           m.text.length > 80 ? m.text.slice(0, 80) + '…' : m.text,
     summary:         m.text,
     views:           m.views,
-    likes:           0,
+    likes:           m.likes || 0,
     severity:        m.severity || 0,
     negativeCommentPct: m.tone === 'negative' ? 72 : 15,
-    commentsCount:   0,
+    commentsCount:   m.comments || 0,
     thumbnail:       m.tone === 'negative' ? 'neg' : 'neutral',
+    url:             m.url || null,
     comments:        m.draft ? [{
       id:            `c_${m.id}`,
       author:        m.author,
@@ -42,7 +43,7 @@ function mentionToItem(m) {
       pendingReply:  null,
       suggestedReply: m.draft,
       status:        m.status === 'sent' ? 'approved' : 'pending',
-      likes:         0,
+      likes:         m.likes || 0,
       minsAgo:       Math.round((Date.now() - new Date(m.created_at)) / 60000),
     }] : [],
     _mentionId: m.id,
@@ -136,7 +137,7 @@ export default function AppPage() {
             ? `Instagram · TikTok · Telegram${usingReal ? ' · реальные данные' : ' · демо'}`
             : undefined}
         >
-          {screen === 'feed' && brand && (
+          {brand && (
             <button
               onClick={handleCollect}
               disabled={collecting}

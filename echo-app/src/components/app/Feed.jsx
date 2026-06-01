@@ -51,6 +51,12 @@ function FeedCard({ item, active, onClick }) {
           <Icon name="eye" size={12} color="var(--fg-4)" />
           {fmtNum(item.views)}
         </span>
+        {item.likes > 0 && (
+          <span className={styles.stat}>
+            <Icon name="heart" size={12} color="var(--fg-4)" />
+            {fmtNum(item.likes)}
+          </span>
+        )}
         <span className={styles.stat}>
           <Icon name="messageCircle" size={12} color="var(--fg-4)" />
           {fmtNum(item.commentsCount)}
@@ -64,16 +70,12 @@ function FeedCard({ item, active, onClick }) {
 
         {item.lane === 'brand' && <SevBadge sev={item.severity} />}
 
-        {item.lane !== 'brand' && pendingCount > 0 && (
-          <span className={styles.pendingBadge} style={{ marginLeft: 'auto' }}>
-            <Icon name="messageCircle" size={11} />
-            {pendingCount} ответов
-          </span>
-        )}
-        {item.lane !== 'brand' && pendingCount === 0 && (
-          <span className={styles.oppBadge} style={{ background: 'var(--brand-dim)', color: 'var(--brand-bright)', marginLeft: 'auto' }}>
-            возможность
-          </span>
+        {item.url && (
+          <a href={item.url} target="_blank" rel="noopener noreferrer"
+            className={styles.linkBtn}
+            onClick={e => e.stopPropagation()}>
+            <Icon name="externalLink" size={11} />
+          </a>
         )}
       </div>
     </button>

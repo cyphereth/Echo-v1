@@ -125,8 +125,9 @@ def get_brand(brand_id: int, session: Session = Depends(db)):
 
 
 class BrandConfigBody(BaseModel):
-    keywords:  Optional[list[str]] = None
-    hashtags:  Optional[list[str]] = None
+    name:       Optional[str]       = None
+    keywords:   Optional[list[str]] = None
+    hashtags:   Optional[list[str]] = None
     exclusions: Optional[list[str]] = None
 
 @app.post("/brands/{brand_id}/config")
@@ -134,9 +135,15 @@ def update_brand_config(brand_id: int, body: BrandConfigBody, session: Session =
     b = session.get(Brand, brand_id)
     if not b:
         raise HTTPException(404, "Brand not found")
-    if body.keywords  is not None: b.keywords   = json.dumps(body.keywords)
+    if body.name      is not None: b.name       = body.name
     if body.hashtags  is not None: b.hashtags   = json.dumps(body.hashtags)
     if body.exclusions is not None: b.exclusions = json.dumps(body.exclusions)
+    if body.keywords  is not None:
+        b.keywords = json.dumps(body.keywords)
+        # Rebuild probes so collect uses the new keywords
+        session.query(Probe).filter_by(brand_id=brand_id).delete()
+        for kw in body.keywords:
+            session.add(Probe(brand_id=brand_id, platform="tiktok", kind="keyword", query=kw))
     session.commit()
     return _brand_card(b)
 

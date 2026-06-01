@@ -167,8 +167,8 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting }) {
       if (!brand) {
         result = await api.createBrand(brandName, keywords, hashtags);
       } else {
-        result = await api.updateBrandConfig(brand.id, { keywords, hashtags, exclusions });
-        result = { ...brand, ...result };
+        result = await api.updateBrandConfig(brand.id, { name: brandName, keywords, hashtags, exclusions });
+        result = { ...brand, ...result, name: brandName };
       }
       onBrandSaved?.(result);
       setSaved(true);

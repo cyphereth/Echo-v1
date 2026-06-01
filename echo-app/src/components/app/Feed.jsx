@@ -80,14 +80,14 @@ function FeedCard({ item, active, onClick }) {
   );
 }
 
-export function Feed({ selectedId, onSelect }) {
+export function Feed({ items: allItems = FEED_ITEMS, selectedId, onSelect }) {
   const [tab, setTab] = useState('brand');
-  const items = FEED_ITEMS.filter(i => i.lane === tab);
+  const items = allItems.filter(i => i.lane === tab);
 
   const counts = {
-    brand:      FEED_ITEMS.filter(i => i.lane === 'brand').length,
-    competitor: FEED_ITEMS.filter(i => i.lane === 'competitor').length,
-    niche:      FEED_ITEMS.filter(i => i.lane === 'niche').length,
+    brand:      allItems.filter(i => i.lane === 'brand').length,
+    competitor: allItems.filter(i => i.lane === 'competitor').length,
+    niche:      allItems.filter(i => i.lane === 'niche').length,
   };
 
   return (

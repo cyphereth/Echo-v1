@@ -279,8 +279,27 @@
 .saveBar {
   display: flex;
   justify-content: flex-end;
+  gap: 10px;
   padding-top: 4px;
 }
+
+.collectBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 20px;
+  background: var(--surface-2);
+  color: var(--brand-bright);
+  border: 1px solid rgba(78,110,242,0.35);
+  border-radius: var(--r-md);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s;
+  font-family: var(--font-sans);
+}
+.collectBtn:hover:not(:disabled) { background: var(--brand-dim); }
+.collectBtn:disabled { opacity: 0.5; cursor: default; }
 
 .saveBtn {
   display: inline-flex;

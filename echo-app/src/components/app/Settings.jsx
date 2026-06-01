@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Icon } from '../shared/icons';
+import * as api from '../../services/api';
 import styles from './settings.module.css';
 
 // ── Tag input component ──────────────────────────────────────────────────────
@@ -98,12 +99,34 @@ const VOICE_PRESETS = [
   { key: 'expert',     title: 'Экспертный',   desc: 'Спокойно и уверенно. Показываем знания, без лишнего пафоса.' },
 ];
 
+// ── Save bar ─────────────────────────────────────────────────────────────────
+
+function SaveBar({ onSave, onCollect, saved, saving, collecting, showCollect }) {
+  return (
+    <div className={styles.saveBar}>
+      {showCollect && (
+        <button
+          className={styles.collectBtn}
+          onClick={onCollect}
+          disabled={collecting}
+        >
+          {collecting ? '⏳ Сбор…' : '⚡ Собрать данные'}
+        </button>
+      )}
+      <button className={styles.saveBtn} onClick={onSave} disabled={saving}>
+        <Icon name={saved ? 'check' : 'checkCircle'} size={15} />
+        {saved ? 'Сохранено!' : saving ? 'Сохранение…' : 'Сохранить'}
+      </button>
+    </div>
+  );
+}
+
 // ── Main component ───────────────────────────────────────────────────────────
 
-export function SettingsScreen() {
+export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting }) {
   const [tab, setTab] = useState('brand');
 
-  // Brand
+  // Brand fields
   const [brandName,      setBrandName]      = useState('PapaPizza');
   const [brandNiche,     setBrandNiche]     = useState('Доставка еды, пиццерия');
   const [brandInstagram, setBrandInstagram] = useState('@papapizza_ru');
@@ -126,11 +149,49 @@ export function SettingsScreen() {
   const [voice, setVoice] = useState('friendly');
   const [toneExample, setToneExample] = useState('Привет! Очень жаль, что так вышло. Напишите нам в директ — разберёмся и всё исправим 🙏');
 
-  const [saved, setSaved] = useState(false);
-  function save() {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  const [saved,  setSaved]  = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // Sync from brand prop when it loads
+  useEffect(() => {
+    if (!brand) return;
+    setBrandName(brand.name ?? '');
+    if (brand.keywords?.length) setKeywords(brand.keywords);
+    if (brand.hashtags?.length)  setHashtags(brand.hashtags);
+  }, [brand?.id]);
+
+  async function save() {
+    setSaving(true);
+    try {
+      let result;
+      if (!brand) {
+        result = await api.createBrand(brandName, keywords, hashtags);
+      } else {
+        result = await api.updateBrandConfig(brand.id, { keywords, hashtags, exclusions });
+        result = { ...brand, ...result };
+      }
+      onBrandSaved?.(result);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      console.error('Save failed:', e.message);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } finally {
+      setSaving(false);
+    }
   }
+
+  const saveBar = (showCollect = false) => (
+    <SaveBar
+      onSave={save}
+      onCollect={onCollect}
+      saved={saved}
+      saving={saving}
+      collecting={collecting}
+      showCollect={showCollect && !!brand}
+    />
+  );
 
   return (
     <div className={styles.page}>
@@ -186,12 +247,14 @@ export function SettingsScreen() {
                   onChange={e => setBrandWebsite(e.target.value)} placeholder="example.ru" />
               </div>
             </Section>
-            <div className={styles.saveBar}>
-              <button className={styles.saveBtn} onClick={save}>
-                <Icon name={saved ? 'check' : 'checkCircle'} size={15} />
-                {saved ? 'Сохранено!' : 'Сохранить'}
-              </button>
-            </div>
+
+            {!brand && (
+              <div style={{ padding: '12px 16px', background: 'var(--brand-dim)', border: '1px solid rgba(78,110,242,0.3)', borderRadius: 'var(--r-lg)', fontSize: 13, color: 'var(--brand-bright)' }}>
+                💡 Сохраните профиль, чтобы начать сбор упоминаний
+              </div>
+            )}
+
+            {saveBar(false)}
           </>
         )}
 
@@ -248,12 +311,7 @@ export function SettingsScreen() {
               </div>
             </div>
 
-            <div className={styles.saveBar}>
-              <button className={styles.saveBtn} onClick={save}>
-                <Icon name={saved ? 'check' : 'checkCircle'} size={15} />
-                {saved ? 'Сохранено!' : 'Сохранить'}
-              </button>
-            </div>
+            {saveBar(true)}
           </>
         )}
 
@@ -274,12 +332,7 @@ export function SettingsScreen() {
                 </div>
               )}
             </Section>
-            <div className={styles.saveBar}>
-              <button className={styles.saveBtn} onClick={save}>
-                <Icon name={saved ? 'check' : 'checkCircle'} size={15} />
-                {saved ? 'Сохранено!' : 'Сохранить'}
-              </button>
-            </div>
+            {saveBar(false)}
           </>
         )}
 
@@ -295,12 +348,7 @@ export function SettingsScreen() {
                   on={platforms.telegram} onToggle={() => togglePlatform('telegram')} />
               </div>
             </Section>
-            <div className={styles.saveBar}>
-              <button className={styles.saveBtn} onClick={save}>
-                <Icon name={saved ? 'check' : 'checkCircle'} size={15} />
-                {saved ? 'Сохранено!' : 'Сохранить'}
-              </button>
-            </div>
+            {saveBar(false)}
           </>
         )}
 
@@ -334,12 +382,7 @@ export function SettingsScreen() {
               </div>
             </Section>
 
-            <div className={styles.saveBar}>
-              <button className={styles.saveBtn} onClick={save}>
-                <Icon name={saved ? 'check' : 'checkCircle'} size={15} />
-                {saved ? 'Сохранено!' : 'Сохранить'}
-              </button>
-            </div>
+            {saveBar(false)}
           </>
         )}
 

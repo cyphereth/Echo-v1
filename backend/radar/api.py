@@ -1,19 +1,31 @@
 from __future__ import annotations
-import json, logging
+import json, logging, os
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .db import init_db, get_session
-from .models import Brand, Mention, DraftEdit
+from .models import Brand, Probe, Mention, DraftEdit
+from .classify import classify
+from .scoring import Snapshot, severity as calc_severity, phase as calc_phase
+from .hotwatch import rescore_mention
 from . import seed as seed_module
 
 log = logging.getLogger(__name__)
 
-app = FastAPI(title="Echo Radar API", version="2.0.0")
+TIKHUB_TOKEN = os.getenv("TIKHUB_TOKEN", "")
+
+def _get_provider():
+    if TIKHUB_TOKEN:
+        from .providers.tikhub import TikHubProvider
+        return TikHubProvider(TIKHUB_TOKEN)
+    from .providers.mock import MockProvider
+    return MockProvider()
+
+app = FastAPI(title="Echo API", version="3.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -142,8 +154,72 @@ def onboarding(body: OnboardingBody, session: Session = Depends(db)):
         hashtags=json.dumps(body.hashtags),
     )
     session.add(b)
+    session.flush()
+    for kw in body.keywords:
+        session.add(Probe(brand_id=b.id, platform="tiktok", kind="keyword", query=kw))
     session.commit()
     return _brand_card(b)
+
+
+# ── Collect (trigger TikHub search now) ───────────────────────────────────────
+
+def _run_collect(brand_id: int) -> dict:
+    """Search TikHub for all brand keywords, classify and store results."""
+    from .collector import collect_probe
+    from .models import MentionSnapshot
+
+    session = get_session()
+    try:
+        brand = session.get(Brand, brand_id)
+        if not brand:
+            return {"error": "brand not found"}
+
+        provider = _get_provider()
+        probes   = session.query(Probe).filter_by(brand_id=brand_id).all()
+
+        # If no probes yet, create from keywords on the fly
+        if not probes:
+            for kw in brand.keywords_list():
+                p = Probe(brand_id=brand_id, platform="tiktok", kind="keyword", query=kw)
+                session.add(p)
+            session.flush()
+            probes = session.query(Probe).filter_by(brand_id=brand_id).all()
+
+        total = 0
+        for probe in probes:
+            try:
+                count = collect_probe(session, probe, provider)
+                total += count
+            except Exception as e:
+                log.warning("Probe %s failed: %s", probe.id, e)
+
+        # Classify unclassified mentions
+        unclassified = session.query(Mention).filter(
+            Mention.brand_id == brand_id,
+            Mention.category.is_(None),
+        ).all()
+
+        for m in unclassified:
+            result = classify(m.text, m.views, m.likes)
+            m.tone       = result.tone
+            m.category   = result.category
+            m.lane       = result.lane
+            m.confidence = result.confidence
+            rescore_mention(session, m)
+
+        session.commit()
+        return {"collected": total, "classified": len(unclassified)}
+    finally:
+        session.close()
+
+
+@app.post("/brands/{brand_id}/collect")
+def collect_brand(brand_id: int, background_tasks: BackgroundTasks, session: Session = Depends(db)):
+    b = session.get(Brand, brand_id)
+    if not b:
+        raise HTTPException(404, "Brand not found")
+    background_tasks.add_task(_run_collect, brand_id)
+    return {"status": "collecting", "brand": b.name, "using_tikhub": bool(TIKHUB_TOKEN)}
 
 
 # ── Inbox ─────────────────────────────────────────────────────────────────────

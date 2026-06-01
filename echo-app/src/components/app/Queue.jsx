@@ -4,6 +4,7 @@ import { FEED_ITEMS, getLaneColor, getLaneLabel } from '../../data/mock';
 import styles from './queue.module.css';
 
 function fmtNum(n) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);
 }
@@ -14,9 +15,9 @@ function fmtAgo(mins) {
   return `${Math.floor(mins / 1440)} д`;
 }
 
-function buildQueue() {
+function buildQueue(source) {
   const items = [];
-  for (const video of FEED_ITEMS) {
+  for (const video of source) {
     const pending = video.comments.filter(c => c.suggestedReply || c.pendingReply);
     if (pending.length > 0) items.push({ video, comments: pending });
   }
@@ -111,13 +112,13 @@ const SORT_OPTIONS      = [
   { key: 'likes', label: 'По лайкам', icon: 'zap' },
 ];
 
-export function QueueScreen() {
+export function QueueScreen({ items }) {
   const [laneFilter, setLaneFilter]         = useState('all');
   const [sentFilter, setSentFilter]         = useState('all');
   const [sortBy, setSortBy]                 = useState('date');
   const [states, setStates]                 = useState({});
 
-  const raw    = buildQueue();
+  const raw    = buildQueue(items ?? FEED_ITEMS);
   const onApprove = (id) => setStates(s => ({ ...s, [id]: 'approved' }));
   const onSkip    = (id) => setStates(s => ({ ...s, [id]: 'skipped' }));
 

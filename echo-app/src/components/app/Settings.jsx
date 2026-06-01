@@ -156,8 +156,10 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting }) {
   useEffect(() => {
     if (!brand) return;
     setBrandName(brand.name ?? '');
-    if (brand.keywords?.length) setKeywords(brand.keywords);
-    if (brand.hashtags?.length)  setHashtags(brand.hashtags);
+    if (brand.keywords?.length)    setKeywords(brand.keywords);
+    if (brand.hashtags?.length)    setHashtags(brand.hashtags);
+    if (brand.exclusions?.length)  setExclusions(brand.exclusions);
+    if (brand.competitors?.length) setCompetitors(brand.competitors);
   }, [brand?.id]);
 
   async function save() {
@@ -167,7 +169,7 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting }) {
       if (!brand) {
         result = await api.createBrand(brandName, keywords, hashtags);
       } else {
-        result = await api.updateBrandConfig(brand.id, { name: brandName, keywords, hashtags, exclusions });
+        result = await api.updateBrandConfig(brand.id, { name: brandName, keywords, hashtags, exclusions, competitors });
         result = { ...brand, ...result, name: brandName };
       }
       onBrandSaved?.(result);

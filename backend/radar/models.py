@@ -17,14 +17,16 @@ class Brand(Base):
     hashtags:              Mapped[str]      = mapped_column(Text, default="[]")
     exclusions:            Mapped[str]      = mapped_column(Text, default="[]")
     tone_examples:         Mapped[str]      = mapped_column(Text, default="[]")
+    competitors:           Mapped[str]      = mapped_column(Text, default="[]")
     mention_limit_monthly: Mapped[int]      = mapped_column(Integer, default=10000)
     created_at:            Mapped[datetime] = mapped_column(default=_now)
     probes:                Mapped[list[Probe]]   = relationship(back_populates="brand")
     mentions:              Mapped[list[Mention]] = relationship(back_populates="brand")
 
-    def keywords_list(self):  return json.loads(self.keywords)
-    def hashtags_list(self):  return json.loads(self.hashtags)
-    def exclusions_list(self): return json.loads(self.exclusions)
+    def keywords_list(self):    return json.loads(self.keywords)
+    def hashtags_list(self):    return json.loads(self.hashtags)
+    def exclusions_list(self):  return json.loads(self.exclusions)
+    def competitors_list(self): return json.loads(self.competitors)
 
 class Probe(Base):
     __tablename__ = "probes"

@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import { Icon } from '../shared/icons';
 import { Button, Eyebrow } from '../shared/primitives';
-import { BRAND } from '../../data/mentions';
 import { ACTIVE_PROBES, AI_SUGGEST, KIND } from '../../data/probes';
 import styles from './app.module.css';
 
-export function ProbesScreen() {
+export function ProbesScreen({ brandName }) {
   const [chips, setChips] = useState(AI_SUGGEST.map(q => ({ q, added: false })));
   const add = (i) => setChips(cs => cs.map((c, j) => j === i ? { ...c, added: true } : c));
 
@@ -15,7 +14,7 @@ export function ProbesScreen() {
         <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--fg-1)' }}>Зонды</h2>
         <p style={{ margin: '8px 0 0', fontSize: 14, lineHeight: 1.6, color: 'var(--fg-2)', maxWidth: 640 }}>
           Зонд — это поисковый запрос по ключевому слову или хэштегу, которым Echo Radar
-          непрерывно ищет упоминания <b style={{ color: 'var(--fg-1)' }}>{BRAND.name}</b> в Instagram и TikTok.
+          непрерывно ищет упоминания <b style={{ color: 'var(--fg-1)' }}>{brandName ?? '…'}</b> в Instagram и TikTok.
           Чем точнее зонды — тем меньше шума и точнее severity.
         </p>
       </div>

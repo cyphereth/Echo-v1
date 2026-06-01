@@ -1,7 +1,7 @@
+import { useState } from 'react';
 import { Icon } from '../shared/icons';
 import { EchoWordmark } from '../shared/EchoWordmark';
 import { Avatar } from '../shared/primitives';
-import { BRAND } from '../../data/mentions';
 import styles from './app.module.css';
 
 function NavItem({ icon, label, active, badge, onClick }) {
@@ -14,7 +14,7 @@ function NavItem({ icon, label, active, badge, onClick }) {
   );
 }
 
-export function Sidebar({ screen, setScreen, prCount }) {
+export function Sidebar({ screen, setScreen, prCount, brand }) {
   return (
     <aside className={styles.sidebar}>
       <div style={{ padding: '20px 18px 16px' }}>
@@ -32,14 +32,14 @@ export function Sidebar({ screen, setScreen, prCount }) {
           <span className={styles.pulse} />
           <div style={{ lineHeight: 1.3 }}>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--sev-calm)', fontWeight: 600 }}>Эфир</div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>4 зонда на связи</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{brand?.probes ?? 0} зондов на связи</div>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 6px' }}>
           <Avatar name="Дарья" size={30} />
           <div style={{ lineHeight: 1.25, flex: 1 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-1)' }}>Дарья · PR</div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{BRAND.name}</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{brand?.name ?? '—'}</div>
           </div>
         </div>
       </div>
@@ -47,17 +47,37 @@ export function Sidebar({ screen, setScreen, prCount }) {
   );
 }
 
-export function TopBar({ title, sub }) {
+export function TopBar({ title, sub, brand, brands = [], onBrandChange }) {
+  const [open, setOpen] = useState(false);
+
   return (
     <header className={styles.topbar}>
-      <button className={styles.brandsel}>
-        <span className={styles.monogram}>{BRAND.monogram}</span>
-        <span style={{ lineHeight: 1.2, textAlign: 'left' }}>
-          <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: 'var(--fg-1)' }}>{BRAND.name}</span>
-          <span style={{ display: 'block', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{BRAND.handle}</span>
-        </span>
-        <Icon name="chevronDown" size={15} color="var(--fg-3)" style={{ marginLeft: 2 }} />
-      </button>
+      <div style={{ position: 'relative' }}>
+        <button className={styles.brandsel} onClick={() => brands.length > 1 && setOpen(o => !o)}>
+          <span className={styles.monogram}>{brand?.monogram ?? '??'}</span>
+          <span style={{ lineHeight: 1.2, textAlign: 'left' }}>
+            <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: 'var(--fg-1)' }}>{brand?.name ?? '—'}</span>
+            <span style={{ display: 'block', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{brand?.handle ?? ''}</span>
+          </span>
+          {brands.length > 1 && <Icon name="chevronDown" size={15} color="var(--fg-3)" style={{ marginLeft: 2 }} />}
+        </button>
+        {open && (
+          <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, background: 'var(--surface-1)',
+            border: '1px solid var(--line-2)', borderRadius: 'var(--r-md)', padding: 6, minWidth: 180, zIndex: 100,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }}>
+            {brands.map((b, i) => (
+              <button key={b.id} onClick={() => { onBrandChange?.(i); setOpen(false); }}
+                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px',
+                  background: 'none', border: 'none', borderRadius: 'var(--r-sm)', cursor: 'pointer',
+                  fontSize: 13, fontWeight: 600, color: 'var(--fg-1)' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+                {b.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div style={{ flex: 1, whiteSpace: 'nowrap', minWidth: 0 }}>
         <div style={{ lineHeight: 1.2 }}>

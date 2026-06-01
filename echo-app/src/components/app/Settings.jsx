@@ -104,9 +104,11 @@ export function SettingsScreen() {
   const [tab, setTab] = useState('brand');
 
   // Brand
-  const [brandName,    setBrandName]    = useState('PapaPizza');
-  const [brandNiche,   setBrandNiche]   = useState('Доставка еды, пиццерия');
-  const [brandHandle,  setBrandHandle]  = useState('@papapizza_ru');
+  const [brandName,      setBrandName]      = useState('PapaPizza');
+  const [brandNiche,     setBrandNiche]     = useState('Доставка еды, пиццерия');
+  const [brandInstagram, setBrandInstagram] = useState('@papapizza_ru');
+  const [brandTiktok,    setBrandTiktok]    = useState('@papapizza');
+  const [brandWebsite,   setBrandWebsite]   = useState('papapizza.ru');
 
   // Keywords
   const [keywords,   setKeywords]   = useState(['папапицца', 'papapizza', 'papa pizza', 'пицца доставка мск']);
@@ -160,10 +162,28 @@ export function SettingsScreen() {
                 <input className={styles.input} value={brandNiche}
                   onChange={e => setBrandNiche(e.target.value)} placeholder="Например: доставка еды, пиццерия" />
               </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className={styles.field} style={{ marginBottom: 0 }}>
+                  <label className={styles.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Icon name="instagram" size={13} />Instagram
+                  </label>
+                  <input className={styles.input} value={brandInstagram}
+                    onChange={e => setBrandInstagram(e.target.value)} placeholder="@аккаунт" />
+                </div>
+                <div className={styles.field} style={{ marginBottom: 0 }}>
+                  <label className={styles.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Icon name="tiktok" size={13} />TikTok
+                  </label>
+                  <input className={styles.input} value={brandTiktok}
+                    onChange={e => setBrandTiktok(e.target.value)} placeholder="@аккаунт" />
+                </div>
+              </div>
               <div className={styles.field}>
-                <label className={styles.label}>Аккаунт в соцсетях</label>
-                <input className={styles.input} value={brandHandle}
-                  onChange={e => setBrandHandle(e.target.value)} placeholder="@ваш_аккаунт" />
+                <label className={styles.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Icon name="externalLink" size={13} />Сайт
+                </label>
+                <input className={styles.input} value={brandWebsite}
+                  onChange={e => setBrandWebsite(e.target.value)} placeholder="example.ru" />
               </div>
             </Section>
             <div className={styles.saveBar}>

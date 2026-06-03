@@ -403,11 +403,8 @@ def _run_collect(brand_id: int) -> dict:
             return {"error": "brand not found"}
 
         provider = _get_provider()
-        # When using real TikHub, clear stale/seeded mentions first
-        if TIKHUB_TOKEN:
-            session.query(Mention).filter_by(brand_id=brand_id).delete()
-            session.commit()
-            log.info("Cleared old mentions for brand %d before fresh collect", brand_id)
+        # collector.py uses upsert (on_conflict_do_update) — no pre-delete needed.
+        # Deleting before collect means losing all data if TikHub rate-limits mid-run.
         probes = session.query(Probe).filter_by(brand_id=brand_id).all()
 
         # If no probes yet, build them (brand + competitor + niche) on the fly

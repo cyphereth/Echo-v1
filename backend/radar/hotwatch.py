@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timezone
+from typing import Callable, Optional, Sequence
 from sqlalchemy.orm import Session
 from .models import Mention, MentionSnapshot
 from .scoring import Snapshot, phase, severity
@@ -22,9 +23,27 @@ def rescore_mention(session: Session, mention: Mention) -> None:
     )
     mention.updated_at = datetime.now(timezone.utc)
 
-def hotwatch_tick(session: Session, provider) -> int:
-    hot = session.query(Mention).filter_by(is_hot=True).all()
+def hotwatch_tick(
+    session: Session,
+    provider,
+    brand_ids: Optional[Sequence[int]] = None,
+    acquire: Optional[Callable[[], None]] = None,
+) -> int:
+    """Re-poll every hot mention and rescore it.
+
+    `brand_ids` scopes the sweep to specific brands (e.g. only auto-collect
+    brands) so we don't spend API budget on opted-out users. `acquire` is an
+    optional rate-limit gate called once per provider request.
+    """
+    q = session.query(Mention).filter_by(is_hot=True)
+    if brand_ids is not None:
+        if not brand_ids:
+            return 0
+        q = q.filter(Mention.brand_id.in_(list(brand_ids)))
+    hot = q.all()
     for mention in hot:
+        if acquire:
+            acquire()
         try:
             page = provider.search(mention.post_id, "keyword", None)
             if page.posts:

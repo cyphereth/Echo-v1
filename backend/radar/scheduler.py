@@ -48,11 +48,12 @@ def adaptive_interval(probe: Probe, new_mentions: int) -> int:
 
 class Scheduler:
     def __init__(self, provider, tick_sec: int = 60):
-        self._provider  = provider
-        self._tick_sec  = tick_sec
-        self._bucket    = TokenBucket()
-        self._running   = False
-        self._timer     = None
+        self._provider     = provider
+        self._tick_sec     = tick_sec
+        self._bucket       = TokenBucket()
+        self._running      = False
+        self._timer        = None
+        self._last_hotwatch = 0.0
 
     def start(self):
         self._running = True
@@ -108,5 +109,27 @@ class Scheduler:
                     classify_and_draft(session, brand_id)
                 except Exception:
                     log.exception("Pipeline failed for brand %s", brand_id)
+            # Re-poll hot mentions on their own (faster) cadence, scoped to
+            # auto-collect brands so opted-out users cost no API calls.
+            self._maybe_hotwatch(session)
         finally:
             session.close()
+
+    def _maybe_hotwatch(self, session: Session):
+        if time.monotonic() - self._last_hotwatch < INTERVAL_HOT:
+            return
+        self._last_hotwatch = time.monotonic()
+        try:
+            brand_ids = [
+                b.id for b in
+                session.query(Brand.id).filter(Brand.auto_collect.is_(True))
+            ]
+            from .hotwatch import hotwatch_tick
+            n = hotwatch_tick(
+                session, self._provider,
+                brand_ids=brand_ids, acquire=self._bucket.acquire,
+            )
+            if n:
+                log.info("Hot-watch re-polled %d mention(s)", n)
+        except Exception:
+            log.exception("Hot-watch tick failed")

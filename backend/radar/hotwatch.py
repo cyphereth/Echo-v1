@@ -42,23 +42,26 @@ def hotwatch_tick(
         q = q.filter(Mention.brand_id.in_(list(brand_ids)))
     hot = q.all()
     for mention in hot:
-        if acquire:
-            acquire()
         try:
-            page = provider.search(mention.post_id, "keyword", None)
-            if page.posts:
-                post = page.posts[0]
-                session.add(MentionSnapshot(
-                    mention_id=mention.id,
-                    ts=datetime.now(timezone.utc),
-                    likes=post.likes, views=post.views,
-                    comments=post.comments, shares=post.shares,
-                ))
-                session.flush()
-                mention.likes    = post.likes
-                mention.views    = post.views
-                mention.comments = post.comments
-                mention.shares   = post.shares
+            # TikTok re-search refreshes live metrics; Instagram has no
+            # per-post re-search via hashtag, so we just rescore its history.
+            if mention.platform == "tiktok":
+                if acquire:
+                    acquire()
+                page = provider.search(mention.post_id, "keyword", None, mention.platform)
+                if page.posts:
+                    post = page.posts[0]
+                    session.add(MentionSnapshot(
+                        mention_id=mention.id,
+                        ts=datetime.now(timezone.utc),
+                        likes=post.likes, views=post.views,
+                        comments=post.comments, shares=post.shares,
+                    ))
+                    session.flush()
+                    mention.likes    = post.likes
+                    mention.views    = post.views
+                    mention.comments = post.comments
+                    mention.shares   = post.shares
             rescore_mention(session, mention)
         except Exception:
             log.exception("Hot-watch failed for mention %s", mention.id)

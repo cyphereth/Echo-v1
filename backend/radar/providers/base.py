@@ -34,8 +34,8 @@ class Comment:
 
 class SearchProvider(ABC):
     @abstractmethod
-    def search(self, query: str, kind: str, cursor: Optional[str]) -> SearchPage: ...
+    def search(self, query: str, kind: str, cursor: Optional[str], platform: str = "tiktok") -> SearchPage: ...
 
-    def fetch_comments(self, post_id: str, cursor: Optional[str]) -> list["Comment"]:
+    def fetch_comments(self, post_id: str, cursor: Optional[str], platform: str = "tiktok") -> list["Comment"]:
         """Fetch comments for a post. Providers that don't support it return []."""
         return []

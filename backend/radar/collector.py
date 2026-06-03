@@ -60,7 +60,7 @@ def collect_probe(session: Session, probe: Probe, provider: SearchProvider) -> i
     found_watermark = False
     try:
         while not found_watermark:
-            page = provider.search(probe.query, probe.kind, cursor)
+            page = provider.search(probe.query, probe.kind, cursor, probe.platform)
             if not page.posts: break
             for post in page.posts:
                 if new_watermark is None:

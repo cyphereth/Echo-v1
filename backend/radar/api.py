@@ -151,6 +151,14 @@ def _velocity(mention: Mention) -> float:
         return 0.0
     return round((snaps[-1].views - snaps[-2].views) / dt_min, 1)
 
+def _post_url(m: Mention) -> Optional[str]:
+    if m.platform == "tiktok":
+        return f"https://www.tiktok.com/@{m.author}/video/{m.post_id}"
+    if m.platform == "instagram":
+        # post_id is the shortcode for IG mentions collected via TikHub.
+        return f"https://www.instagram.com/p/{m.post_id}/"
+    return None
+
 def _mention_card(m: Mention) -> dict:
     snaps = sorted(m.snapshots, key=lambda s: s.ts)
     snap_views = [s.views for s in snaps] if snaps else [
@@ -177,7 +185,7 @@ def _mention_card(m: Mention) -> dict:
         "likes":        m.likes,
         "comments":     m.comments,
         "post_id":      m.post_id,
-        "url":          f"https://www.tiktok.com/@{m.author}/video/{m.post_id}" if m.platform == "tiktok" else None,
+        "url":          _post_url(m),
         "velocity":     _velocity(m),
         "draft":        m.draft,
         "draft_flag":   m.draft_flag,
@@ -201,15 +209,20 @@ def _brand_card(b: Brand) -> dict:
 
 # ── Probe building ────────────────────────────────────────────────────────────
 
+# Monitor each term on every supported platform — one probe per (term, platform).
+MONITORED_PLATFORMS = ("tiktok", "instagram")
+
+
 def _rebuild_probes(session: Session, brand: Brand) -> None:
     """Replace a brand's probes from its current keywords / competitors / niche."""
     session.query(Probe).filter_by(brand_id=brand.id).delete()
-    for kw in brand.keywords_list():
-        session.add(Probe(brand_id=brand.id, platform="tiktok", kind="keyword", source="brand", query=kw))
-    for comp in brand.competitors_list():
-        session.add(Probe(brand_id=brand.id, platform="tiktok", kind="keyword", source="competitor", label=comp, query=comp))
-    for term in brand.niche_keywords_list():
-        session.add(Probe(brand_id=brand.id, platform="tiktok", kind="keyword", source="niche", label=term, query=term))
+    for pf in MONITORED_PLATFORMS:
+        for kw in brand.keywords_list():
+            session.add(Probe(brand_id=brand.id, platform=pf, kind="keyword", source="brand", query=kw))
+        for comp in brand.competitors_list():
+            session.add(Probe(brand_id=brand.id, platform=pf, kind="keyword", source="competitor", label=comp, query=comp))
+        for term in brand.niche_keywords_list():
+            session.add(Probe(brand_id=brand.id, platform=pf, kind="keyword", source="niche", label=term, query=term))
     session.flush()
 
 
@@ -453,7 +466,7 @@ def _comment_card(c: Comment) -> dict:
 def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
     """Pull comments from the provider, classify sentiment, draft relevant replies, store."""
     provider = _get_provider()
-    fetched  = provider.fetch_comments(mention.post_id, None)
+    fetched  = provider.fetch_comments(mention.post_id, None, mention.platform)
     if not fetched:
         return 0
 
@@ -556,18 +569,19 @@ def regenerate_comment(comment_id: int, user: User = Depends(current_user), sess
 # ── Debug ─────────────────────────────────────────────────────────────────────
 
 @app.get("/debug/tikhub")
-def debug_tikhub(keyword: str = "озон"):
+def debug_tikhub(keyword: str = "озон", platform: str = "tiktok"):
     provider = _get_provider()
     try:
-        page = provider.search(keyword, "keyword", None)
+        page = provider.search(keyword, "keyword", None, platform)
         return {
             "provider":   provider.__class__.__name__,
+            "platform":   platform,
             "token_set":  bool(TIKHUB_TOKEN),
             "posts_found": len(page.posts),
             "sample":     [{"id": p.post_id, "text": p.text[:80], "views": p.views} for p in page.posts[:5]],
         }
     except Exception as e:
-        return {"error": str(e), "provider": provider.__class__.__name__}
+        return {"error": str(e), "provider": provider.__class__.__name__, "platform": platform}
 
 
 # ── Search ────────────────────────────────────────────────────────────────────

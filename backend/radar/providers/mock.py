@@ -16,15 +16,15 @@ class MockProvider(SearchProvider):
     def __init__(self, total_pages: int = 3):
         self.total_pages = total_pages
 
-    def search(self, query: str, kind: str, cursor: Optional[str]) -> SearchPage:
+    def search(self, query: str, kind: str, cursor: Optional[str], platform: str = "tiktok") -> SearchPage:
         page = int(cursor) if cursor is not None else 0
         if page >= self.total_pages:
             return SearchPage(posts=[], next_cursor=None)
         start = page * PAGE_SIZE
         now = datetime.now(timezone.utc)
         posts = [Post(
-            post_id=f"{query}_post_{start+i}",
-            platform="tiktok",
+            post_id=f"{platform}_{query}_post_{start+i}",
+            platform=platform,
             author=f"user_{start+i}",
             followers=(start + i + 1) * 1000,
             text=f"Упоминание {query}: {_FLAVORS[(start + i) % len(_FLAVORS)]}",
@@ -38,7 +38,7 @@ class MockProvider(SearchProvider):
         next_cursor = str(page + 1) if page + 1 < self.total_pages else None
         return SearchPage(posts=posts, next_cursor=next_cursor)
 
-    def fetch_comments(self, post_id: str, cursor: Optional[str]) -> list[Comment]:
+    def fetch_comments(self, post_id: str, cursor: Optional[str], platform: str = "tiktok") -> list[Comment]:
         now = datetime.now(timezone.utc)
         return [Comment(
             comment_id=f"{post_id}_c{i}",

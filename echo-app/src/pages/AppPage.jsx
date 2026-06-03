@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Sidebar, TopBar } from '../components/app/Shell';
 import { Feed } from '../components/app/Feed';
 import { DetailPanel, EmptyDetail } from '../components/app/Detail';
@@ -59,9 +60,11 @@ function mentionToItem(m) {
 }
 
 export default function AppPage() {
+  const navigate = useNavigate();
   const [screen, setScreen]         = useState('feed');
   const [selectedId, setSelectedId] = useState(null);
   const [brand, setBrand]           = useState(null);
+  const [brands, setBrands]         = useState([]);
   const [feedItems, setFeedItems]   = useState(FEED_ITEMS);
   const [usingReal, setUsingReal]   = useState(false);
   const [collecting, setCollecting] = useState(false);
@@ -82,17 +85,40 @@ export default function AppPage() {
 
   const loadBrand = useCallback(async () => {
     try {
-      const brands = await api.getBrands();
-      if (brands.length > 0) {
-        setBrand(brands[0]);
-        loadFeed(brands[0].id);
+      const list = await api.getBrands();
+      setBrands(list);
+      if (list.length > 0) {
+        setBrand(prev => list.find(b => b.id === prev?.id) ?? list[0]);
+        loadFeed((list.find(b => b.id === brand?.id) ?? list[0]).id);
       }
     } catch (e) {
       console.warn('Backend unavailable, using demo data');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadFeed]);
 
   useEffect(() => { loadBrand(); }, [loadBrand]);
+
+  function selectBrand(id) {
+    const b = brands.find(x => x.id === id);
+    if (!b) return;
+    setBrand(b);
+    setSelectedId(null);
+    setUsingReal(false);
+    setFeedItems(FEED_ITEMS);
+    loadFeed(b.id);
+    setScreen('feed');
+  }
+
+  function newBrand() {
+    setBrand(null);
+    setScreen('settings');
+  }
+
+  function handleLogout() {
+    api.logout();
+    navigate('/login', { replace: true });
+  }
 
   useEffect(() => () => clearInterval(pollRef.current), []);
 
@@ -120,6 +146,9 @@ export default function AppPage() {
   async function handleBrandSaved(updatedBrand) {
     setBrand(updatedBrand);
     if (updatedBrand?.id) {
+      setBrands(prev => prev.some(b => b.id === updatedBrand.id)
+        ? prev.map(b => b.id === updatedBrand.id ? updatedBrand : b)
+        : [...prev, updatedBrand]);
       await loadFeed(updatedBrand.id);
     }
   }
@@ -132,6 +161,11 @@ export default function AppPage() {
         screen={screen}
         setScreen={setScreen}
         brand={brand ?? { name: 'PapaPizza', niche: 'доставка еды' }}
+        brands={brands}
+        activeBrandId={brand?.id}
+        onSelectBrand={selectBrand}
+        onNewBrand={newBrand}
+        onLogout={handleLogout}
       />
       <div className={styles.main}>
         <TopBar

@@ -3,8 +3,29 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
-from .models import Brand, Probe, Mention, MentionSnapshot
+from .models import Brand, Probe, Mention, MentionSnapshot, User
+from .auth import hash_password
 from .scoring import Snapshot, severity, phase
+
+DEMO_EMAIL    = "demo@echo.app"
+DEMO_PASSWORD = "demo12345"
+
+
+def ensure_demo_user(session: Session) -> User:
+    """Idempotent: make sure a login exists and every brand has an owner.
+
+    Runs on every startup so pre-auth databases keep working — orphan brands
+    (user_id NULL after migration) get attached to the demo account.
+    """
+    user = session.query(User).filter_by(email=DEMO_EMAIL).first()
+    if not user:
+        user = User(email=DEMO_EMAIL, password_hash=hash_password(DEMO_PASSWORD))
+        session.add(user)
+        session.flush()
+    for b in session.query(Brand).filter(Brand.user_id.is_(None)).all():
+        b.user_id = user.id
+    session.commit()
+    return user
 
 def _now(): return datetime.now(timezone.utc)
 def _ago(minutes: int) -> datetime: return _now() - timedelta(minutes=minutes)

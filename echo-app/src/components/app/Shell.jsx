@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Icon } from '../shared/icons';
 import styles from './shell.module.css';
 
@@ -24,8 +25,19 @@ function EchoLogo() {
   );
 }
 
-export function Sidebar({ screen, setScreen, brand, brandCount = 1 }) {
+export function Sidebar({
+  screen, setScreen, brand,
+  brands = [], activeBrandId, onSelectBrand, onNewBrand, onLogout,
+}) {
   const negCount = 3;
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const menuItem = {
+    display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+    padding: '8px 10px', borderRadius: 'var(--r-sm)', fontSize: 13, color: 'var(--fg-2)',
+    background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-sans)',
+  };
+
   return (
     <aside className={styles.sidebar}>
       <EchoLogo />
@@ -35,8 +47,40 @@ export function Sidebar({ screen, setScreen, brand, brandCount = 1 }) {
         <NavItem icon="pieChart"    label="Аналитика"  active={screen === 'analytics'} onClick={() => setScreen('analytics')} />
         <NavItem icon="settings"    label="Настройки"  active={screen === 'settings'}  onClick={() => setScreen('settings')} />
       </nav>
-      <div className={styles.sidebarBottom}>
-        <button className={styles.brandChip}>
+      <div className={styles.sidebarBottom} style={{ position: 'relative' }}>
+        {menuOpen && (
+          <>
+            <div onClick={() => setMenuOpen(false)}
+              style={{ position: 'fixed', inset: 0, zIndex: 10 }} />
+            <div style={{
+              position: 'absolute', bottom: 'calc(100% + 8px)', left: 0, right: 0, zIndex: 11,
+              background: 'var(--surface-2)', border: '1px solid var(--line-2)',
+              borderRadius: 'var(--r-md)', padding: 6, boxShadow: '0 8px 28px rgba(0,0,0,0.5)',
+            }}>
+              {brands.map(b => (
+                <button key={b.id} style={{
+                  ...menuItem,
+                  background: b.id === activeBrandId ? 'var(--surface-3)' : 'none',
+                  color: b.id === activeBrandId ? 'var(--fg-1)' : 'var(--fg-2)',
+                }} onClick={() => { onSelectBrand?.(b.id); setMenuOpen(false); }}>
+                  <div className={styles.brandMonogram} style={{ width: 22, height: 22, fontSize: 10 }}>
+                    {b.name?.slice(0, 2).toUpperCase()}
+                  </div>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
+                  {b.id === activeBrandId && <Icon name="check" size={13} color="var(--brand-bright)" />}
+                </button>
+              ))}
+              {brands.length > 0 && <div style={{ height: 1, background: 'var(--line)', margin: '6px 4px' }} />}
+              <button style={menuItem} onClick={() => { onNewBrand?.(); setMenuOpen(false); }}>
+                <Icon name="plus" size={14} color="var(--fg-3)" /> Новый бренд
+              </button>
+              <button style={{ ...menuItem, color: 'var(--neg)' }} onClick={() => { onLogout?.(); setMenuOpen(false); }}>
+                <Icon name="x" size={14} color="var(--neg)" /> Выйти
+              </button>
+            </div>
+          </>
+        )}
+        <button className={styles.brandChip} onClick={() => setMenuOpen(o => !o)}>
           <div className={styles.brandMonogram}>
             {brand?.name?.slice(0, 2).toUpperCase() ?? 'PP'}
           </div>
@@ -45,7 +89,7 @@ export function Sidebar({ screen, setScreen, brand, brandCount = 1 }) {
               {brand?.name ?? '—'}
             </div>
             <div style={{ fontSize: 11, color: 'var(--fg-3)', fontFamily: 'var(--font-mono)' }}>
-              {brand?.niche ?? ''}
+              {brands.length > 1 ? `${brands.length} бренда` : (brand?.niche ?? '')}
             </div>
           </div>
           <Icon name="chevronDown" size={13} color="var(--fg-4)" />

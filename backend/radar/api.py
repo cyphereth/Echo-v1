@@ -5,13 +5,14 @@ from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 load_dotenv()
 from typing import Optional
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .db import init_db, get_session
-from .models import Brand, Probe, Mention, DraftEdit, Comment
+from .models import Brand, Probe, Mention, DraftEdit, Comment, User
+from .auth import hash_password, verify_password, create_token, decode_token
 from .classify import classify
 from .drafts import generate_draft
 from .pipeline import classify_and_draft, recent_edits
@@ -49,6 +50,7 @@ def on_startup():
     session = get_session()
     try:
         seed_module.run(session)
+        seed_module.ensure_demo_user(session)   # idempotent: demo login + backfill owners
     finally:
         session.close()
 
@@ -70,6 +72,72 @@ def db() -> Session:
         yield session
     finally:
         session.close()
+
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+def current_user(authorization: str = Header(None), session: Session = Depends(db)) -> User:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Not authenticated")
+    try:
+        payload = decode_token(authorization.split(" ", 1)[1])
+    except Exception:
+        raise HTTPException(401, "Invalid or expired token")
+    user = session.get(User, payload.get("uid"))
+    if not user:
+        raise HTTPException(401, "User not found")
+    return user
+
+
+def _owned_brand(session: Session, brand_id: int, user: User) -> Brand:
+    b = session.get(Brand, brand_id)
+    if not b:
+        raise HTTPException(404, "Brand not found")
+    if b.user_id is not None and b.user_id != user.id:
+        raise HTTPException(403, "Forbidden")
+    return b
+
+
+def _owned_mention(session: Session, mention_id: int, user: User) -> Mention:
+    m = session.get(Mention, mention_id)
+    if not m:
+        raise HTTPException(404, "Mention not found")
+    _owned_brand(session, m.brand_id, user)
+    return m
+
+
+class AuthBody(BaseModel):
+    email:    str
+    password: str
+
+def _user_card(u: User) -> dict:
+    return {"id": u.id, "email": u.email}
+
+@app.post("/auth/register")
+def register(body: AuthBody, session: Session = Depends(db)):
+    email = body.email.strip().lower()
+    if not email or not body.password:
+        raise HTTPException(400, "Email and password required")
+    if len(body.password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters")
+    if session.query(User).filter_by(email=email).first():
+        raise HTTPException(409, "Email already registered")
+    user = User(email=email, password_hash=hash_password(body.password))
+    session.add(user)
+    session.commit()
+    return {"token": create_token(user.id, user.email), "user": _user_card(user)}
+
+@app.post("/auth/login")
+def login(body: AuthBody, session: Session = Depends(db)):
+    email = body.email.strip().lower()
+    user = session.query(User).filter_by(email=email).first()
+    if not user or not verify_password(body.password, user.password_hash):
+        raise HTTPException(401, "Invalid email or password")
+    return {"token": create_token(user.id, user.email), "user": _user_card(user)}
+
+@app.get("/auth/me")
+def auth_me(user: User = Depends(current_user)):
+    return _user_card(user)
 
 
 # ── Serialization ─────────────────────────────────────────────────────────────
@@ -155,15 +223,12 @@ def health():
 # ── Brands ────────────────────────────────────────────────────────────────────
 
 @app.get("/brands")
-def list_brands(session: Session = Depends(db)):
-    return [_brand_card(b) for b in session.query(Brand).all()]
+def list_brands(user: User = Depends(current_user), session: Session = Depends(db)):
+    return [_brand_card(b) for b in session.query(Brand).filter_by(user_id=user.id).all()]
 
 @app.get("/brands/{brand_id}")
-def get_brand(brand_id: int, session: Session = Depends(db)):
-    b = session.get(Brand, brand_id)
-    if not b:
-        raise HTTPException(404, "Brand not found")
-    return _brand_card(b)
+def get_brand(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    return _brand_card(_owned_brand(session, brand_id, user))
 
 
 class BrandConfigBody(BaseModel):
@@ -176,10 +241,8 @@ class BrandConfigBody(BaseModel):
     tone_examples:  Optional[list[str]] = None
 
 @app.post("/brands/{brand_id}/config")
-def update_brand_config(brand_id: int, body: BrandConfigBody, session: Session = Depends(db)):
-    b = session.get(Brand, brand_id)
-    if not b:
-        raise HTTPException(404, "Brand not found")
+def update_brand_config(brand_id: int, body: BrandConfigBody, user: User = Depends(current_user), session: Session = Depends(db)):
+    b = _owned_brand(session, brand_id, user)
     if body.name           is not None: b.name           = body.name
     if body.hashtags       is not None: b.hashtags       = json.dumps(body.hashtags)
     if body.exclusions     is not None: b.exclusions     = json.dumps(body.exclusions)
@@ -202,8 +265,9 @@ class OnboardingBody(BaseModel):
     niche_keywords: list[str] = []
 
 @app.post("/onboarding")
-def onboarding(body: OnboardingBody, session: Session = Depends(db)):
+def onboarding(body: OnboardingBody, user: User = Depends(current_user), session: Session = Depends(db)):
     b = Brand(
+        user_id=user.id,
         name=body.name,
         keywords=json.dumps(body.keywords),
         hashtags=json.dumps(body.hashtags),
@@ -261,10 +325,8 @@ def _run_collect(brand_id: int) -> dict:
 
 
 @app.post("/brands/{brand_id}/collect")
-def collect_brand(brand_id: int, background_tasks: BackgroundTasks, session: Session = Depends(db)):
-    b = session.get(Brand, brand_id)
-    if not b:
-        raise HTTPException(404, "Brand not found")
+def collect_brand(brand_id: int, background_tasks: BackgroundTasks, user: User = Depends(current_user), session: Session = Depends(db)):
+    b = _owned_brand(session, brand_id, user)
     background_tasks.add_task(_run_collect, brand_id)
     return {"status": "collecting", "brand": b.name, "using_tikhub": bool(TIKHUB_TOKEN)}
 
@@ -273,10 +335,8 @@ class AutoCollectBody(BaseModel):
     enabled: bool
 
 @app.post("/brands/{brand_id}/autocollect")
-def set_autocollect(brand_id: int, body: AutoCollectBody, session: Session = Depends(db)):
-    b = session.get(Brand, brand_id)
-    if not b:
-        raise HTTPException(404, "Brand not found")
+def set_autocollect(brand_id: int, body: AutoCollectBody, user: User = Depends(current_user), session: Session = Depends(db)):
+    b = _owned_brand(session, brand_id, user)
     b.auto_collect = body.enabled
     # Make sure probes exist so the scheduler has something to run
     if body.enabled and not b.probes:
@@ -288,7 +348,8 @@ def set_autocollect(brand_id: int, body: AutoCollectBody, session: Session = Dep
 # ── Inbox ─────────────────────────────────────────────────────────────────────
 
 @app.get("/inbox")
-def inbox(brand_id: int, session: Session = Depends(db)):
+def inbox(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    _owned_brand(session, brand_id, user)
     mentions = (
         session.query(Mention)
         .filter(Mention.brand_id == brand_id, Mention.status != "rejected")
@@ -303,11 +364,8 @@ def inbox(brand_id: int, session: Session = Depends(db)):
 # ── Mentions ──────────────────────────────────────────────────────────────────
 
 @app.get("/mentions/{mention_id}")
-def get_mention(mention_id: int, session: Session = Depends(db)):
-    m = session.get(Mention, mention_id)
-    if not m:
-        raise HTTPException(404, "Mention not found")
-    return _mention_card(m)
+def get_mention(mention_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    return _mention_card(_owned_mention(session, mention_id, user))
 
 
 class ActionBody(BaseModel):
@@ -315,10 +373,8 @@ class ActionBody(BaseModel):
     draft:  Optional[str] = None
 
 @app.post("/mentions/{mention_id}/action")
-def post_action(mention_id: int, body: ActionBody, session: Session = Depends(db)):
-    m = session.get(Mention, mention_id)
-    if not m:
-        raise HTTPException(404, "Mention not found")
+def post_action(mention_id: int, body: ActionBody, user: User = Depends(current_user), session: Session = Depends(db)):
+    m = _owned_mention(session, mention_id, user)
 
     if body.action == "approve":
         original = m.draft
@@ -348,10 +404,8 @@ def post_action(mention_id: int, body: ActionBody, session: Session = Depends(db
 
 
 @app.post("/mentions/{mention_id}/regenerate")
-def regenerate_draft(mention_id: int, session: Session = Depends(db)):
-    m = session.get(Mention, mention_id)
-    if not m:
-        raise HTTPException(404, "Mention not found")
+def regenerate_draft(mention_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    m = _owned_mention(session, mention_id, user)
     brand = session.get(Brand, m.brand_id)
     dr = generate_draft(
         m.text, m.category or "neutral", m.tone, m.confidence or 0.0,
@@ -438,10 +492,8 @@ def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
 
 
 @app.get("/mentions/{mention_id}/comments")
-def get_comments(mention_id: int, refresh: int = 0, session: Session = Depends(db)):
-    m = session.get(Mention, mention_id)
-    if not m:
-        raise HTTPException(404, "Mention not found")
+def get_comments(mention_id: int, refresh: int = 0, user: User = Depends(current_user), session: Session = Depends(db)):
+    m = _owned_mention(session, mention_id, user)
     if refresh or not m.comment_rows:
         try:
             _fetch_and_store_comments(session, m)
@@ -456,10 +508,11 @@ class CommentActionBody(BaseModel):
     draft:  Optional[str] = None
 
 @app.post("/comments/{comment_id}/action")
-def comment_action(comment_id: int, body: CommentActionBody, session: Session = Depends(db)):
+def comment_action(comment_id: int, body: CommentActionBody, user: User = Depends(current_user), session: Session = Depends(db)):
     c = session.get(Comment, comment_id)
     if not c:
         raise HTTPException(404, "Comment not found")
+    _owned_mention(session, c.mention_id, user)
     if body.action == "approve":
         if body.draft and body.draft != c.draft:
             mention = session.get(Mention, c.mention_id)
@@ -478,10 +531,11 @@ def comment_action(comment_id: int, body: CommentActionBody, session: Session = 
 
 
 @app.post("/comments/{comment_id}/regenerate")
-def regenerate_comment(comment_id: int, session: Session = Depends(db)):
+def regenerate_comment(comment_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
     c = session.get(Comment, comment_id)
     if not c:
         raise HTTPException(404, "Comment not found")
+    _owned_mention(session, c.mention_id, user)
     mention = session.get(Mention, c.mention_id)
     brand   = session.get(Brand, mention.brand_id) if mention else None
     dr = generate_draft(
@@ -519,10 +573,10 @@ def debug_tikhub(keyword: str = "озон"):
 # ── Search ────────────────────────────────────────────────────────────────────
 
 @app.get("/search")
-def search(query: str, session: Session = Depends(db)):
+def search(query: str, user: User = Depends(current_user), session: Session = Depends(db)):
     results = (
-        session.query(Mention)
-        .filter(Mention.text.ilike(f"%{query}%"))
+        session.query(Mention).join(Brand)
+        .filter(Brand.user_id == user.id, Mention.text.ilike(f"%{query}%"))
         .limit(20)
         .all()
     )
@@ -542,7 +596,8 @@ def _aware(dt: Optional[datetime]) -> Optional[datetime]:
 
 
 @app.get("/analytics")
-def analytics(brand_id: int, session: Session = Depends(db)):
+def analytics(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    _owned_brand(session, brand_id, user)
     mentions = (
         session.query(Mention)
         .filter(Mention.brand_id == brand_id, Mention.status != "rejected")

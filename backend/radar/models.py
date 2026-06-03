@@ -9,10 +9,18 @@ def _now(): return datetime.now(timezone.utc)
 
 class Base(DeclarativeBase): pass
 
+class User(Base):
+    __tablename__ = "users"
+    id:            Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email:         Mapped[str]      = mapped_column(Text, unique=True, nullable=False)
+    password_hash: Mapped[str]      = mapped_column(Text, nullable=False)
+    created_at:    Mapped[datetime] = mapped_column(default=_now)
+
 class Brand(Base):
     __tablename__ = "brands"
-    id:                    Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name:                  Mapped[str]      = mapped_column(Text, nullable=False)
+    id:                    Mapped[int]           = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id:               Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"))
+    name:                  Mapped[str]           = mapped_column(Text, nullable=False)
     keywords:              Mapped[str]      = mapped_column(Text, default="[]")
     hashtags:              Mapped[str]      = mapped_column(Text, default="[]")
     exclusions:            Mapped[str]      = mapped_column(Text, default="[]")

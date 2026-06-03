@@ -330,6 +330,38 @@ def suggest_brand(body: SuggestBody, user: User = Depends(current_user)):
     }
 
 
+class PreviewBody(BaseModel):
+    keywords:  list[str] = []
+    platforms: list[str] = ["tiktok", "instagram"]
+
+@app.post("/brands/preview")
+def preview_brand(body: PreviewBody, user: User = Depends(current_user)):
+    """Search TikHub with given keywords and return up to 5 real posts. Nothing is stored in DB."""
+    provider = _get_provider()
+    posts = []
+    seen = set()
+    for kw in body.keywords[:2]:
+        for pf in body.platforms[:2]:
+            if len(posts) >= 5:
+                break
+            try:
+                page = provider.search(kw, "keyword", None, pf)
+                for p in page.posts[:3]:
+                    if p.post_id not in seen:
+                        seen.add(p.post_id)
+                        posts.append({
+                            "post_id":  p.post_id,
+                            "platform": p.platform,
+                            "author":   p.author,
+                            "views":    p.views,
+                            "likes":    p.likes,
+                            "text":     p.text[:120],
+                        })
+            except Exception as e:
+                log.warning("preview_brand search failed kw=%s pf=%s: %s", kw, pf, e)
+    return {"posts": posts[:5]}
+
+
 class OnboardingBody(BaseModel):
     name:           str
     keywords:       list[str] = []
@@ -339,6 +371,9 @@ class OnboardingBody(BaseModel):
 
 @app.post("/onboarding")
 def onboarding(body: OnboardingBody, user: User = Depends(current_user), session: Session = Depends(db)):
+    existing = session.query(Brand).filter_by(user_id=user.id).first()
+    if existing:
+        raise HTTPException(409, "Brand already exists")
     b = Brand(
         user_id=user.id,
         name=body.name,

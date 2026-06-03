@@ -6,6 +6,7 @@ import { DetailPanel, EmptyDetail } from '../components/app/Detail';
 import { QueueScreen } from '../components/app/Queue';
 import { AnalyticsScreen } from '../components/app/Analytics';
 import { SettingsScreen } from '../components/app/Settings';
+import { AIWizard } from '../components/app/AIWizard';
 import * as api from '../services/api';
 import styles from '../components/app/shell.module.css';
 
@@ -60,23 +61,20 @@ function mentionToItem(m) {
 
 export default function AppPage() {
   const navigate = useNavigate();
-  const [screen, setScreen]         = useState('feed');
-  const [selectedId, setSelectedId] = useState(null);
-  const [brand, setBrand]           = useState(null);
-  const [brands, setBrands]         = useState([]);
-  const [feedItems, setFeedItems]   = useState([]);
-  const [usingReal, setUsingReal]   = useState(false);
-  const [collecting, setCollecting] = useState(false);
-  const pollRef                     = useRef(null);
+  const [screen, setScreen]           = useState('feed');
+  const [selectedId, setSelectedId]   = useState(null);
+  const [brand, setBrand]             = useState(null);
+  const [brandLoaded, setBrandLoaded] = useState(false);
+  const [feedItems, setFeedItems]     = useState([]);
+  const [collecting, setCollecting]   = useState(false);
+  const [showWizard, setShowWizard]   = useState(false);
+  const pollRef                       = useRef(null);
 
   const loadFeed = useCallback(async (brandId) => {
     try {
       const inbox = await api.getInbox(brandId);
       const all = [...inbox.pr, ...inbox.smm];
-      if (all.length > 0) {
-        setFeedItems(all.map(mentionToItem));
-        setUsingReal(true);
-      }
+      setFeedItems(all.map(mentionToItem));
     } catch (e) {
       console.warn('Failed to load inbox:', e.message);
     }
@@ -85,70 +83,45 @@ export default function AppPage() {
   const loadBrand = useCallback(async () => {
     try {
       const list = await api.getBrands();
-      setBrands(list);
       if (list.length > 0) {
-        setBrand(prev => list.find(b => b.id === prev?.id) ?? list[0]);
-        loadFeed((list.find(b => b.id === brand?.id) ?? list[0]).id);
+        setBrand(list[0]);
+        loadFeed(list[0].id);
       }
     } catch (e) {
-      console.warn('Backend unavailable, using demo data');
+      console.warn('Backend unavailable');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setBrandLoaded(true);
   }, [loadFeed]);
 
   useEffect(() => { loadBrand(); }, [loadBrand]);
-
-  function selectBrand(id) {
-    const b = brands.find(x => x.id === id);
-    if (!b) return;
-    setBrand(b);
-    setSelectedId(null);
-    setUsingReal(false);
-    loadFeed(b.id);
-    setScreen('feed');
-  }
-
-  function newBrand() {
-    setBrand(null);
-    setScreen('settings');
-  }
+  useEffect(() => () => clearInterval(pollRef.current), []);
 
   function handleLogout() {
     api.logout();
     navigate('/login', { replace: true });
   }
 
-  useEffect(() => () => clearInterval(pollRef.current), []);
-
   async function handleCollect() {
     if (!brand || collecting) return;
     setCollecting(true);
-    try {
-      await api.collectBrand(brand.id);
-    } catch (e) {
-      setCollecting(false);
-      return;
-    }
-
+    try { await api.collectBrand(brand.id); } catch { setCollecting(false); return; }
     let ticks = 0;
     pollRef.current = setInterval(async () => {
       ticks++;
       await loadFeed(brand.id);
-      if (ticks >= 6) {
-        clearInterval(pollRef.current);
-        setCollecting(false);
-      }
+      if (ticks >= 6) { clearInterval(pollRef.current); setCollecting(false); }
     }, 3000);
   }
 
   async function handleBrandSaved(updatedBrand) {
     setBrand(updatedBrand);
-    if (updatedBrand?.id) {
-      setBrands(prev => prev.some(b => b.id === updatedBrand.id)
-        ? prev.map(b => b.id === updatedBrand.id ? updatedBrand : b)
-        : [...prev, updatedBrand]);
-      await loadFeed(updatedBrand.id);
-    }
+    setShowWizard(false);
+    if (updatedBrand?.id) await loadFeed(updatedBrand.id);
+  }
+
+  // No brand yet → show onboarding wizard fullscreen
+  if (brandLoaded && !brand) {
+    return <AIWizard mode="create" onSaved={handleBrandSaved} />;
   }
 
   const selected = feedItems.find(i => i.id === selectedId) ?? null;
@@ -158,11 +131,7 @@ export default function AppPage() {
       <Sidebar
         screen={screen}
         setScreen={setScreen}
-        brand={brand ?? { name: 'PapaPizza', niche: 'доставка еды' }}
-        brands={brands}
-        activeBrandId={brand?.id}
-        onSelectBrand={selectBrand}
-        onNewBrand={newBrand}
+        brand={brand}
         onLogout={handleLogout}
       />
       <div className={styles.main}>
@@ -172,9 +141,7 @@ export default function AppPage() {
             screen === 'queue'     ? 'Очередь ответов' :
             screen === 'analytics' ? 'Аналитика' : 'Настройки'
           }
-          sub={screen === 'feed'
-            ? `Instagram · TikTok · Telegram${usingReal ? ' · реальные данные' : ' · демо'}`
-            : undefined}
+          sub={screen === 'feed' ? 'Instagram · TikTok · Telegram · реальные данные' : undefined}
         >
           {brand && (
             <button
@@ -211,10 +178,20 @@ export default function AppPage() {
               onBrandSaved={handleBrandSaved}
               onCollect={handleCollect}
               collecting={collecting}
+              onOpenWizard={() => setShowWizard(true)}
             />
           </div>
         )}
       </div>
+
+      {showWizard && (
+        <AIWizard
+          mode="edit"
+          brand={brand}
+          onSaved={handleBrandSaved}
+          onClose={() => setShowWizard(false)}
+        />
+      )}
     </div>
   );
 }

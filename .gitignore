@@ -1,6 +1,20 @@
-echo-radar/node_modules
-echo-radar/dist
-echo-radar/.vite
+# Secrets / env
+.env
+*.env
+!.env.example
+
+# Python
 __pycache__/
 *.pyc
 echo_radar.db
+*.db
+backend/_check*.py
+
+# Node / Vite (frontend)
+echo-app/node_modules
+echo-app/dist
+echo-app/.vite
+node_modules/
+
+# Misc
+.DS_Store

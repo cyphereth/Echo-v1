@@ -141,9 +141,26 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting }) {
   // Competitors
   const [competitors, setCompetitors] = useState(['DoDo Pizza', 'Dominos', 'Pizza Hut']);
 
+  // Niche search terms
+  const [niche, setNiche] = useState(['доставка пиццы москва', 'лучшая пицца']);
+
   // Platforms
   const [platforms, setPlatforms] = useState({ instagram: true, tiktok: true, telegram: false });
   function togglePlatform(p) { setPlatforms(prev => ({ ...prev, [p]: !prev[p] })); }
+
+  // Auto-collect (background scheduler)
+  const [autoCollect, setAutoCollect] = useState(false);
+  async function toggleAutoCollect() {
+    if (!brand) return;
+    const next = !autoCollect;
+    setAutoCollect(next);
+    try {
+      await api.setAutoCollect(brand.id, next);
+      onBrandSaved?.({ ...brand, auto_collect: next });
+    } catch (e) {
+      setAutoCollect(!next); // revert on failure
+    }
+  }
 
   // Voice
   const [voice, setVoice] = useState('friendly');
@@ -160,6 +177,8 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting }) {
     if (brand.hashtags?.length)    setHashtags(brand.hashtags);
     if (brand.exclusions?.length)  setExclusions(brand.exclusions);
     if (brand.competitors?.length) setCompetitors(brand.competitors);
+    if (brand.niche_keywords?.length) setNiche(brand.niche_keywords);
+    setAutoCollect(!!brand.auto_collect);
   }, [brand?.id]);
 
   async function save() {
@@ -169,7 +188,7 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting }) {
       if (!brand) {
         result = await api.createBrand(brandName, keywords, hashtags);
       } else {
-        result = await api.updateBrandConfig(brand.id, { name: brandName, keywords, hashtags, exclusions, competitors });
+        result = await api.updateBrandConfig(brand.id, { name: brandName, keywords, hashtags, exclusions, competitors, niche_keywords: niche });
         result = { ...brand, ...result, name: brandName };
       }
       onBrandSaved?.(result);
@@ -296,6 +315,17 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting }) {
               />
             </Section>
 
+            <Section
+              title="Ниша"
+              sub="Темы без упоминания бренда — Echo найдёт обсуждения вашей ниши, где можно зайти нативно. Попадут в ленту «Ниша».">
+              <TagInput
+                tags={niche}
+                onChange={setNiche}
+                placeholder="доставка пиццы москва..."
+                color="var(--lane-niche)"
+              />
+            </Section>
+
             <div style={{ background: 'var(--surface-2)', border: '1px solid var(--line-2)', borderRadius: 'var(--r-lg)', padding: '14px 18px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <Icon name="sparkles" size={14} color="var(--brand-bright)" />
@@ -350,6 +380,20 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting }) {
                   on={platforms.telegram} onToggle={() => togglePlatform('telegram')} />
               </div>
             </Section>
+
+            {brand && (
+              <Section title="Автосбор" sub="Echo сам собирает новые упоминания в фоне — адаптивный интервал, чаще когда тема набирает обороты. Изменения применяются сразу.">
+                <div className={styles.platforms}>
+                  <PlatformToggle
+                    name="Автоматический сбор"
+                    icon="zap"
+                    note={autoCollect ? 'Включён — Echo мониторит в фоне' : 'Выключен — собирайте вручную кнопкой «Собрать данные»'}
+                    on={autoCollect}
+                    onToggle={toggleAutoCollect}
+                  />
+                </div>
+              </Section>
+            )}
             {saveBar(false)}
           </>
         )}

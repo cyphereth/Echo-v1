@@ -14,6 +14,7 @@ from .db import init_db, get_session
 from .models import Brand, Probe, Mention, DraftEdit, Comment
 from .classify import classify
 from .drafts import generate_draft
+from .pipeline import classify_and_draft, recent_edits
 from .scoring import Snapshot, severity as calc_severity, phase as calc_phase
 from .hotwatch import rescore_mention
 from . import seed as seed_module
@@ -21,7 +22,6 @@ from . import seed as seed_module
 log = logging.getLogger(__name__)
 
 TIKHUB_TOKEN = os.getenv("TIKHUB_TOKEN", "")
-MAX_DRAFTS_PER_COLLECT = int(os.getenv("MAX_DRAFTS_PER_COLLECT", "50"))
 
 def _get_provider():
     if TIKHUB_TOKEN:
@@ -40,6 +40,9 @@ app.add_middleware(
 )
 
 
+_scheduler = None
+
+
 @app.on_event("startup")
 def on_startup():
     init_db()
@@ -48,6 +51,15 @@ def on_startup():
         seed_module.run(session)
     finally:
         session.close()
+
+    # Background auto-collect. Harmless when idle — only runs probes for brands
+    # with auto_collect=True (default off), so no surprise API usage.
+    global _scheduler
+    if os.getenv("ENABLE_SCHEDULER", "1") == "1" and _scheduler is None:
+        from .scheduler import Scheduler
+        _scheduler = Scheduler(_get_provider(), tick_sec=int(os.getenv("SCHEDULER_TICK_SEC", "60")))
+        _scheduler.start()
+        log.info("Auto-collect scheduler started (tick=%ss)", _scheduler._tick_sec)
 
 
 # ── Dependency ────────────────────────────────────────────────────────────────
@@ -114,6 +126,7 @@ def _brand_card(b: Brand) -> dict:
         "exclusions":    b.exclusions_list(),
         "competitors":   b.competitors_list(),
         "niche_keywords": b.niche_keywords_list(),
+        "auto_collect":  bool(b.auto_collect),
         "probes":        [{"id": p.id, "query": p.query, "kind": p.kind, "source": p.source, "platform": p.platform} for p in b.probes],
     }
 
@@ -130,27 +143,6 @@ def _rebuild_probes(session: Session, brand: Brand) -> None:
     for term in brand.niche_keywords_list():
         session.add(Probe(brand_id=brand.id, platform="tiktok", kind="keyword", source="niche", label=term, query=term))
     session.flush()
-
-
-def _opportunity_for(m: Mention) -> Optional[str]:
-    if m.source == "competitor":
-        who = m.competitor or "конкурента"
-        return f"Аудитория обсуждает {who} — момент предложить ваш бренд как альтернативу."
-    if m.source == "niche":
-        return "Тематическая аудитория без упоминания бренда — хороший момент зайти нативно."
-    return None
-
-
-def _recent_edits(session: Session, brand_id: int) -> list[dict]:
-    """Last few human edits to drafts — fed back to the LLM to mirror the team's style."""
-    rows = (
-        session.query(DraftEdit)
-        .filter_by(brand_id=brand_id)
-        .order_by(DraftEdit.created_at.desc())
-        .limit(5)
-        .all()
-    )
-    return [{"original": e.original, "edited": e.edited} for e in rows]
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -261,39 +253,9 @@ def _run_collect(brand_id: int) -> dict:
             except Exception as e:
                 log.warning("Probe '%s' failed: %s", probe.query, e)
 
-        # Classify unclassified mentions
-        unclassified = session.query(Mention).filter(
-            Mention.brand_id == brand_id,
-            Mention.category.is_(None),
-        ).all()
-
-        for m in unclassified:
-            result = classify(m.text, m.views, m.likes)
-            m.tone        = result.tone
-            m.category    = result.category
-            m.lane        = result.lane
-            m.confidence  = result.confidence
-            m.opportunity = _opportunity_for(m)
-            rescore_mention(session, m)
-        session.flush()
-
-        # Draft replies only for the highest-severity mentions to bound LLM
-        # cost/latency — one Claude call each, most important first.
-        tone_examples = brand.tone_examples_list()
-        recent_edits  = _recent_edits(session, brand_id)
-        drafted = 0
-        for m in sorted(unclassified, key=lambda x: x.severity or 0, reverse=True)[:MAX_DRAFTS_PER_COLLECT]:
-            dr = generate_draft(
-                m.text, m.category or "neutral", m.tone, m.confidence or 0.0,
-                tone_examples, recent_edits,
-                source=m.source, competitor=m.competitor, brand_name=brand.name,
-            )
-            if dr:
-                m.draft, m.draft_flag = dr.text, dr.flag
-                drafted += 1
-
-        session.commit()
-        return {"collected": total, "classified": len(unclassified), "drafted": drafted}
+        # Classify + draft (shared with the scheduler)
+        result = classify_and_draft(session, brand_id)
+        return {"collected": total, **result}
     finally:
         session.close()
 
@@ -305,6 +267,22 @@ def collect_brand(brand_id: int, background_tasks: BackgroundTasks, session: Ses
         raise HTTPException(404, "Brand not found")
     background_tasks.add_task(_run_collect, brand_id)
     return {"status": "collecting", "brand": b.name, "using_tikhub": bool(TIKHUB_TOKEN)}
+
+
+class AutoCollectBody(BaseModel):
+    enabled: bool
+
+@app.post("/brands/{brand_id}/autocollect")
+def set_autocollect(brand_id: int, body: AutoCollectBody, session: Session = Depends(db)):
+    b = session.get(Brand, brand_id)
+    if not b:
+        raise HTTPException(404, "Brand not found")
+    b.auto_collect = body.enabled
+    # Make sure probes exist so the scheduler has something to run
+    if body.enabled and not b.probes:
+        _rebuild_probes(session, b)
+    session.commit()
+    return {"auto_collect": b.auto_collect}
 
 
 # ── Inbox ─────────────────────────────────────────────────────────────────────
@@ -378,7 +356,7 @@ def regenerate_draft(mention_id: int, session: Session = Depends(db)):
     dr = generate_draft(
         m.text, m.category or "neutral", m.tone, m.confidence or 0.0,
         brand.tone_examples_list() if brand else [],
-        _recent_edits(session, m.brand_id),
+        recent_edits(session, m.brand_id),
         source=m.source, competitor=m.competitor,
         brand_name=brand.name if brand else None,
     )
@@ -427,7 +405,7 @@ def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
 
     brand         = session.get(Brand, mention.brand_id)
     tone_examples = brand.tone_examples_list() if brand else []
-    recent_edits  = _recent_edits(session, mention.brand_id)
+    edits         = recent_edits(session, mention.brand_id)
     existing      = {c.comment_id for c in mention.comment_rows}
 
     stored, drafted = 0, 0
@@ -441,7 +419,7 @@ def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
         want_draft = (mention.source != "brand") or (sentiment == "negative")
         if want_draft and drafted < MAX_COMMENT_DRAFTS:
             dr = generate_draft(
-                fc.text, "comment", sentiment, 0.9, tone_examples, recent_edits,
+                fc.text, "comment", sentiment, 0.9, tone_examples, edits,
                 source=mention.source, competitor=mention.competitor,
                 brand_name=brand.name if brand else None,
             )
@@ -509,7 +487,7 @@ def regenerate_comment(comment_id: int, session: Session = Depends(db)):
     dr = generate_draft(
         c.text, "comment", c.sentiment, 0.9,
         brand.tone_examples_list() if brand else [],
-        _recent_edits(session, mention.brand_id) if mention else [],
+        recent_edits(session, mention.brand_id) if mention else [],
         source=mention.source if mention else "brand",
         competitor=mention.competitor if mention else None,
         brand_name=brand.name if brand else None,

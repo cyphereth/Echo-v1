@@ -2,7 +2,7 @@ import logging, random, time, threading
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from .db import get_session
-from .models import Probe
+from .models import Brand, Probe
 
 log = logging.getLogger(__name__)
 INTERVAL_HOT    = 300
@@ -78,9 +78,16 @@ class Scheduler:
     def _run_once(self):
         session = get_session()
         try:
-            due = session.query(Probe).filter(
-                Probe.next_run_at <= datetime.now(timezone.utc)
-            ).all()
+            # Only probes of brands that opted into auto-collect are due.
+            due = (
+                session.query(Probe).join(Brand)
+                .filter(
+                    Probe.next_run_at <= datetime.now(timezone.utc),
+                    Brand.auto_collect.is_(True),
+                )
+                .all()
+            )
+            touched: set[int] = set()
             for probe in due:
                 self._bucket.acquire()
                 try:
@@ -90,7 +97,16 @@ class Scheduler:
                     probe.next_run_at  = datetime.now(timezone.utc) + timedelta(seconds=interval)
                     probe.interval_sec = interval
                     session.commit()
+                    if count:
+                        touched.add(probe.brand_id)
                 except Exception:
                     log.exception("Probe %s failed", probe.id)
+            # Classify + draft for brands that got new mentions this tick.
+            for brand_id in touched:
+                try:
+                    from .pipeline import classify_and_draft
+                    classify_and_draft(session, brand_id)
+                except Exception:
+                    log.exception("Pipeline failed for brand %s", brand_id)
         finally:
             session.close()

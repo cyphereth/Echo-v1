@@ -28,6 +28,12 @@ export const updateBrandConfig = (brandId, config) =>
     body: JSON.stringify(config),
   });
 
+export const setAutoCollect = (brandId, enabled) =>
+  request(`/brands/${brandId}/autocollect`, {
+    method: 'POST',
+    body: JSON.stringify({ enabled }),
+  });
+
 export const postAction = (mentionId, action, draft = null) =>
   request(`/mentions/${mentionId}/action`, {
     method: 'POST',

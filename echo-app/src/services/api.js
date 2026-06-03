@@ -42,10 +42,10 @@ export const getInbox        = (brandId)     => request(`/inbox?brand_id=${brand
 export const collectBrand    = (brandId)     => request(`/brands/${brandId}/collect`, { method: 'POST' });
 export const searchMentions  = (q)           => request(`/search?query=${encodeURIComponent(q)}`);
 
-export const createBrand = (name, keywords = [], hashtags = []) =>
+export const createBrand = (name, keywords = [], hashtags = [], competitors = [], niche_keywords = []) =>
   request('/onboarding', {
     method: 'POST',
-    body: JSON.stringify({ name, keywords, hashtags }),
+    body: JSON.stringify({ name, keywords, hashtags, competitors, niche_keywords }),
   });
 
 export const updateBrandConfig = (brandId, config) =>
@@ -83,3 +83,15 @@ export const commentAction = (commentId, action, draft = null) =>
 
 export const regenerateComment = (commentId) =>
   request(`/comments/${commentId}/regenerate`, { method: 'POST' });
+
+export const suggestBrand = (name) =>
+  request('/brands/suggest', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  });
+
+export const previewBrand = (keywords, platforms = ['tiktok', 'instagram']) =>
+  request('/brands/preview', {
+    method: 'POST',
+    body: JSON.stringify({ keywords, platforms }),
+  });

@@ -102,6 +102,7 @@ function CommentCard({ c, onApprove, onSkip, onRegenerate }) {
 export function DetailPanel({ item }) {
   const [filter, setFilter] = useState('all');
   const [comments, setComments] = useState(item.comments);
+  const [loadingComments, setLoadingComments] = useState(false);
   const isReal = typeof item.id === 'number';
   const laneColor = getLaneColor(item.lane);
   const pendingCount = comments.filter(c => (c.suggestedReply || c.pendingReply) && c.status === 'pending').length;
@@ -111,9 +112,14 @@ export function DetailPanel({ item }) {
     setComments(item.comments);
     if (!isReal) return;
     let alive = true;
+    setLoadingComments(true);
     api.getComments(item.id)
-      .then(data => { if (alive && Array.isArray(data) && data.length) setComments(data); })
-      .catch(() => { /* keep fallback */ });
+      .then(data => {
+        if (!alive) return;
+        if (Array.isArray(data) && data.length) setComments(data);
+      })
+      .catch(() => {})
+      .finally(() => { if (alive) setLoadingComments(false); });
     return () => { alive = false; };
   }, [item.id]);
 
@@ -217,6 +223,11 @@ export function DetailPanel({ item }) {
       </div>
 
       {/* Comments list */}
+      {loadingComments && (
+        <div style={{ padding: '12px 16px', fontSize: 12, color: 'var(--fg-4)' }}>
+          Загружаю комментарии…
+        </div>
+      )}
       <div className={styles.commentsList}>
         {filtered.map(c => (
           <CommentCard key={c.id} c={c} onApprove={handleApprove} onSkip={handleSkip}

@@ -381,6 +381,7 @@ def onboarding(body: OnboardingBody, user: User = Depends(current_user), session
         hashtags=json.dumps(body.hashtags),
         competitors=json.dumps(body.competitors),
         niche_keywords=json.dumps(body.niche_keywords),
+        auto_collect=True,
     )
     session.add(b)
     session.flush()

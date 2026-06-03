@@ -89,35 +89,67 @@ class TikHubProvider(SearchProvider):
 
     # ── Instagram ───────────────────────────────────────────────────────────
     def _search_instagram(self, query: str, cursor: Optional[str]) -> SearchPage:
-        # Instagram has no free-text post search — monitoring is hashtag-based.
-        # The brand/competitor/niche term is used as the hashtag keyword.
-        params = {"keyword": query.lstrip("#"), "feed_type": "top"}
-        # IG pagination tokens from this endpoint expire quickly and cause 400
-        # on retry — cap at 1 page per probe run to avoid stale token errors.
+        # Cap at 1 page — IG pagination tokens expire immediately and cause 400.
         if cursor:
             return SearchPage(posts=[], next_cursor=None)
+        kw = query.lstrip("#")
+        # Try v2 first; fall back to v3/general_search on 400.
         try:
             resp = httpx.get(
                 f"{BASE_URL}/api/v1/instagram/v2/fetch_hashtag_posts",
                 headers=self._headers,
-                params=params,
+                params={"keyword": kw, "feed_type": "top"},
+                timeout=25,
+            )
+            if resp.status_code == 400:
+                raise httpx.HTTPStatusError("v2 400", request=resp.request, response=resp)
+            resp.raise_for_status()
+            body  = resp.json()
+            data  = body.get("data", {}) or {}
+            items = (data.get("data", {}) or {}).get("items", []) or []
+            posts = [p for item in items if (p := self._safe_parse_ig(item)) is not None]
+            return SearchPage(posts=posts, next_cursor=None)
+        except httpx.HTTPStatusError:
+            pass  # fall through to v3
+
+        # v3/general_search fallback
+        try:
+            resp = httpx.get(
+                f"{BASE_URL}/api/v1/instagram/v3/general_search",
+                headers=self._headers,
+                params={"query": kw, "enable_metadata": "True"},
                 timeout=25,
             )
             resp.raise_for_status()
-        except httpx.HTTPStatusError as e:
-            raise RuntimeError(f"TikHub IG error {e.response.status_code}: {e.response.text[:200]}")
+        except Exception as e:
+            log.warning("IG v3 fallback failed for %r: %s", kw, e)
+            return SearchPage(posts=[], next_cursor=None)
 
-        body  = resp.json()
-        data  = body.get("data", {}) or {}
-        items = (data.get("data", {}) or {}).get("items", []) or []
-        posts = []
-        for item in items:
-            try:
-                posts.append(_parse_ig_post(item))
-            except Exception:
-                continue
-        next_cursor = data.get("pagination_token") or None
-        return SearchPage(posts=posts, next_cursor=next_cursor)
+        body       = resp.json()
+        data       = body.get("data", {}) or {}
+        media_grid = data.get("media_grid", {}) or {}
+        sections   = media_grid.get("sections", [])
+        items = []
+        for sec in sections:
+            lc = sec.get("layout_content", {}) or {}
+            for mw in lc.get("medias", []):
+                items.append(mw.get("media", mw))
+        posts = [p for item in items if (p := self._safe_parse_ig_v3(item)) is not None]
+        return SearchPage(posts=posts, next_cursor=None)
+
+    def _safe_parse_ig(self, item: dict):
+        """Parse a v2 IG item dict into a Post, return None on any error."""
+        try:
+            return _parse_ig_post(item)
+        except Exception:
+            return None
+
+    def _safe_parse_ig_v3(self, item: dict):
+        """Parse a v3/general_search media item into a Post, return None on any error."""
+        try:
+            return _parse_ig_post_v3(item)
+        except Exception:
+            return None
 
     def _comments_instagram(self, post_id: str, cursor: Optional[str]) -> list[Comment]:
         # post_id is the IG shortcode (see _parse_ig_post) — also accepted as a URL.
@@ -212,6 +244,32 @@ def _parse_ig_post(item: dict) -> Post:
         views=item.get("play_count") or item.get("view_count") or 0,
         comments=item.get("comment_count") or 0,
         shares=0,            # Instagram API does not expose share counts
+        sound_id=None,
+    )
+
+
+def _parse_ig_post_v3(item: dict) -> Post:
+    """Parse a v3/general_search media item (different field layout than v2)."""
+    user    = item.get("user", {}) or {}
+    caption = item.get("caption") or {}
+    if isinstance(caption, dict):
+        text = caption.get("text", "") or ""
+    else:
+        text = str(caption) if caption else ""
+    hashtags = [w.lstrip("#") for w in text.split() if w.startswith("#")]
+    ts = item.get("taken_at") or 0
+    return Post(
+        post_id=str(item.get("code") or item.get("pk") or item.get("id", "")),
+        platform="instagram",
+        author=user.get("username") or str(user.get("pk", "")),
+        followers=user.get("follower_count") or 0,
+        text=text,
+        hashtags=hashtags,
+        created_at=datetime.fromtimestamp(ts, tz=timezone.utc) if ts else _now(),
+        likes=item.get("like_count") or 0,
+        views=item.get("play_count") or item.get("view_count") or 0,
+        comments=item.get("comment_count") or 0,
+        shares=0,
         sound_id=None,
     )
 

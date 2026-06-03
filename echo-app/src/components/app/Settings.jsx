@@ -123,26 +123,26 @@ function SaveBar({ onSave, onCollect, saved, saving, collecting, showCollect }) 
 
 // ── Main component ───────────────────────────────────────────────────────────
 
-export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting }) {
+export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting, onOpenWizard }) {
   const [tab, setTab] = useState('brand');
 
   // Brand fields
-  const [brandName,      setBrandName]      = useState('PapaPizza');
-  const [brandNiche,     setBrandNiche]     = useState('Доставка еды, пиццерия');
-  const [brandInstagram, setBrandInstagram] = useState('@papapizza_ru');
-  const [brandTiktok,    setBrandTiktok]    = useState('@papapizza');
-  const [brandWebsite,   setBrandWebsite]   = useState('papapizza.ru');
+  const [brandName,      setBrandName]      = useState('');
+  const [brandNiche,     setBrandNiche]     = useState('');
+  const [brandInstagram, setBrandInstagram] = useState('');
+  const [brandTiktok,    setBrandTiktok]    = useState('');
+  const [brandWebsite,   setBrandWebsite]   = useState('');
 
   // Keywords
-  const [keywords,   setKeywords]   = useState(['папапицца', 'papapizza', 'papa pizza', 'пицца доставка мск']);
-  const [hashtags,   setHashtags]   = useState(['#папапицца', '#papapizza', '#пиццамосква']);
-  const [exclusions, setExclusions] = useState(['домино', 'додо', 'рецепт пицца']);
+  const [keywords,   setKeywords]   = useState([]);
+  const [hashtags,   setHashtags]   = useState([]);
+  const [exclusions, setExclusions] = useState([]);
 
   // Competitors
-  const [competitors, setCompetitors] = useState(['DoDo Pizza', 'Dominos', 'Pizza Hut']);
+  const [competitors, setCompetitors] = useState([]);
 
   // Niche search terms
-  const [niche, setNiche] = useState(['доставка пиццы москва', 'лучшая пицца']);
+  const [niche, setNiche] = useState([]);
 
   // Platforms
   const [platforms, setPlatforms] = useState({ instagram: true, tiktok: true, telegram: false });
@@ -281,6 +281,21 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting }) {
 
         {tab === 'keywords' && (
           <>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>Ключевые слова, конкуренты и ниша</span>
+              <button
+                onClick={onOpenWizard}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '6px 12px', borderRadius: 'var(--r-md)',
+                  background: 'var(--surface-3)', border: '1px solid var(--line-2)',
+                  color: 'var(--fg-1)', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                  fontFamily: 'var(--font-sans)',
+                }}
+              >
+                ✨ AI-заполнение
+              </button>
+            </div>
             <Section
               title="Ключевые слова"
               sub="Echo будет искать посты и комментарии, содержащие эти слова. Добавьте названия бренда, продуктов, слоганы — всё что люди могут написать о вас.">

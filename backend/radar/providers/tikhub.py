@@ -92,8 +92,10 @@ class TikHubProvider(SearchProvider):
         # Instagram has no free-text post search — monitoring is hashtag-based.
         # The brand/competitor/niche term is used as the hashtag keyword.
         params = {"keyword": query.lstrip("#"), "feed_type": "top"}
+        # IG pagination tokens from this endpoint expire quickly and cause 400
+        # on retry — cap at 1 page per probe run to avoid stale token errors.
         if cursor:
-            params["pagination_token"] = cursor
+            return SearchPage(posts=[], next_cursor=None)
         try:
             resp = httpx.get(
                 f"{BASE_URL}/api/v1/instagram/v2/fetch_hashtag_posts",

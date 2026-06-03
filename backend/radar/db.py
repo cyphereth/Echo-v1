@@ -5,7 +5,23 @@ from .models import Base
 
 _DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///echo_radar.db")
 _connect_args = {"check_same_thread": False} if _DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(_DATABASE_URL, connect_args=_connect_args)
+engine = create_engine(
+    _DATABASE_URL,
+    connect_args=_connect_args,
+    # WAL mode: readers don't block writers and writers don't block readers.
+    # Prevents "database is locked" when background collect runs concurrently.
+    pool_pre_ping=True,
+)
+
+
+def _enable_wal(connection, _record):
+    if _DATABASE_URL.startswith("sqlite"):
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA busy_timeout=5000")
+
+
+from sqlalchemy import event
+event.listen(engine, "connect", _enable_wal)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 # Columns added after the initial schema shipped. create_all() never ALTERs an

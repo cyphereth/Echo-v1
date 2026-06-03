@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json, logging, os
-from datetime import datetime, timezone
+from collections import defaultdict
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 load_dotenv()
 from typing import Optional
@@ -548,3 +549,104 @@ def search(query: str, session: Session = Depends(db)):
         .all()
     )
     return [_mention_card(m) for m in results]
+
+
+# ── Analytics ─────────────────────────────────────────────────────────────────
+
+WEEKDAYS_RU    = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+PLATFORM_NAMES = {"tiktok": "TikTok", "instagram": "Instagram", "telegram": "Telegram"}
+
+
+def _aware(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+@app.get("/analytics")
+def analytics(brand_id: int, session: Session = Depends(db)):
+    mentions = (
+        session.query(Mention)
+        .filter(Mention.brand_id == brand_id, Mention.status != "rejected")
+        .all()
+    )
+    now  = datetime.now(timezone.utc)
+    wk   = now - timedelta(days=7)
+    prev = now - timedelta(days=14)
+    created = lambda m: _aware(m.created_at) or now
+
+    last7 = [m for m in mentions if created(m) >= wk]
+    prev7 = [m for m in mentions if prev <= created(m) < wk]
+    neg7, neg_prev = [m for m in last7 if m.tone == "negative"], [m for m in prev7 if m.tone == "negative"]
+
+    sent_comments = (
+        session.query(Comment).join(Mention)
+        .filter(Mention.brand_id == brand_id, Comment.status == "sent").count()
+    )
+    sent_total = sum(1 for m in mentions if m.status == "sent") + sent_comments
+    hot = sum(1 for m in mentions if m.is_hot)
+
+    def _d(cur, prev, good_up=True):
+        diff = cur - prev
+        return {"delta": f"{'+' if diff >= 0 else ''}{diff}", "up": (diff >= 0) == good_up}
+
+    stats = [
+        {"key": "total", "label": "Упоминаний за 7 дней", "value": str(len(last7)), **_d(len(last7), len(prev7))},
+        {"key": "neg",   "label": "Негативных",           "value": str(len(neg7)), **_d(len(neg7), len(neg_prev), good_up=False)},
+        {"key": "sent",  "label": "Ответов отправлено",   "value": str(sent_total), "delta": f"+{sent_total}", "up": True},
+        {"key": "hot",   "label": "Горячих сейчас",       "value": str(hot), "delta": f"{hot}", "up": hot == 0},
+    ]
+
+    # Sentiment by day (oldest → newest)
+    days = [(now - timedelta(days=i)).date() for i in range(6, -1, -1)]
+    series = {"days": [], "neg": [], "pos": [], "neu": []}
+    for d in days:
+        on_day = [m for m in mentions if created(m).date() == d]
+        series["days"].append(WEEKDAYS_RU[d.weekday()])
+        series["neg"].append(sum(1 for m in on_day if m.tone == "negative"))
+        series["pos"].append(sum(1 for m in on_day if m.tone == "positive"))
+        series["neu"].append(sum(1 for m in on_day if m.tone == "neutral"))
+
+    # Platform split
+    pcounts: dict[str, int] = defaultdict(int)
+    for m in mentions:
+        pcounts[m.platform] += 1
+    ptotal = sum(pcounts.values()) or 1
+    platforms = [
+        {"key": p, "name": PLATFORM_NAMES.get(p, p.title()), "pct": round(c * 100 / ptotal)}
+        for p, c in sorted(pcounts.items(), key=lambda x: -x[1])
+    ]
+
+    # Competitor breakdown
+    comp: dict[str, dict] = defaultdict(lambda: {"mentions": 0, "neg": 0})
+    for m in mentions:
+        if m.source == "competitor" and m.competitor:
+            comp[m.competitor]["mentions"] += 1
+            if m.tone == "negative":
+                comp[m.competitor]["neg"] += 1
+    competitors = []
+    for name, d in sorted(comp.items(), key=lambda x: -x[1]["mentions"]):
+        negpct = round(d["neg"] * 100 / d["mentions"]) if d["mentions"] else 0
+        competitors.append({"name": name, "mentions": d["mentions"], "neg": negpct,
+                            "trend": "up" if negpct >= 50 else "down"})
+
+    # Top negative brand mentions
+    top = sorted(
+        [m for m in mentions if m.source == "brand" and m.tone == "negative"],
+        key=lambda m: -(m.severity or 0),
+    )[:4]
+    top_negative = [{
+        "id": m.id,
+        "title": (m.text[:80] + "…") if len(m.text) > 80 else m.text,
+        "author": m.author, "platform": m.platform, "views": m.views,
+        "severity": round(m.severity or 0), "negativeCommentPct": 72,
+    } for m in top]
+
+    return {
+        "has_data": len(mentions) > 0,
+        "stats": stats,
+        "series": series,
+        "platforms": platforms,
+        "competitors": competitors,
+        "top_negative": top_negative,
+    }

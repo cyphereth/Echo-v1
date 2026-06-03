@@ -171,7 +171,7 @@ export default function AppPage() {
         ) : screen === 'queue' ? (
           <div className={styles.workspace}><QueueScreen items={feedItems} /></div>
         ) : screen === 'analytics' ? (
-          <div className={styles.workspace}><AnalyticsScreen /></div>
+          <div className={styles.workspace}><AnalyticsScreen brandId={brand?.id} /></div>
         ) : (
           <div className={styles.workspace}>
             <SettingsScreen

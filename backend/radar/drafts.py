@@ -78,14 +78,20 @@ def generate_draft(
             },
             json={
                 "model": MODEL_DRAFT,
-                "max_tokens": 512,
+                "max_tokens": 200,
                 "system": system,
                 "messages": [{"role": "user", "content": user}],
             },
-            timeout=30,
+            timeout=60,
         )
         resp.raise_for_status()
-        text = resp.json()["content"][0]["text"].strip()
+        # Some API proxies return an extended thinking block before the text
+        # block; find the first content item that actually has a "text" key.
+        content_blocks = resp.json().get("content", [])
+        text_block = next((b for b in content_blocks if b.get("type") == "text"), None)
+        if not text_block:
+            return None
+        text = text_block["text"].strip()
         flag = None
         if text.startswith("[HUMOR]"):
             text, flag = text[7:].strip(), HUMOR_FLAG

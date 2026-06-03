@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from .db import init_db, get_session
 from .models import Brand, Probe, Mention, DraftEdit
 from .classify import classify
+from .drafts import generate_draft
 from .scoring import Snapshot, severity as calc_severity, phase as calc_phase
 from .hotwatch import rescore_mention
 from . import seed as seed_module
@@ -19,6 +20,7 @@ from . import seed as seed_module
 log = logging.getLogger(__name__)
 
 TIKHUB_TOKEN = os.getenv("TIKHUB_TOKEN", "")
+MAX_DRAFTS_PER_COLLECT = int(os.getenv("MAX_DRAFTS_PER_COLLECT", "50"))
 
 def _get_provider():
     if TIKHUB_TOKEN:
@@ -136,6 +138,18 @@ def _opportunity_for(m: Mention) -> Optional[str]:
     if m.source == "niche":
         return "Тематическая аудитория без упоминания бренда — хороший момент зайти нативно."
     return None
+
+
+def _recent_edits(session: Session, brand_id: int) -> list[dict]:
+    """Last few human edits to drafts — fed back to the LLM to mirror the team's style."""
+    rows = (
+        session.query(DraftEdit)
+        .filter_by(brand_id=brand_id)
+        .order_by(DraftEdit.created_at.desc())
+        .limit(5)
+        .all()
+    )
+    return [{"original": e.original, "edited": e.edited} for e in rows]
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -260,9 +274,25 @@ def _run_collect(brand_id: int) -> dict:
             m.confidence  = result.confidence
             m.opportunity = _opportunity_for(m)
             rescore_mention(session, m)
+        session.flush()
+
+        # Draft replies only for the highest-severity mentions to bound LLM
+        # cost/latency — one Claude call each, most important first.
+        tone_examples = brand.tone_examples_list()
+        recent_edits  = _recent_edits(session, brand_id)
+        drafted = 0
+        for m in sorted(unclassified, key=lambda x: x.severity or 0, reverse=True)[:MAX_DRAFTS_PER_COLLECT]:
+            dr = generate_draft(
+                m.text, m.category or "neutral", m.tone, m.confidence or 0.0,
+                tone_examples, recent_edits,
+                source=m.source, competitor=m.competitor, brand_name=brand.name,
+            )
+            if dr:
+                m.draft, m.draft_flag = dr.text, dr.flag
+                drafted += 1
 
         session.commit()
-        return {"collected": total, "classified": len(unclassified)}
+        return {"collected": total, "classified": len(unclassified), "drafted": drafted}
     finally:
         session.close()
 
@@ -336,6 +366,26 @@ def post_action(mention_id: int, body: ActionBody, session: Session = Depends(db
 
     session.commit()
     return {"ok": True}
+
+
+@app.post("/mentions/{mention_id}/regenerate")
+def regenerate_draft(mention_id: int, session: Session = Depends(db)):
+    m = session.get(Mention, mention_id)
+    if not m:
+        raise HTTPException(404, "Mention not found")
+    brand = session.get(Brand, m.brand_id)
+    dr = generate_draft(
+        m.text, m.category or "neutral", m.tone, m.confidence or 0.0,
+        brand.tone_examples_list() if brand else [],
+        _recent_edits(session, m.brand_id),
+        source=m.source, competitor=m.competitor,
+        brand_name=brand.name if brand else None,
+    )
+    if not dr:
+        raise HTTPException(503, "Draft generation unavailable — set LLM_API_KEY in backend/.env")
+    m.draft, m.draft_flag = dr.text, dr.flag
+    session.commit()
+    return {"draft": m.draft, "draft_flag": m.draft_flag}
 
 
 # ── Debug ─────────────────────────────────────────────────────────────────────

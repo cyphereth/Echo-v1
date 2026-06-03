@@ -33,3 +33,7 @@ export const postAction = (mentionId, action, draft = null) =>
     method: 'POST',
     body: JSON.stringify({ action, draft }),
   });
+
+export const getMention      = (mentionId) => request(`/mentions/${mentionId}`);
+export const regenerateDraft = (mentionId) =>
+  request(`/mentions/${mentionId}/regenerate`, { method: 'POST' });

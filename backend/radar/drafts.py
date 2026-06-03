@@ -13,29 +13,58 @@ class DraftResult:
     text: str
     flag: Optional[str]
 
+
+def _system_prompt(source: str, brand_name: Optional[str], tone_examples: list[str]) -> str:
+    brand = brand_name or "бренд"
+    if source == "competitor":
+        system = (
+            f"You write short, friendly social-media replies on behalf of {brand}. "
+            f"The post criticizes a COMPETITOR. Gently, without bashing the competitor, "
+            f"invite the author to try {brand} as an alternative. Reply in Russian, 1-3 sentences, "
+            f"natural and non-spammy. Include a soft call to action."
+        )
+    elif source == "niche":
+        system = (
+            f"You write short, friendly social-media replies on behalf of {brand}. "
+            f"The post is about the niche but does NOT mention {brand}. Add value to the discussion "
+            f"and mention {brand} naturally where relevant. Reply in Russian, 1-3 sentences, non-spammy."
+        )
+    else:
+        system = (
+            f"You are a brand reputation manager for {brand} writing response drafts in Russian. "
+            f"Always include a concrete next step. Be concise (2-4 sentences)."
+        )
+    if tone_examples:
+        system += "\nMatch this brand voice. Examples:\n" + "\n".join(f"- {e}" for e in tone_examples[:5])
+    return system
+
+
 def generate_draft(
-    post_text:    str,
-    category:     str,
-    tone:         str,
-    confidence:   float,
+    post_text:     str,
+    category:      str,
+    tone:          str,
+    confidence:    float,
     tone_examples: list[str],
-    recent_edits: list[dict],
+    recent_edits:  list[dict],
+    source:        str = "brand",
+    competitor:    Optional[str] = None,
+    brand_name:    Optional[str] = None,
 ) -> Optional[DraftResult]:
-    """Returns None if no LLM key, low confidence, or error."""
-    if not LLM_API_KEY or confidence < CONFIDENCE_THRESHOLD:
+    """Returns None if no LLM key, (brand-lane) low confidence, or error."""
+    if not LLM_API_KEY:
+        return None
+    # Brand-lane drafts are gated on classifier confidence; competitor/niche
+    # engagement is opportunistic and always worth a draft.
+    if source == "brand" and confidence < CONFIDENCE_THRESHOLD:
         return None
     try:
         import httpx
-        from .classify import MODEL_EXPENSIVE
-        system = (
-            "You are a brand reputation manager writing response drafts in Russian. "
-            "Always include a concrete next step. Be concise (2-4 sentences)."
-        )
-        if tone_examples:
-            system += "\nExamples:\n" + "\n".join(f"- {e}" for e in tone_examples[:5])
-        user = f"Post (category={category}, tone={tone}):\n{post_text}\n\n"
+        from .classify import MODEL_DRAFT
+        system = _system_prompt(source, brand_name, tone_examples)
+        ctx = f" about {competitor}" if competitor else ""
+        user = f"Post (source={source}{ctx}, category={category}, tone={tone}):\n{post_text}\n\n"
         if recent_edits:
-            user += "Recent edits:\n" + "".join(
+            user += "How the team edited past drafts (mirror this style):\n" + "".join(
                 f"  Original: {e['original']}\n  Edited: {e['edited']}\n"
                 for e in recent_edits[-5:]
             )
@@ -48,7 +77,7 @@ def generate_draft(
                 "content-type": "application/json",
             },
             json={
-                "model": MODEL_EXPENSIVE,
+                "model": MODEL_DRAFT,
                 "max_tokens": 512,
                 "system": system,
                 "messages": [{"role": "user", "content": user}],

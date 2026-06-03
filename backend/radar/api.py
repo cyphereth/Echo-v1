@@ -270,6 +270,66 @@ def update_brand_config(brand_id: int, body: BrandConfigBody, user: User = Depen
     return _brand_card(b)
 
 
+# ── AI Brand Suggest ──────────────────────────────────────────────────────────
+
+class SuggestBody(BaseModel):
+    name: str
+
+@app.post("/brands/suggest")
+def suggest_brand(body: SuggestBody, user: User = Depends(current_user)):
+    """Call Claude to suggest keywords/hashtags/competitors/niche for a brand name."""
+    import httpx
+    from .drafts import LLM_API_KEY, LLM_API_URL
+    if not LLM_API_KEY:
+        raise HTTPException(503, "LLM_API_KEY not configured")
+
+    system = (
+        "Ты эксперт по SMM и мониторингу брендов в русскоязычных соцсетях (TikTok, Instagram). "
+        "Отвечай ТОЛЬКО валидным JSON без пояснений и markdown-блоков."
+    )
+    user_msg = (
+        f'Для бренда "{body.name}" подбери для мониторинга в TikTok и Instagram: '
+        f'5-7 ключевых слов (на русском и латинице, вариации написания бренда), '
+        f'3-5 хэштегов (с #), '
+        f'3-5 прямых конкурентов (только названия компаний), '
+        f'3-5 нишевых терминов для мониторинга тематики. '
+        f'Ответ строго в JSON: {{"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[]}}'
+    )
+
+    def _call():
+        resp = httpx.post(
+            LLM_API_URL,
+            headers={"x-api-key": LLM_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            json={"model": "claude-haiku-4-5-20251001", "max_tokens": 300,
+                  "system": system, "messages": [{"role": "user", "content": user_msg}]},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        blocks = resp.json().get("content", [])
+        text = next((b["text"] for b in blocks if b.get("type") == "text"), "")
+        text = text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        return json.loads(text)
+
+    try:
+        data = _call()
+    except (json.JSONDecodeError, KeyError):
+        try:
+            data = _call()
+        except Exception as e:
+            log.warning("suggest_brand retry failed: %s", e)
+            raise HTTPException(502, "AI suggestion failed")
+    except Exception as e:
+        log.warning("suggest_brand failed: %s", e)
+        raise HTTPException(502, "AI suggestion failed")
+
+    return {
+        "keywords":       data.get("keywords", []),
+        "hashtags":       data.get("hashtags", []),
+        "competitors":    data.get("competitors", []),
+        "niche_keywords": data.get("niche_keywords", []),
+    }
+
+
 class OnboardingBody(BaseModel):
     name:           str
     keywords:       list[str] = []

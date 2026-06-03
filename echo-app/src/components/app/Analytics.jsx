@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { Icon } from '../shared/icons';
-import { FEED_ITEMS } from '../../data/mock';
 import * as api from '../../services/api';
 import styles from './analytics.module.css';
 
@@ -122,7 +121,7 @@ export function AnalyticsScreen({ brandId }) {
   const competitors = data?.competitors?.length ? data.competitors  : COMPETITORS_MOCK;
   const topVideos = data?.top_negative?.length
     ? data.top_negative
-    : [...FEED_ITEMS].filter(v => v.lane === 'brand').sort((a, b) => b.severity - a.severity).slice(0, 4);
+    : [];
 
   return (
     <div className={styles.page}>

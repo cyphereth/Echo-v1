@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Icon } from '../shared/icons';
-import { FEED_ITEMS, getLaneColor, getLaneLabel } from '../../data/mock';
+import { getLaneColor, getLaneLabel } from '../../data/mock';
 import styles from './queue.module.css';
 
 function fmtNum(n) {
@@ -118,7 +118,7 @@ export function QueueScreen({ items }) {
   const [sortBy, setSortBy]                 = useState('date');
   const [states, setStates]                 = useState({});
 
-  const raw    = buildQueue(items ?? FEED_ITEMS);
+  const raw    = buildQueue(items ?? []);
   const onApprove = (id) => setStates(s => ({ ...s, [id]: 'approved' }));
   const onSkip    = (id) => setStates(s => ({ ...s, [id]: 'skipped' }));
 

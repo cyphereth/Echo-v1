@@ -6,7 +6,6 @@ import { DetailPanel, EmptyDetail } from '../components/app/Detail';
 import { QueueScreen } from '../components/app/Queue';
 import { AnalyticsScreen } from '../components/app/Analytics';
 import { SettingsScreen } from '../components/app/Settings';
-import { FEED_ITEMS } from '../data/mock';
 import * as api from '../services/api';
 import styles from '../components/app/shell.module.css';
 
@@ -65,7 +64,7 @@ export default function AppPage() {
   const [selectedId, setSelectedId] = useState(null);
   const [brand, setBrand]           = useState(null);
   const [brands, setBrands]         = useState([]);
-  const [feedItems, setFeedItems]   = useState(FEED_ITEMS);
+  const [feedItems, setFeedItems]   = useState([]);
   const [usingReal, setUsingReal]   = useState(false);
   const [collecting, setCollecting] = useState(false);
   const pollRef                     = useRef(null);
@@ -105,7 +104,6 @@ export default function AppPage() {
     setBrand(b);
     setSelectedId(null);
     setUsingReal(false);
-    setFeedItems(FEED_ITEMS);
     loadFeed(b.id);
     setScreen('feed');
   }

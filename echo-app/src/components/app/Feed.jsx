@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Icon } from '../shared/icons';
-import { FEED_ITEMS, getLaneColor } from '../../data/mock';
+import { getLaneColor } from '../../data/mock';
 import styles from './feed.module.css';
 
 const TABS = [
@@ -82,7 +82,7 @@ function FeedCard({ item, active, onClick }) {
   );
 }
 
-export function Feed({ items: allItems = FEED_ITEMS, selectedId, onSelect }) {
+export function Feed({ items: allItems = [], selectedId, onSelect }) {
   const [tab, setTab] = useState('brand');
   const items = allItems.filter(i => i.lane === tab);
 

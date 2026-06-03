@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Icon } from '../shared/icons';
 import { getLaneColor, getLaneLabel } from '../../data/mock';
+import * as api from '../../services/api';
 import styles from './detail.module.css';
 
 function fmtNum(n) {
@@ -17,10 +18,11 @@ function SentimentBadge({ sentiment }) {
   return <span className={styles.sentBadge} style={{ background: 'var(--surface-3)', color: 'var(--fg-3)' }}>нейтрал</span>;
 }
 
-function CommentCard({ c, onApprove, onSkip }) {
+function CommentCard({ c, onApprove, onSkip, onRegenerate }) {
   const [draft, setDraft]   = useState(c.suggestedReply || c.pendingReply || '');
   const [done, setDone]     = useState(c.status !== 'pending');
   const [editing, setEditing] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const hasSuggestion = !!(c.suggestedReply || c.pendingReply);
 
   function approve() {
@@ -30,6 +32,13 @@ function CommentCard({ c, onApprove, onSkip }) {
   function skip() {
     onSkip(c.id);
     setDone(true);
+  }
+  async function regenerate() {
+    if (!onRegenerate) return;
+    setRegenerating(true);
+    const next = await onRegenerate(c.id);
+    if (next) setDraft(next);
+    setRegenerating(false);
   }
 
   return (
@@ -61,9 +70,9 @@ function CommentCard({ c, onApprove, onSkip }) {
               autoFocus
             />
           ) : (
-            <p style={{ fontSize: 13, color: 'var(--fg-1)', lineHeight: 1.55, cursor: 'text' }}
+            <p style={{ fontSize: 13, color: regenerating ? 'var(--fg-3)' : 'var(--fg-1)', lineHeight: 1.55, cursor: 'text' }}
               onClick={() => setEditing(true)}>
-              {draft}
+              {regenerating ? 'Генерирую черновик…' : draft}
             </p>
           )}
           <div className={styles.replyActions}>
@@ -73,6 +82,11 @@ function CommentCard({ c, onApprove, onSkip }) {
             {!editing && (
               <button className={`${styles.btn} ${styles.btnGhost}`} onClick={() => setEditing(true)}>
                 <Icon name="edit" size={13} /> Изменить
+              </button>
+            )}
+            {onRegenerate && (
+              <button className={`${styles.btn} ${styles.btnGhost}`} onClick={regenerate} disabled={regenerating}>
+                <Icon name="sparkles" size={13} /> {regenerating ? '…' : 'Заново'}
               </button>
             )}
             <button className={`${styles.btn} ${styles.btnPrimary}`} onClick={approve}>
@@ -85,17 +99,39 @@ function CommentCard({ c, onApprove, onSkip }) {
   );
 }
 
-export function DetailPanel({ item, onCommentAction }) {
+export function DetailPanel({ item }) {
   const [filter, setFilter] = useState('all');
   const [comments, setComments] = useState(item.comments);
+  const isReal = typeof item.id === 'number';
   const laneColor = getLaneColor(item.lane);
   const pendingCount = comments.filter(c => (c.suggestedReply || c.pendingReply) && c.status === 'pending').length;
 
+  // Load real comments from the backend for real mentions (numeric id).
+  useEffect(() => {
+    setComments(item.comments);
+    if (!isReal) return;
+    let alive = true;
+    api.getComments(item.id)
+      .then(data => { if (alive && Array.isArray(data) && data.length) setComments(data); })
+      .catch(() => { /* keep fallback */ });
+    return () => { alive = false; };
+  }, [item.id]);
+
   function handleApprove(id, draft) {
-    setComments(cs => cs.map(c => c.id === id ? { ...c, status: 'approved', draft } : c));
+    setComments(cs => cs.map(c => c.id === id ? { ...c, status: 'approved', draft, suggestedReply: draft } : c));
+    if (isReal) api.commentAction(id, 'approve', draft).catch(() => {});
   }
   function handleSkip(id) {
     setComments(cs => cs.map(c => c.id === id ? { ...c, status: 'skipped' } : c));
+    if (isReal) api.commentAction(id, 'skip').catch(() => {});
+  }
+  async function handleRegenerate(id) {
+    if (!isReal) return null;
+    try {
+      const { draft } = await api.regenerateComment(id);
+      setComments(cs => cs.map(c => c.id === id ? { ...c, suggestedReply: draft } : c));
+      return draft;
+    } catch { return null; }
   }
 
   const filtered = comments.filter(c => {
@@ -183,7 +219,8 @@ export function DetailPanel({ item, onCommentAction }) {
       {/* Comments list */}
       <div className={styles.commentsList}>
         {filtered.map(c => (
-          <CommentCard key={c.id} c={c} onApprove={handleApprove} onSkip={handleSkip} />
+          <CommentCard key={c.id} c={c} onApprove={handleApprove} onSkip={handleSkip}
+            onRegenerate={isReal ? handleRegenerate : undefined} />
         ))}
       </div>
 
@@ -194,14 +231,18 @@ export function DetailPanel({ item, onCommentAction }) {
             <strong style={{ color: 'var(--fg-1)' }}>{pendingCount}</strong> ответов ждут одобрения
           </span>
           <button className={`${styles.btn} ${styles.btnGhost}`}
-            onClick={() => setComments(cs => cs.map(c => ({ ...c, status: 'skipped' })))}>
+            onClick={() => {
+              if (isReal) comments.forEach(c => c.status === 'pending' && api.commentAction(c.id, 'skip').catch(() => {}));
+              setComments(cs => cs.map(c => c.status === 'pending' ? { ...c, status: 'skipped' } : c));
+            }}>
             Пропустить все
           </button>
           <button className={`${styles.btn} ${styles.btnSuccess}`}
-            onClick={() => setComments(cs => cs.map(c =>
-              (c.suggestedReply || c.pendingReply) && c.status === 'pending'
-                ? { ...c, status: 'approved' } : c
-            ))}>
+            onClick={() => {
+              const isPending = c => (c.suggestedReply || c.pendingReply) && c.status === 'pending';
+              if (isReal) comments.forEach(c => isPending(c) && api.commentAction(c.id, 'approve', c.suggestedReply || c.pendingReply).catch(() => {}));
+              setComments(cs => cs.map(c => isPending(c) ? { ...c, status: 'approved' } : c));
+            }}>
             <Icon name="checkCircle" size={14} /> Одобрить все
           </button>
         </div>

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .db import init_db, get_session
-from .models import Brand, Probe, Mention, DraftEdit
+from .models import Brand, Probe, Mention, DraftEdit, Comment
 from .classify import classify
 from .drafts import generate_draft
 from .scoring import Snapshot, severity as calc_severity, phase as calc_phase
@@ -386,6 +386,138 @@ def regenerate_draft(mention_id: int, session: Session = Depends(db)):
     m.draft, m.draft_flag = dr.text, dr.flag
     session.commit()
     return {"draft": m.draft, "draft_flag": m.draft_flag}
+
+
+# ── Comments ──────────────────────────────────────────────────────────────────
+
+MAX_COMMENT_DRAFTS = int(os.getenv("MAX_COMMENT_DRAFTS", "10"))
+_STATUS_OUT = {"sent": "approved", "skipped": "skipped", "pending": "pending"}
+
+
+def _minutes_ago(dt: datetime) -> int:
+    if dt is None:
+        return 0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return max(0, int((datetime.now(timezone.utc) - dt).total_seconds() // 60))
+
+
+def _comment_card(c: Comment) -> dict:
+    return {
+        "id":             c.id,
+        "author":         c.author,
+        "followers":      c.followers,
+        "text":           c.text,
+        "sentiment":      c.sentiment,
+        "likes":          c.likes,
+        "minsAgo":        _minutes_ago(c.created_at),
+        "suggestedReply": c.draft,
+        "draft_flag":     c.draft_flag,
+        "status":         _STATUS_OUT.get(c.status, "pending"),
+    }
+
+
+def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
+    """Pull comments from the provider, classify sentiment, draft relevant replies, store."""
+    provider = _get_provider()
+    fetched  = provider.fetch_comments(mention.post_id, None)
+    if not fetched:
+        return 0
+
+    brand         = session.get(Brand, mention.brand_id)
+    tone_examples = brand.tone_examples_list() if brand else []
+    recent_edits  = _recent_edits(session, mention.brand_id)
+    existing      = {c.comment_id for c in mention.comment_rows}
+
+    stored, drafted = 0, 0
+    # Draft for negatives first (brand) / opportunities (competitor+niche)
+    fetched.sort(key=lambda fc: fc.likes, reverse=True)
+    for fc in fetched:
+        if fc.comment_id in existing:
+            continue
+        sentiment = classify(fc.text).tone
+        draft = draft_flag = None
+        want_draft = (mention.source != "brand") or (sentiment == "negative")
+        if want_draft and drafted < MAX_COMMENT_DRAFTS:
+            dr = generate_draft(
+                fc.text, "comment", sentiment, 0.9, tone_examples, recent_edits,
+                source=mention.source, competitor=mention.competitor,
+                brand_name=brand.name if brand else None,
+            )
+            if dr:
+                draft, draft_flag = dr.text, dr.flag
+                drafted += 1
+        session.add(Comment(
+            mention_id=mention.id, comment_id=fc.comment_id, author=fc.author,
+            followers=fc.followers, text=fc.text, likes=fc.likes,
+            sentiment=sentiment, draft=draft, draft_flag=draft_flag,
+            created_at=fc.created_at,
+        ))
+        stored += 1
+    session.commit()
+    return stored
+
+
+@app.get("/mentions/{mention_id}/comments")
+def get_comments(mention_id: int, refresh: int = 0, session: Session = Depends(db)):
+    m = session.get(Mention, mention_id)
+    if not m:
+        raise HTTPException(404, "Mention not found")
+    if refresh or not m.comment_rows:
+        try:
+            _fetch_and_store_comments(session, m)
+        except Exception:
+            log.exception("Comment fetch failed for mention %s", mention_id)
+        session.refresh(m)
+    return [_comment_card(c) for c in m.comment_rows]
+
+
+class CommentActionBody(BaseModel):
+    action: str                 # approve | skip
+    draft:  Optional[str] = None
+
+@app.post("/comments/{comment_id}/action")
+def comment_action(comment_id: int, body: CommentActionBody, session: Session = Depends(db)):
+    c = session.get(Comment, comment_id)
+    if not c:
+        raise HTTPException(404, "Comment not found")
+    if body.action == "approve":
+        if body.draft and body.draft != c.draft:
+            mention = session.get(Mention, c.mention_id)
+            session.add(DraftEdit(
+                mention_id=c.mention_id, brand_id=mention.brand_id if mention else None,
+                category="comment", original=c.draft or "", edited=body.draft,
+            ))
+        c.draft  = body.draft or c.draft
+        c.status = "sent"
+    elif body.action == "skip":
+        c.status = "skipped"
+    else:
+        raise HTTPException(400, f"Unknown action: {body.action}")
+    session.commit()
+    return {"ok": True}
+
+
+@app.post("/comments/{comment_id}/regenerate")
+def regenerate_comment(comment_id: int, session: Session = Depends(db)):
+    c = session.get(Comment, comment_id)
+    if not c:
+        raise HTTPException(404, "Comment not found")
+    mention = session.get(Mention, c.mention_id)
+    brand   = session.get(Brand, mention.brand_id) if mention else None
+    dr = generate_draft(
+        c.text, "comment", c.sentiment, 0.9,
+        brand.tone_examples_list() if brand else [],
+        _recent_edits(session, mention.brand_id) if mention else [],
+        source=mention.source if mention else "brand",
+        competitor=mention.competitor if mention else None,
+        brand_name=brand.name if brand else None,
+    )
+    if not dr:
+        raise HTTPException(503, "Draft generation unavailable — set LLM_API_KEY in backend/.env")
+    c.draft, c.draft_flag = dr.text, dr.flag
+    session.commit()
+    return {"draft": c.draft, "draft_flag": c.draft_flag}
 
 
 # ── Debug ─────────────────────────────────────────────────────────────────────

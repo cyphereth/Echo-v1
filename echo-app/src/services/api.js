@@ -37,3 +37,15 @@ export const postAction = (mentionId, action, draft = null) =>
 export const getMention      = (mentionId) => request(`/mentions/${mentionId}`);
 export const regenerateDraft = (mentionId) =>
   request(`/mentions/${mentionId}/regenerate`, { method: 'POST' });
+
+export const getComments = (mentionId, refresh = false) =>
+  request(`/mentions/${mentionId}/comments${refresh ? '?refresh=1' : ''}`);
+
+export const commentAction = (commentId, action, draft = null) =>
+  request(`/comments/${commentId}/action`, {
+    method: 'POST',
+    body: JSON.stringify({ action, draft }),
+  });
+
+export const regenerateComment = (commentId) =>
+  request(`/comments/${commentId}/regenerate`, { method: 'POST' });

@@ -80,6 +80,7 @@ class Mention(Base):
     brand:        Mapped[Brand]         = relationship(back_populates="mentions")
     snapshots:    Mapped[list[MentionSnapshot]] = relationship(back_populates="mention", order_by="MentionSnapshot.ts")
     draft_edits:  Mapped[list[DraftEdit]]       = relationship(back_populates="mention")
+    comment_rows: Mapped[list["Comment"]]       = relationship(back_populates="mention", order_by="Comment.likes.desc()")
 
 class MentionSnapshot(Base):
     __tablename__ = "mention_snapshots"
@@ -91,6 +92,25 @@ class MentionSnapshot(Base):
     comments:   Mapped[int]      = mapped_column(Integer, default=0)
     shares:     Mapped[int]      = mapped_column(Integer, default=0)
     mention:    Mapped[Mention]  = relationship(back_populates="snapshots")
+
+class Comment(Base):
+    __tablename__ = "comments"
+    __table_args__ = (UniqueConstraint("mention_id", "comment_id"),)
+    id:         Mapped[int]             = mapped_column(Integer, primary_key=True, autoincrement=True)
+    mention_id: Mapped[int]             = mapped_column(ForeignKey("mentions.id"))
+    comment_id: Mapped[str]             = mapped_column(Text)
+    author:     Mapped[str]             = mapped_column(Text, default="")
+    followers:  Mapped[int]             = mapped_column(Integer, default=0)
+    text:       Mapped[str]             = mapped_column(Text, default="")
+    likes:      Mapped[int]             = mapped_column(Integer, default=0)
+    sentiment:  Mapped[str]             = mapped_column(Text, default="neutral")
+    draft:      Mapped[Optional[str]]   = mapped_column(Text)
+    draft_flag: Mapped[Optional[str]]   = mapped_column(Text)
+    status:     Mapped[str]             = mapped_column(Text, default="pending")  # pending | sent | skipped
+    created_at: Mapped[datetime]        = mapped_column(nullable=False)
+    fetched_at: Mapped[datetime]        = mapped_column(default=_now)
+    mention:    Mapped[Mention]         = relationship(back_populates="comment_rows")
+
 
 class DraftEdit(Base):
     __tablename__ = "draft_edits"

@@ -80,6 +80,39 @@ _SEED = [
     ),
 ]
 
+_SEED_COMPETITOR = [
+    dict(
+        platform="tiktok", post_id="cmp_001", author="pizza_wars_ru",
+        followers=245000, ago=55, source="competitor", competitor="DoDo Pizza",
+        text="DoDo Pizza разочаровала — честный обзор. Тесто пресное, порции маленькие, за эти деньги ожидал большего 😤",
+        lane="smm", tone="negative", category="complaint", confidence=0.86,
+        opportunity="Аудитория обсуждает DoDo Pizza — момент предложить ваш бренд как альтернативу.",
+        draft="Понимаем разочарование 🍕 Если хочется живого теста на дровах — попробуйте PapaPizza, первый заказ со скидкой.",
+        snapshots=[_snap(120000,5400,820,310), _snap(240000,11200,1500,640), _snap(312000,18700,2100,910)],
+    ),
+    dict(
+        platform="instagram", post_id="cmp_002", author="eda_review_ru",
+        followers=98000, ago=160, source="competitor", competitor="Dominos",
+        text="Dominos в 2026 — уже не то. Качество ингредиентов упало, цена выросла. Куда уходить за нормальной пиццей?",
+        lane="smm", tone="negative", category="complaint", confidence=0.82,
+        opportunity="Аудитория обсуждает Dominos — момент предложить ваш бренд как альтернативу.",
+        draft="PapaPizza — живое тесто и итальянские ингредиенты. Доставка за 40 минут, попробуйте 🔥",
+        snapshots=[_snap(40000,2100,420,180), _snap(72000,4800,900,360), _snap(94000,7100,1300,520)],
+    ),
+]
+
+_SEED_NICHE = [
+    dict(
+        platform="tiktok", post_id="nch_001", author="food_blogger_msk",
+        followers=445000, ago=30, source="niche",
+        text="Топ-5 пиццерий Москвы 2026 — честный рейтинг. Объездил 12 заведений, рассказываю где реально вкусно 🍕",
+        lane="none", tone="neutral", category="review", confidence=0.70,
+        opportunity="Тематическая аудитория без упоминания бренда — хороший момент зайти нативно.",
+        draft="Огонь подборка! А PapaPizza пробовали? Дровяная печь, живое тесто — будем рады попасть в ваш следующий рейтинг 🍕",
+        snapshots=[_snap(220000,12000,2400,1100), _snap(390000,22000,4100,1900), _snap(512000,31000,5200,2400)],
+    ),
+]
+
 _SEED_BRAND2 = [
     dict(
         platform="instagram", post_id="cb_001", author="travel_lena",
@@ -112,6 +145,8 @@ def run(session: Session) -> None:
         keywords=json.dumps(["папапицца", "papapizza", "papa pizza"]),
         hashtags=json.dumps(["#папапицца", "#papapizza"]),
         exclusions=json.dumps([]),
+        competitors=json.dumps(["DoDo Pizza", "Dominos", "Pizza Hut"]),
+        niche_keywords=json.dumps(["доставка пиццы москва", "лучшая пицца"]),
         tone_examples=json.dumps([
             "Очень жаль, что так вышло! Напишите нам — разберёмся.",
             "Рады, что понравилось! Ждём снова 🍕",
@@ -120,9 +155,15 @@ def run(session: Session) -> None:
     session.add(b1)
     session.flush()
     for q in ["папапицца", "#papapizza", "papa pizza"]:
-        session.add(Probe(brand_id=b1.id, platform="tiktok", kind="keyword", query=q))
+        session.add(Probe(brand_id=b1.id, platform="tiktok", kind="keyword", source="brand", query=q))
+    for comp in ["DoDo Pizza", "Dominos", "Pizza Hut"]:
+        session.add(Probe(brand_id=b1.id, platform="tiktok", kind="keyword", source="competitor", label=comp, query=comp))
+    for term in ["доставка пиццы москва", "лучшая пицца"]:
+        session.add(Probe(brand_id=b1.id, platform="tiktok", kind="keyword", source="niche", label=term, query=term))
     session.flush()
     _seed_mentions(session, b1.id, _SEED)
+    _seed_mentions(session, b1.id, _SEED_COMPETITOR)
+    _seed_mentions(session, b1.id, _SEED_NICHE)
 
     # Brand 2
     b2 = Brand(
@@ -167,6 +208,9 @@ def _seed_mentions(session: Session, brand_id: int, seed_list: list[dict]) -> No
             is_hot=is_hot,
             category=d.get("category"),
             lane=d.get("lane"),
+            source=d.get("source", "brand"),
+            competitor=d.get("competitor"),
+            opportunity=d.get("opportunity"),
             confidence=d.get("confidence"),
             draft=d.get("draft"),
             draft_flag=d.get("draft_flag"),

@@ -18,9 +18,16 @@ function agoStr(isoString) {
 }
 
 function mentionToItem(m) {
+  const lane = m.source || 'brand';
+  const thumbnail =
+    lane === 'competitor' ? 'competitor' :
+    lane === 'niche'      ? 'niche' :
+    m.tone === 'negative' ? 'neg' : 'neutral';
   return {
     id:              m.id,
-    lane:            'brand',
+    lane,
+    competitor:      m.competitor || null,
+    opportunity:     m.opportunity || null,
     platform:        m.platform,
     author:          m.author,
     authorFollowers: m.followers,
@@ -32,7 +39,7 @@ function mentionToItem(m) {
     severity:        m.severity || 0,
     negativeCommentPct: m.tone === 'negative' ? 72 : 15,
     commentsCount:   m.comments || 0,
-    thumbnail:       m.tone === 'negative' ? 'neg' : 'neutral',
+    thumbnail,
     url:             m.url || null,
     comments:        m.draft ? [{
       id:            `c_${m.id}`,

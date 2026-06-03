@@ -86,6 +86,9 @@ def _mention_card(m: Mention) -> dict:
         "confidence":   m.confidence,
         "category":     m.category,
         "lane":         m.lane or "none",
+        "source":       m.source or "brand",
+        "competitor":   m.competitor,
+        "opportunity":  m.opportunity,
         "is_hot":       m.is_hot,
         "views":        m.views,
         "likes":        m.likes,
@@ -103,12 +106,36 @@ def _brand_card(b: Brand) -> dict:
     return {
         "id":          b.id,
         "name":        b.name,
-        "keywords":    b.keywords_list(),
-        "hashtags":    b.hashtags_list(),
-        "exclusions":  b.exclusions_list(),
-        "competitors": b.competitors_list(),
-        "probes":      [{"id": p.id, "query": p.query, "kind": p.kind, "platform": p.platform} for p in b.probes],
+        "keywords":      b.keywords_list(),
+        "hashtags":      b.hashtags_list(),
+        "exclusions":    b.exclusions_list(),
+        "competitors":   b.competitors_list(),
+        "niche_keywords": b.niche_keywords_list(),
+        "probes":        [{"id": p.id, "query": p.query, "kind": p.kind, "source": p.source, "platform": p.platform} for p in b.probes],
     }
+
+
+# ── Probe building ────────────────────────────────────────────────────────────
+
+def _rebuild_probes(session: Session, brand: Brand) -> None:
+    """Replace a brand's probes from its current keywords / competitors / niche."""
+    session.query(Probe).filter_by(brand_id=brand.id).delete()
+    for kw in brand.keywords_list():
+        session.add(Probe(brand_id=brand.id, platform="tiktok", kind="keyword", source="brand", query=kw))
+    for comp in brand.competitors_list():
+        session.add(Probe(brand_id=brand.id, platform="tiktok", kind="keyword", source="competitor", label=comp, query=comp))
+    for term in brand.niche_keywords_list():
+        session.add(Probe(brand_id=brand.id, platform="tiktok", kind="keyword", source="niche", label=term, query=term))
+    session.flush()
+
+
+def _opportunity_for(m: Mention) -> Optional[str]:
+    if m.source == "competitor":
+        who = m.competitor or "конкурента"
+        return f"Аудитория обсуждает {who} — момент предложить ваш бренд как альтернативу."
+    if m.source == "niche":
+        return "Тематическая аудитория без упоминания бренда — хороший момент зайти нативно."
+    return None
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -133,35 +160,39 @@ def get_brand(brand_id: int, session: Session = Depends(db)):
 
 
 class BrandConfigBody(BaseModel):
-    name:        Optional[str]       = None
-    keywords:    Optional[list[str]] = None
-    hashtags:    Optional[list[str]] = None
-    exclusions:  Optional[list[str]] = None
-    competitors: Optional[list[str]] = None
+    name:           Optional[str]       = None
+    keywords:       Optional[list[str]] = None
+    hashtags:       Optional[list[str]] = None
+    exclusions:     Optional[list[str]] = None
+    competitors:    Optional[list[str]] = None
+    niche_keywords: Optional[list[str]] = None
+    tone_examples:  Optional[list[str]] = None
 
 @app.post("/brands/{brand_id}/config")
 def update_brand_config(brand_id: int, body: BrandConfigBody, session: Session = Depends(db)):
     b = session.get(Brand, brand_id)
     if not b:
         raise HTTPException(404, "Brand not found")
-    if body.name        is not None: b.name        = body.name
-    if body.hashtags    is not None: b.hashtags    = json.dumps(body.hashtags)
-    if body.exclusions  is not None: b.exclusions  = json.dumps(body.exclusions)
-    if body.competitors is not None: b.competitors = json.dumps(body.competitors)
-    if body.keywords    is not None:
-        b.keywords = json.dumps(body.keywords)
-        # Rebuild probes so collect uses the new keywords
-        session.query(Probe).filter_by(brand_id=brand_id).delete()
-        for kw in body.keywords:
-            session.add(Probe(brand_id=brand_id, platform="tiktok", kind="keyword", query=kw))
+    if body.name           is not None: b.name           = body.name
+    if body.hashtags       is not None: b.hashtags       = json.dumps(body.hashtags)
+    if body.exclusions     is not None: b.exclusions     = json.dumps(body.exclusions)
+    if body.competitors    is not None: b.competitors    = json.dumps(body.competitors)
+    if body.niche_keywords is not None: b.niche_keywords = json.dumps(body.niche_keywords)
+    if body.tone_examples  is not None: b.tone_examples  = json.dumps(body.tone_examples)
+    if body.keywords       is not None: b.keywords       = json.dumps(body.keywords)
+    # Rebuild probes (brand + competitor + niche) so collect picks up every source
+    if any(v is not None for v in (body.keywords, body.competitors, body.niche_keywords)):
+        _rebuild_probes(session, b)
     session.commit()
     return _brand_card(b)
 
 
 class OnboardingBody(BaseModel):
-    name:      str
-    keywords:  list[str] = []
-    hashtags:  list[str] = []
+    name:           str
+    keywords:       list[str] = []
+    hashtags:       list[str] = []
+    competitors:    list[str] = []
+    niche_keywords: list[str] = []
 
 @app.post("/onboarding")
 def onboarding(body: OnboardingBody, session: Session = Depends(db)):
@@ -169,11 +200,12 @@ def onboarding(body: OnboardingBody, session: Session = Depends(db)):
         name=body.name,
         keywords=json.dumps(body.keywords),
         hashtags=json.dumps(body.hashtags),
+        competitors=json.dumps(body.competitors),
+        niche_keywords=json.dumps(body.niche_keywords),
     )
     session.add(b)
     session.flush()
-    for kw in body.keywords:
-        session.add(Probe(brand_id=b.id, platform="tiktok", kind="keyword", query=kw))
+    _rebuild_probes(session, b)
     session.commit()
     return _brand_card(b)
 
@@ -199,12 +231,9 @@ def _run_collect(brand_id: int) -> dict:
             log.info("Cleared old mentions for brand %d before fresh collect", brand_id)
         probes = session.query(Probe).filter_by(brand_id=brand_id).all()
 
-        # If no probes yet, create from keywords on the fly
+        # If no probes yet, build them (brand + competitor + niche) on the fly
         if not probes:
-            for kw in brand.keywords_list():
-                p = Probe(brand_id=brand_id, platform="tiktok", kind="keyword", query=kw)
-                session.add(p)
-            session.flush()
+            _rebuild_probes(session, brand)
             probes = session.query(Probe).filter_by(brand_id=brand_id).all()
 
         total = 0
@@ -225,10 +254,11 @@ def _run_collect(brand_id: int) -> dict:
 
         for m in unclassified:
             result = classify(m.text, m.views, m.likes)
-            m.tone       = result.tone
-            m.category   = result.category
-            m.lane       = result.lane
-            m.confidence = result.confidence
+            m.tone        = result.tone
+            m.category    = result.category
+            m.lane        = result.lane
+            m.confidence  = result.confidence
+            m.opportunity = _opportunity_for(m)
             rescore_mention(session, m)
 
         session.commit()

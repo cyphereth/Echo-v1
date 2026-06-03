@@ -23,6 +23,19 @@ class SearchPage:
     posts:       list[Post]
     next_cursor: Optional[str]
 
+@dataclass
+class Comment:
+    comment_id: str
+    author:     str
+    followers:  int
+    text:       str
+    likes:      int
+    created_at: datetime
+
 class SearchProvider(ABC):
     @abstractmethod
     def search(self, query: str, kind: str, cursor: Optional[str]) -> SearchPage: ...
+
+    def fetch_comments(self, post_id: str, cursor: Optional[str]) -> list["Comment"]:
+        """Fetch comments for a post. Providers that don't support it return []."""
+        return []

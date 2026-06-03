@@ -18,15 +18,18 @@ class Brand(Base):
     exclusions:            Mapped[str]      = mapped_column(Text, default="[]")
     tone_examples:         Mapped[str]      = mapped_column(Text, default="[]")
     competitors:           Mapped[str]      = mapped_column(Text, default="[]")
+    niche_keywords:        Mapped[str]      = mapped_column(Text, default="[]")
     mention_limit_monthly: Mapped[int]      = mapped_column(Integer, default=10000)
     created_at:            Mapped[datetime] = mapped_column(default=_now)
     probes:                Mapped[list[Probe]]   = relationship(back_populates="brand")
     mentions:              Mapped[list[Mention]] = relationship(back_populates="brand")
 
-    def keywords_list(self):    return json.loads(self.keywords)
-    def hashtags_list(self):    return json.loads(self.hashtags)
-    def exclusions_list(self):  return json.loads(self.exclusions)
-    def competitors_list(self): return json.loads(self.competitors)
+    def keywords_list(self):       return json.loads(self.keywords)
+    def hashtags_list(self):       return json.loads(self.hashtags)
+    def exclusions_list(self):     return json.loads(self.exclusions)
+    def competitors_list(self):    return json.loads(self.competitors)
+    def niche_keywords_list(self): return json.loads(self.niche_keywords or "[]")
+    def tone_examples_list(self):  return json.loads(self.tone_examples or "[]")
 
 class Probe(Base):
     __tablename__ = "probes"
@@ -35,6 +38,8 @@ class Probe(Base):
     platform:     Mapped[str]           = mapped_column(Text)
     kind:         Mapped[str]           = mapped_column(Text)
     query:        Mapped[str]           = mapped_column(Text)
+    source:       Mapped[str]           = mapped_column(Text, default="brand")  # brand | competitor | niche
+    label:        Mapped[Optional[str]] = mapped_column(Text)                    # competitor name / niche term
     watermark:    Mapped[Optional[str]] = mapped_column(Text)
     next_run_at:  Mapped[datetime]      = mapped_column(default=_now)
     interval_sec: Mapped[int]           = mapped_column(Integer, default=3600)
@@ -63,6 +68,9 @@ class Mention(Base):
     is_hot:       Mapped[bool]          = mapped_column(Boolean, default=False)
     category:     Mapped[Optional[str]] = mapped_column(Text)
     lane:         Mapped[Optional[str]] = mapped_column(Text)
+    source:       Mapped[str]           = mapped_column(Text, default="brand")  # brand | competitor | niche
+    competitor:   Mapped[Optional[str]] = mapped_column(Text)                    # which competitor (source=competitor)
+    opportunity:  Mapped[Optional[str]] = mapped_column(Text)                    # engagement hint for competitor/niche
     confidence:   Mapped[Optional[float]] = mapped_column(Float)
     draft:        Mapped[Optional[str]] = mapped_column(Text)
     draft_flag:   Mapped[Optional[str]] = mapped_column(Text)

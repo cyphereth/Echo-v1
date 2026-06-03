@@ -10,17 +10,25 @@ log = logging.getLogger(__name__)
 
 def _now(): return datetime.now(timezone.utc)
 
-def _matches_brand(post: Post, brand: Brand) -> bool:
-    exclusions   = [e.lower() for e in brand.exclusions_list()]
-    text_lower   = post.text.lower()
-    if any(exc in text_lower for exc in exclusions): return False
-    keywords     = [k.lower() for k in brand.keywords_list()]
-    hashtags     = [h.lower().lstrip("#") for h in brand.hashtags_list()]
-    post_hashtags = [h.lower().lstrip("#") for h in post.hashtags]
-    return (
-        any(kw in text_lower for kw in keywords) or
-        any(ht in post_hashtags for ht in hashtags)
-    )
+def _matches(post: Post, brand: Brand, probe: Probe) -> bool:
+    text_lower = post.text.lower()
+    exclusions = [e.lower() for e in brand.exclusions_list()]
+    if any(exc in text_lower for exc in exclusions):
+        return False
+
+    if probe.source == "brand":
+        keywords      = [k.lower() for k in brand.keywords_list()]
+        hashtags      = [h.lower().lstrip("#") for h in brand.hashtags_list()]
+        post_hashtags = [h.lower().lstrip("#") for h in post.hashtags]
+        return (
+            any(kw in text_lower for kw in keywords) or
+            any(ht in post_hashtags for ht in hashtags)
+        )
+
+    # competitor / niche: the probe query already targets the term, so we only
+    # require that the search label/query actually shows up in the post text.
+    needle = (probe.label or probe.query).lower().lstrip("#")
+    return needle in text_lower or any(needle in h.lower().lstrip("#") for h in post.hashtags)
 
 def _upsert_mention(session: Session, post: Post, brand_id: int) -> Mention:
     stmt = (
@@ -59,12 +67,14 @@ def collect_probe(session: Session, probe: Probe, provider: SearchProvider) -> i
                     new_watermark = post.post_id
                 if probe.watermark and post.post_id == probe.watermark:
                     found_watermark = True; break
-                if not _matches_brand(post, brand): continue
+                if not _matches(post, brand, probe): continue
                 age = (_now().replace(tzinfo=None) - post.created_at.replace(tzinfo=None)).days
                 if age > 7: continue
                 clean = " ".join(w for w in post.text.split() if not w.startswith("#")).strip()
                 if len(clean) < 10: continue
                 mention = _upsert_mention(session, post, brand.id)
+                mention.source = probe.source
+                mention.competitor = probe.label if probe.source == "competitor" else None
                 session.add(MentionSnapshot(
                     mention_id=mention.id, ts=_now(),
                     likes=post.likes, views=post.views,

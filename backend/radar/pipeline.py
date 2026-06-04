@@ -56,12 +56,18 @@ def classify_and_draft(session: Session, brand_id: int) -> dict:
         m.confidence  = result.confidence
         m.opportunity = opportunity_for(m)
         rescore_mention(session, m)
-    session.flush()
+    # Commit classification immediately so the write lock is released before the
+    # slow per-mention Claude draft calls below — otherwise the transaction is
+    # held for minutes and other writers (onboarding, manual collect) get
+    # "database is locked".
+    session.commit()
 
     tone_examples = brand.tone_examples_list()
     edits         = recent_edits(session, brand_id)
     drafted = 0
     for m in sorted(unclassified, key=lambda x: x.severity or 0, reverse=True)[:MAX_DRAFTS_PER_COLLECT]:
+        # generate_draft is a slow network call — done outside any open
+        # transaction; we commit each draft individually right after.
         dr = generate_draft(
             m.text, m.category or "neutral", m.tone, m.confidence or 0.0,
             tone_examples, edits,
@@ -69,7 +75,7 @@ def classify_and_draft(session: Session, brand_id: int) -> dict:
         )
         if dr:
             m.draft, m.draft_flag = dr.text, dr.flag
+            session.commit()
             drafted += 1
 
-    session.commit()
     return {"classified": len(unclassified), "drafted": drafted}

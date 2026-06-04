@@ -78,6 +78,8 @@ export const regenerateDraft = (mentionId) =>
 
 export const getAnalytics = (brandId) => request(`/analytics?brand_id=${brandId}`);
 
+export const getOpportunities = (brandId) => request(`/opportunities?brand_id=${brandId}`);
+
 export const getComments = (mentionId, refresh = false) =>
   request(`/mentions/${mentionId}/comments${refresh ? '?refresh=1' : ''}`);
 

@@ -8,16 +8,21 @@ from .providers.base import Post, SearchProvider
 
 log = logging.getLogger(__name__)
 
-VIRAL_VIEWS = 500_000  # foreign-language posts above this still pass the RU filter
+VIRAL_VIEWS  = 500_000  # views above this = viral (post passes filters regardless)
+VIRAL_LIKES  = 1_500    # smaller RU market: 1.5k likes already means a post took off
+MAX_HASHTAGS = 3        # posts with more hashtags are usually low-value spam
 
 def _now(): return datetime.now(timezone.utc)
 
+def _is_viral(post: Post) -> bool:
+    return (post.likes or 0) >= VIRAL_LIKES or (post.views or 0) >= VIRAL_VIEWS
+
 def _passes_language(post: Post, brand: Brand) -> bool:
-    """For RU/CIS brands keep only Cyrillic posts — unless the post is viral
-    (real view count), in which case a foreign-language post is worth showing."""
+    """For RU/CIS brands keep only Cyrillic posts — unless the post is viral,
+    in which case a foreign-language post is worth showing."""
     if getattr(brand, "market", "global") != "ru":
         return True
-    if (post.views or 0) >= VIRAL_VIEWS:
+    if _is_viral(post):
         return True
     clean = " ".join(w for w in post.text.split() if not w.startswith("#"))
     return bool(re.search(r"[а-яёА-ЯЁ]", clean))
@@ -29,6 +34,10 @@ def _matches(post: Post, brand: Brand, probe: Probe) -> bool:
         return False
 
     if not _passes_language(post, brand):
+        return False
+
+    # Hashtag spam: >3 hashtags usually means a low-value post — drop unless viral.
+    if len(post.hashtags) > MAX_HASHTAGS and not _is_viral(post):
         return False
 
     if probe.source == "brand":

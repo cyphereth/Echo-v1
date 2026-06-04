@@ -45,6 +45,10 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "competitor":  "TEXT",
         "opportunity": "TEXT",
     },
+    "comments": {
+        "is_opportunity": "BOOLEAN DEFAULT 0",
+        "opportunity":    "TEXT",
+    },
 }
 
 

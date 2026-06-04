@@ -1,4 +1,4 @@
-import logging, os
+import json, logging, os
 from dataclasses import dataclass
 from typing import Optional
 from .classify import CONFIDENCE_THRESHOLD
@@ -7,6 +7,69 @@ log = logging.getLogger(__name__)
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_API_URL = os.getenv("LLM_API_URL", "https://api.anthropic.com/v1/messages")
 HUMOR_FLAG  = "humor_manual"
+
+# Comments worth a closer look: discussing promos, prices, dissatisfaction, choice.
+OPPORTUNITY_TRIGGERS = [
+    "акци", "скидк", "промокод", "цена", "цены", "дорого", "дешев",
+    "где лучше", "посоветуй", "подскажи", "альтернатив", "разочаров",
+    "не совет", "надоел", "ужас", "плохо", "верните", "обман", "лучше чем",
+]
+
+
+def _is_opportunity_candidate(text: str, sentiment: str) -> bool:
+    """Cheap prefilter: only negative or trigger-matching comments reach Claude."""
+    t = (text or "").lower()
+    return sentiment == "negative" or any(trig in t for trig in OPPORTUNITY_TRIGGERS)
+
+
+def evaluate_opportunity(comment_text: str, source: str,
+                         competitor: Optional[str], brand_name: Optional[str]) -> dict:
+    """Ask Claude whether a competitor/niche comment is an opening for the brand to
+    win the commenter, and draft an intercept reply. Returns
+    {is_opportunity, reason, reply} or {} on no-key/error."""
+    if not LLM_API_KEY:
+        return {}
+    import httpx
+    brand = brand_name or "бренд"
+    where = f"под постом конкурента {competitor}" if (source == "competitor" and competitor) \
+            else "под тематическим (нишевым) постом"
+    system = (
+        "Ты помогаешь бренду нативно перехватывать аудиторию у конкурентов в "
+        "комментариях соцсетей. Отвечай ТОЛЬКО валидным JSON без markdown."
+    )
+    user = (
+        f'Комментарий {where}: "{comment_text}". '
+        f'Это возможность для бренда {brand} нативно зайти и привлечь этого человека? '
+        f'Если да — напиши короткий дружелюбный ненавязчивый ответ от лица {brand} '
+        f'с мягкой выгодой (без агрессии к конкуренту). '
+        f'JSON: {{"is_opportunity": false, "reason": "", "reply": ""}}'
+    )
+
+    def _call():
+        resp = httpx.post(
+            LLM_API_URL,
+            headers={"x-api-key": LLM_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            json={"model": "claude-haiku-4-5-20251001", "max_tokens": 250,
+                  "system": system, "messages": [{"role": "user", "content": user}]},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        blocks = resp.json().get("content", [])
+        text = next((b["text"] for b in blocks if b.get("type") == "text"), "")
+        text = text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        return json.loads(text)
+
+    try:
+        return _call()
+    except (json.JSONDecodeError, KeyError):
+        try:
+            return _call()
+        except Exception as e:
+            log.warning("evaluate_opportunity retry failed: %s", e)
+            return {}
+    except Exception as e:
+        log.warning("evaluate_opportunity failed: %s", e)
+        return {}
 
 @dataclass
 class DraftResult:

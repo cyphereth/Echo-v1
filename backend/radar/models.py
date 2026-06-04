@@ -116,6 +116,8 @@ class Comment(Base):
     sentiment:  Mapped[str]             = mapped_column(Text, default="neutral")
     draft:      Mapped[Optional[str]]   = mapped_column(Text)
     draft_flag: Mapped[Optional[str]]   = mapped_column(Text)
+    is_opportunity: Mapped[bool]        = mapped_column(Boolean, default=False)
+    opportunity:    Mapped[Optional[str]] = mapped_column(Text)   # short reason
     status:     Mapped[str]             = mapped_column(Text, default="pending")  # pending | sent | skipped
     created_at: Mapped[datetime]        = mapped_column(nullable=False)
     fetched_at: Mapped[datetime]        = mapped_column(default=_now)

@@ -1,7 +1,24 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Icon } from '../shared/icons';
 import { getLaneColor, getLaneLabel } from '../../data/mock';
+import * as api from '../../services/api';
 import styles from './queue.module.css';
+
+function buildOppGroups(opps) {
+  const byMention = {};
+  for (const o of opps) {
+    const key = o.mention_id;
+    if (!byMention[key]) {
+      byMention[key] = {
+        video: { id: `m${key}`, title: o.post_title, platform: o.platform,
+                 lane: o.source || 'competitor', url: o.post_url },
+        comments: [],
+      };
+    }
+    byMention[key].comments.push(o);
+  }
+  return Object.values(byMention);
+}
 
 function fmtNum(n) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -47,6 +64,13 @@ function ReplyCard({ c, postUrl, onApprove, onSkip }) {
           <div className={styles.avatar}>{c.author[0].toUpperCase()}</div>
           <span className={styles.author}>{c.author}</span>
           <span className={styles.followers}>{fmtNum(c.followers)} подп.</span>
+          {c.is_opportunity && (
+            <span className={styles.sentBadge}
+              title={c.opportunity || 'Возможность перехватить аудиторию'}
+              style={{ background: 'var(--brand-dim, rgba(99,102,241,0.15))', color: 'var(--brand-bright, #818cf8)' }}>
+              🎯 Возможность
+            </span>
+          )}
           <span className={styles.sentBadge} style={{ background: sentColor.bg, color: sentColor.fg }}>
             {sentLabel}
           </span>
@@ -119,15 +143,37 @@ const SORT_OPTIONS      = [
   { key: 'likes', label: 'По лайкам', icon: 'zap' },
 ];
 
-export function QueueScreen({ items }) {
+export function QueueScreen({ items, brandId }) {
   const [laneFilter, setLaneFilter]         = useState('all');
   const [sentFilter, setSentFilter]         = useState('all');
   const [sortBy, setSortBy]                 = useState('date');
+  const [onlyOpps, setOnlyOpps]             = useState(false);
   const [states, setStates]                 = useState({});
+  const [opps, setOpps]                     = useState([]);
 
-  const raw    = buildQueue(items ?? []);
-  const onApprove = (id) => setStates(s => ({ ...s, [id]: 'approved' }));
-  const onSkip    = (id) => setStates(s => ({ ...s, [id]: 'skipped' }));
+  // Real competitor/niche opportunity comments (separate from synthetic mention drafts).
+  useEffect(() => {
+    if (typeof brandId !== 'number') return;
+    let alive = true;
+    api.getOpportunities(brandId)
+      .then(d => { if (alive && Array.isArray(d)) setOpps(d); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [brandId]);
+
+  const oppGroups = buildOppGroups(opps);
+  const raw = [...oppGroups, ...buildQueue(items ?? [])];
+
+  // Opportunity comments are real DB rows (numeric id) — persist the action.
+  const oppIds = new Set(opps.map(o => o.id));
+  const onApprove = (id, draft) => {
+    setStates(s => ({ ...s, [id]: 'approved' }));
+    if (oppIds.has(id)) api.commentAction(id, 'approve', draft).catch(() => {});
+  };
+  const onSkip = (id) => {
+    setStates(s => ({ ...s, [id]: 'skipped' }));
+    if (oppIds.has(id)) api.commentAction(id, 'skip').catch(() => {});
+  };
 
   const totalPending = raw.reduce((sum, g) => sum + g.comments.length, 0);
   const approved     = Object.values(states).filter(s => s === 'approved').length;
@@ -140,6 +186,7 @@ export function QueueScreen({ items }) {
       ...g,
       comments: g.comments
         .filter(c => sentFilter === 'all' || c.sentiment === sentFilter)
+        .filter(c => !onlyOpps || c.is_opportunity)
         .sort((a, b) => sortBy === 'likes' ? b.likes - a.likes : a.minsAgo - b.minsAgo),
     }))
     .filter(g => g.comments.length > 0);
@@ -202,6 +249,11 @@ export function QueueScreen({ items }) {
                 {f === 'all' ? 'Все' : getLaneLabel(f)}
               </button>
             ))}
+            <button className={styles.chip} data-active={onlyOpps ? '1' : '0'}
+              onClick={() => setOnlyOpps(v => !v)}
+              title="Только перехват аудитории конкурентов">
+              🎯 Только возможности
+            </button>
           </div>
         </div>
       </div>

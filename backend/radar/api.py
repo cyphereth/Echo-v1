@@ -717,6 +717,8 @@ def _comment_card(c: Comment) -> dict:
         "minsAgo":        _minutes_ago(c.created_at),
         "suggestedReply": c.draft,
         "draft_flag":     c.draft_flag,
+        "is_opportunity": bool(getattr(c, "is_opportunity", False)),
+        "opportunity":    getattr(c, "opportunity", None),
         "status":         _STATUS_OUT.get(c.status, "pending"),
     }
 
@@ -733,6 +735,9 @@ def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
     edits         = recent_edits(session, mention.brand_id)
     existing      = {c.comment_id for c in mention.comment_rows}
 
+    from .drafts import _is_opportunity_candidate, evaluate_opportunity
+    is_comp_niche = mention.source in ("competitor", "niche")
+
     stored, drafted = 0, 0
     # Draft for negatives first (brand) / opportunities (competitor+niche)
     fetched.sort(key=lambda fc: fc.likes, reverse=True)
@@ -740,9 +745,24 @@ def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
         if fc.comment_id in existing:
             continue
         sentiment = classify(fc.text).tone
-        draft = draft_flag = None
-        want_draft = (mention.source != "brand") or (sentiment == "negative")
-        if want_draft and drafted < MAX_COMMENT_DRAFTS:
+        draft = draft_flag = opp_reason = None
+        is_opp = False
+
+        if is_comp_niche:
+            # Opportunity interception: prefilter cheaply, then let Claude decide
+            # and write the intercept reply in one call.
+            if _is_opportunity_candidate(fc.text, sentiment) and drafted < MAX_COMMENT_DRAFTS:
+                ev = evaluate_opportunity(
+                    fc.text, mention.source, mention.competitor,
+                    brand.name if brand else None,
+                )
+                if ev.get("is_opportunity") and ev.get("reply"):
+                    draft      = ev["reply"]
+                    opp_reason = ev.get("reason") or None
+                    is_opp     = True
+                    drafted   += 1
+        elif sentiment == "negative" and drafted < MAX_COMMENT_DRAFTS:
+            # brand-lane: reply to negative comments as before
             dr = generate_draft(
                 fc.text, "comment", sentiment, 0.9, tone_examples, edits,
                 source=mention.source, competitor=mention.competitor,
@@ -751,10 +771,12 @@ def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
             if dr:
                 draft, draft_flag = dr.text, dr.flag
                 drafted += 1
+
         session.add(Comment(
             mention_id=mention.id, comment_id=fc.comment_id, author=fc.author,
             followers=fc.followers, text=fc.text, likes=fc.likes,
             sentiment=sentiment, draft=draft, draft_flag=draft_flag,
+            is_opportunity=is_opp, opportunity=opp_reason,
             created_at=fc.created_at,
         ))
         stored += 1
@@ -772,6 +794,33 @@ def get_comments(mention_id: int, refresh: int = 0, user: User = Depends(current
             log.exception("Comment fetch failed for mention %s", mention_id)
         session.refresh(m)
     return [_comment_card(c) for c in m.comment_rows]
+
+
+@app.get("/opportunities")
+def opportunities(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    """All opportunity comments (competitor/niche intercepts) for a brand, grouped
+    by their source mention — feeds the Queue's 'Возможности' view."""
+    _owned_brand(session, brand_id, user)
+    rows = (
+        session.query(Comment).join(Mention)
+        .filter(Mention.brand_id == brand_id, Comment.is_opportunity.is_(True))
+        .order_by(Comment.likes.desc())
+        .all()
+    )
+    out = []
+    for c in rows:
+        m = c.mention
+        card = _comment_card(c)
+        card.update({
+            "mention_id": m.id,
+            "post_title": (m.text[:80] + "…") if len(m.text) > 80 else m.text,
+            "platform":   m.platform,
+            "source":     m.source or "competitor",
+            "competitor": m.competitor,
+            "post_url":   _post_url(m),
+        })
+        out.append(card)
+    return out
 
 
 class CommentActionBody(BaseModel):

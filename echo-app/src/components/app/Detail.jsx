@@ -50,6 +50,13 @@ function CommentCard({ c, onApprove, onSkip, onRegenerate }) {
           </div>
           <span className={styles.commentAuthor}>{c.author}</span>
           <span className={styles.commentFollowers}>{fmtNum(c.followers)} подп.</span>
+          {c.is_opportunity && (
+            <span className={styles.sentBadge}
+              title={c.opportunity || 'Возможность перехватить аудиторию'}
+              style={{ background: 'var(--brand-dim, rgba(99,102,241,0.15))', color: 'var(--brand-bright, #818cf8)', marginLeft: 4 }}>
+              🎯
+            </span>
+          )}
           <SentimentBadge sentiment={c.sentiment} />
           {done && <span className={styles.sentBadge} style={{ background: 'var(--calm-dim)', color: 'var(--calm)', marginLeft: 4 }}>✓ отправлен</span>}
         </div>

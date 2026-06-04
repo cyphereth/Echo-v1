@@ -181,7 +181,7 @@ export default function AppPage() {
             {selected ? <DetailPanel item={selected} /> : <EmptyDetail />}
           </div>
         ) : screen === 'queue' ? (
-          <div className={styles.workspace}><QueueScreen items={feedItems} /></div>
+          <div className={styles.workspace}><QueueScreen items={feedItems} brandId={brand?.id} /></div>
         ) : screen === 'analytics' ? (
           <div className={styles.workspace}><AnalyticsScreen brandId={brand?.id} /></div>
         ) : (

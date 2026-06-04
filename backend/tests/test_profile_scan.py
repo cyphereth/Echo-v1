@@ -62,3 +62,30 @@ def test_lang_ru_keeps_viral_foreign():
 def test_lang_global_keeps_everything():
     from radar.collector import _passes_language
     assert _passes_language(_mk_post("amazing delivery"), _mk_brand("global")) is True
+
+
+# ── Viral threshold + hashtag spam ────────────────────────────────────────────
+
+def test_is_viral_by_likes():
+    from radar.collector import _is_viral
+    assert _is_viral(_mk_post("x", views=0)) is False
+    p = _mk_post("x"); p.likes = 1500
+    assert _is_viral(p) is True
+
+def test_is_viral_by_views():
+    from radar.collector import _is_viral
+    assert _is_viral(_mk_post("x", views=600_000)) is True
+
+# ── Opportunity prefilter ─────────────────────────────────────────────────────
+
+def test_opportunity_candidate_trigger():
+    from radar.drafts import _is_opportunity_candidate
+    assert _is_opportunity_candidate("у них скоро акция и скидки", "neutral") is True
+
+def test_opportunity_candidate_negative():
+    from radar.drafts import _is_opportunity_candidate
+    assert _is_opportunity_candidate("всё дорого и плохо", "negative") is True
+
+def test_opportunity_candidate_noise():
+    from radar.drafts import _is_opportunity_candidate
+    assert _is_opportunity_candidate("спасибо, классное видео", "positive") is False

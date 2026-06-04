@@ -70,7 +70,7 @@ function CommentCard({ c, onApprove, onSkip, onRegenerate }) {
               autoFocus
             />
           ) : (
-            <p style={{ fontSize: 13, color: regenerating ? 'var(--fg-3)' : 'var(--fg-1)', lineHeight: 1.55, cursor: 'text' }}
+            <p style={{ fontSize: 13, color: regenerating ? 'var(--fg-3)' : 'var(--fg-1)', lineHeight: 1.55, cursor: 'text', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
               onClick={() => setEditing(true)}>
               {regenerating ? 'Генерирую черновик…' : draft}
             </p>

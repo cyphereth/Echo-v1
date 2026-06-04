@@ -3,38 +3,12 @@ import { Icon } from '../shared/icons';
 import * as api from '../../services/api';
 import styles from './analytics.module.css';
 
-// ── Fallback (demo) data — used when the backend has no real data yet ─────────
-
-const STATS_MOCK = [
-  { key: 'total', label: 'Упоминаний за 7 дней', value: '284',  delta: '+38', up: true  },
-  { key: 'neg',   label: 'Негативных',           value: '67',   delta: '+12', up: false },
-  { key: 'sent',  label: 'Ответов отправлено',   value: '41',   delta: '+9',  up: true  },
-  { key: 'hot',   label: 'Горячих сейчас',       value: '3',    delta: '3',   up: false },
-];
 const STAT_COLOR = {
   total: 'var(--fg-1)', neg: 'var(--neg)', sent: 'var(--calm)', hot: 'var(--rising)',
 };
 
-const SERIES_MOCK = {
-  days: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'],
-  neg:  [28, 35, 42, 31, 67, 54, 48],
-  pos:  [18, 22, 19, 25, 20, 28, 24],
-  neu:  [44, 39, 51, 48, 57, 62, 44],
-};
-
 const PLATFORM_ICON = { TikTok: 'tiktok', Instagram: 'instagram', Telegram: 'telegram' };
 const PLATFORM_COLOR = { TikTok: 'var(--tt)', Instagram: 'var(--ig)', Telegram: 'var(--tg)' };
-const PLATFORMS_MOCK = [
-  { name: 'TikTok',    pct: 58 },
-  { name: 'Instagram', pct: 31 },
-  { name: 'Telegram',  pct: 11 },
-];
-
-const COMPETITORS_MOCK = [
-  { name: 'DoDo Pizza',  mentions: 142, neg: 61, trend: 'up'   },
-  { name: 'Dominos',     mentions: 98,  neg: 55, trend: 'up'   },
-  { name: 'Pizza Hut',   mentions: 67,  neg: 38, trend: 'down' },
-];
 
 // ── SVG multi-line chart ─────────────────────────────────────────────────────
 
@@ -110,15 +84,17 @@ export function AnalyticsScreen({ brandId }) {
     if (typeof brandId !== 'number') return;
     let alive = true;
     api.getAnalytics(brandId)
-      .then(d => { if (alive && d && d.has_data) setData(d); })
-      .catch(() => { /* keep demo fallback */ });
+      .then(d => { if (alive && d) setData(d); })
+      .catch(() => {});
     return () => { alive = false; };
   }, [brandId]);
 
-  const stats     = data?.stats?.length        ? data.stats        : STATS_MOCK;
-  const series    = data?.series?.days?.length  ? data.series       : SERIES_MOCK;
-  const platforms = data?.platforms?.length     ? data.platforms    : PLATFORMS_MOCK;
-  const competitors = data?.competitors?.length ? data.competitors  : COMPETITORS_MOCK;
+  // Real data only — backend always returns stats/series; competitors/platforms
+  // may be empty until enough mentions are collected.
+  const stats     = data?.stats ?? [];
+  const series    = data?.series ?? { days: [], neg: [], pos: [], neu: [] };
+  const platforms = data?.platforms ?? [];
+  const competitors = data?.competitors ?? [];
   const topVideos = data?.top_negative?.length
     ? data.top_negative
     : [];

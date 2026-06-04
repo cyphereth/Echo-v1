@@ -216,6 +216,8 @@
   font-size: 13px;
   color: var(--fg-2);
   line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* ── Reply area ── */
@@ -255,6 +257,7 @@
 
 .replyActions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
   justify-content: flex-end;

@@ -235,17 +235,18 @@ class TikHubProvider(SearchProvider):
             secuid = prof.get("_secuid")
             if not secuid:
                 return []
+            # app/v3 is more reliable than web/fetch_user_post (which 400s often).
             resp = httpx.get(
-                f"{BASE_URL}/api/v1/tiktok/web/fetch_user_post",
-                headers=self._headers, params={"secUid": secuid, "count": limit}, timeout=25,
+                f"{BASE_URL}/api/v1/tiktok/app/v3/fetch_user_post_videos",
+                headers=self._headers, params={"sec_user_id": secuid, "count": limit}, timeout=25,
             )
             resp.raise_for_status()
             data = resp.json().get("data", {}) or {}
-            items = data.get("itemList") or data.get("aweme_list") or []
+            items = data.get("aweme_list") or data.get("itemList") or []
             out = []
             for it in items:
                 try:
-                    out.append(_parse_tiktok_post(it))
+                    out.append(_parse_tiktok_app_post(it))
                 except Exception:
                     continue
             return out[:limit]
@@ -264,6 +265,32 @@ def _parse_tiktok_comment(c: dict) -> Comment:
         text=c.get("text") or c.get("content", ""),
         likes=c.get("digg_count", 0) or 0,
         created_at=datetime.fromtimestamp(c.get("create_time", 0) or 0, tz=timezone.utc),
+    )
+
+
+def _parse_tiktok_app_post(item: dict) -> Post:
+    """Parse a TikTok app/v3 aweme item (different shape than the web format)."""
+    author = item.get("author", {}) or {}
+    stats  = item.get("statistics", {}) or {}
+    hashtags = [
+        te.get("hashtag_name", "")
+        for te in item.get("text_extra", [])
+        if te.get("hashtag_name")
+    ]
+    ts = item.get("create_time", 0) or 0
+    return Post(
+        post_id=str(item.get("aweme_id", "")),
+        platform="tiktok",
+        author=author.get("unique_id") or author.get("nickname") or str(author.get("uid", "")),
+        followers=author.get("follower_count", 0) or 0,
+        text=item.get("desc", "") or "",
+        hashtags=hashtags,
+        created_at=datetime.fromtimestamp(ts, tz=timezone.utc) if ts else _now(),
+        likes=stats.get("digg_count", 0) or 0,
+        views=stats.get("play_count", 0) or 0,
+        comments=stats.get("comment_count", 0) or 0,
+        shares=stats.get("share_count", 0) or 0,
+        sound_id=None,
     )
 
 

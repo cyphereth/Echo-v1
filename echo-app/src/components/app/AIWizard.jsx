@@ -8,13 +8,19 @@ import styles from './aiwizard.module.css';
  * mode="edit"   → modal overlay, calls POST /brands/:id/config
  */
 export function AIWizard({ mode, brand, onSaved, onClose }) {
-  const [step, setStep]             = useState(1);
+  const [step, setStep]             = useState(mode === 'edit' ? 1 : 0);
   const [name, setName]             = useState(brand?.name ?? '');
   const [keywords, setKeywords]     = useState(brand?.keywords ?? []);
   const [hashtags, setHashtags]     = useState(brand?.hashtags ?? []);
   const [competitors, setCompetitors] = useState(brand?.competitors ?? []);
   const [niche, setNiche]           = useState(brand?.niche_keywords ?? []);
   const [previews, setPreviews]     = useState([]);
+  const [tiktokUrl, setTiktokUrl]   = useState('');
+  const [instagramUrl, setInstagramUrl] = useState('');
+  const [voiceDescription, setVoiceDescription] = useState('');
+  const [toneExamples, setToneExamples] = useState(brand?.tone_examples ?? []);
+  const [audience, setAudience]     = useState(null);
+  const [scanning, setScanning]     = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [saving, setSaving]         = useState(false);
@@ -45,6 +51,33 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
     }
   }
 
+  async function handleScan() {
+    if (!tiktokUrl.trim() && !instagramUrl.trim()) return;
+    setScanning(true);
+    setToast('');
+    try {
+      const data = await api.scanProfile(tiktokUrl.trim(), instagramUrl.trim());
+      if (data.name)                   setName(data.name);
+      if (data.keywords?.length)       setKeywords(data.keywords);
+      if (data.hashtags?.length)       setHashtags(data.hashtags);
+      if (data.competitors?.length)    setCompetitors(data.competitors);
+      if (data.niche_keywords?.length) setNiche(data.niche_keywords);
+      if (data.tone_examples?.length)  setToneExamples(data.tone_examples);
+      if (data.voice_description)      setVoiceDescription(data.voice_description);
+      if (data.audience_sentiment)     setAudience(data.audience_sentiment);
+      setStep(1);
+    } catch (e) {
+      const msg = String(e.message || '');
+      if (msg.includes('422')) {
+        showToast('Не удалось прочитать аккаунты — заполните вручную по названию.');
+      } else {
+        showToast('Ошибка анализа аккаунтов — попробуйте ручной режим.');
+      }
+    } finally {
+      setScanning(false);
+    }
+  }
+
   async function handlePreview() {
     if (keywords.length === 0) { setStep(2); return; }
     setPreviewing(true);
@@ -67,15 +100,16 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
     try {
       let result;
       if (mode === 'create') {
-        result = await api.createBrand(name.trim(), keywords, hashtags, competitors, niche);
+        result = await api.createBrand(name.trim(), keywords, hashtags, competitors, niche, toneExamples);
         api.collectBrand(result.id).catch(() => {});
       } else {
         await api.updateBrandConfig(brand.id, {
           name: name.trim(), keywords, hashtags,
           exclusions: brand.exclusions ?? [],
           competitors, niche_keywords: niche,
+          tone_examples: toneExamples,
         });
-        result = { ...brand, name: name.trim(), keywords, hashtags, competitors, niche_keywords: niche };
+        result = { ...brand, name: name.trim(), keywords, hashtags, competitors, niche_keywords: niche, tone_examples: toneExamples };
       }
       onSaved?.(result);
     } catch (e) {
@@ -114,11 +148,56 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
           {mode === 'create' ? '✨ Настройка бренда' : '✨ AI-заполнение'}
         </div>
         <div className={styles.sub}>
-          {step === 1
-            ? 'Введите название бренда — AI подберёт ключевые слова, конкурентов и нишу'
+          {step === 0
+            ? 'Введите ссылки на аккаунты бренда — Echo проанализирует контент'
+            : step === 1
+            ? 'Проверьте профиль бренда перед запуском'
             : 'Реальные посты по вашим ключевым словам'}
         </div>
       </div>
+
+      {step === 0 && (
+        <>
+          <div className={styles.section}>
+            <div className={styles.sectionLabel}>TikTok аккаунт</div>
+            <input
+              className={styles.nameInput}
+              value={tiktokUrl}
+              onChange={e => setTiktokUrl(e.target.value)}
+              placeholder="@ozon или ссылка"
+              autoFocus
+            />
+          </div>
+          <div className={styles.section}>
+            <div className={styles.sectionLabel}>Instagram аккаунт</div>
+            <input
+              className={styles.nameInput}
+              value={instagramUrl}
+              onChange={e => setInstagramUrl(e.target.value)}
+              placeholder="@ozon.ru или ссылка"
+            />
+          </div>
+
+          {toast && <div className={styles.toast}>{toast}</div>}
+
+          <div style={{ fontSize: 12, color: 'var(--fg-4)' }}>
+            Echo прочитает посты и комментарии, чтобы понять голос бренда и темы
+          </div>
+
+          <div className={styles.actions}>
+            <button className={styles.cancelBtn} onClick={() => setStep(1)}>
+              Заполнить вручную по названию →
+            </button>
+            <button
+              className={styles.nextBtn}
+              onClick={handleScan}
+              disabled={scanning || (!tiktokUrl.trim() && !instagramUrl.trim())}
+            >
+              {scanning ? <><span className={styles.spinner} />Анализирую аккаунты…</> : 'Анализировать аккаунты'}
+            </button>
+          </div>
+        </>
+      )}
 
       {step === 1 && (
         <>
@@ -147,10 +226,36 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
           <TagGroup label="Конкуренты"     list={competitors} setList={setCompetitors} />
           <TagGroup label="Ниша"           list={niche}       setList={setNiche} />
 
+          {voiceDescription && (
+            <div className={styles.section}>
+              <div className={styles.sectionLabel}>Голос бренда</div>
+              <div style={{ fontSize: 13, color: 'var(--fg-2)' }}>{voiceDescription}</div>
+            </div>
+          )}
+          {toneExamples.length > 0 && (
+            <div className={styles.section}>
+              <div className={styles.sectionLabel}>Примеры голоса</div>
+              <div className={styles.tags}>
+                {toneExamples.map((t, i) => (
+                  <span key={i} className={styles.tag} style={{ maxWidth: '100%' }}>
+                    {t.length > 60 ? t.slice(0, 60) + '…' : t}
+                    <button className={styles.tagX}
+                      onClick={() => setToneExamples(toneExamples.filter((_, j) => j !== i))}>✕</button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {audience && (audience.positive + audience.negative + audience.neutral) > 0 && (
+            <div style={{ fontSize: 12, color: 'var(--fg-4)' }}>
+              Аудитория: {audience.positive} 👍 · {audience.negative} 👎 · {audience.neutral} 😐
+            </div>
+          )}
+
           <div className={styles.actions}>
-            {mode === 'edit' && (
-              <button className={styles.cancelBtn} onClick={onClose}>Отмена</button>
-            )}
+            {mode === 'edit'
+              ? <button className={styles.cancelBtn} onClick={onClose}>Отмена</button>
+              : <button className={styles.cancelBtn} onClick={() => setStep(0)}>← К аккаунтам</button>}
             <button
               className={styles.nextBtn}
               onClick={handlePreview}

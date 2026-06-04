@@ -75,8 +75,10 @@ export default function AppPage() {
       const inbox = await api.getInbox(brandId);
       const all = [...inbox.pr, ...inbox.smm];
       setFeedItems(all.map(mentionToItem));
+      return all.length;
     } catch (e) {
       console.warn('Failed to load inbox:', e.message);
+      return 0;
     }
   }, []);
 
@@ -108,15 +110,26 @@ export default function AppPage() {
     let ticks = 0;
     pollRef.current = setInterval(async () => {
       ticks++;
-      await loadFeed(brand.id);
-      if (ticks >= 6) { clearInterval(pollRef.current); setCollecting(false); }
-    }, 3000);
+      const n = await loadFeed(brand.id);
+      if (n > 0 || ticks >= 12) { clearInterval(pollRef.current); setCollecting(false); }
+    }, 4000);
   }
 
   async function handleBrandSaved(updatedBrand) {
     setBrand(updatedBrand);
     setShowWizard(false);
-    if (updatedBrand?.id) await loadFeed(updatedBrand.id);
+    if (!updatedBrand?.id) return;
+    await loadFeed(updatedBrand.id);
+    // The wizard kicks off a background collect; the first run scans all probes
+    // and takes a while, so poll the feed until results land (up to ~80s).
+    setCollecting(true);
+    clearInterval(pollRef.current);
+    let ticks = 0;
+    pollRef.current = setInterval(async () => {
+      ticks++;
+      const n = await loadFeed(updatedBrand.id);
+      if (n > 0 || ticks >= 20) { clearInterval(pollRef.current); setCollecting(false); }
+    }, 4000);
   }
 
   // No brand yet → show onboarding wizard fullscreen

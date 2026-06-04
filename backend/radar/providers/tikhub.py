@@ -178,6 +178,81 @@ class TikHubProvider(SearchProvider):
                 continue
         return out
 
+    # ── Account profile + own posts ───────────────────────────────────────────
+    def fetch_profile(self, username: str, platform: str = "tiktok") -> dict:
+        try:
+            if platform == "instagram":
+                resp = httpx.get(
+                    f"{BASE_URL}/api/v1/instagram/v1/fetch_user_info_by_username",
+                    headers=self._headers, params={"username": username}, timeout=25,
+                )
+                resp.raise_for_status()
+                u = ((resp.json().get("data", {}) or {}).get("user", {}) or {})
+                followers = (u.get("edge_followed_by", {}) or {}).get("count", 0) or u.get("follower_count", 0) or 0
+                return {
+                    "name": u.get("full_name") or username,
+                    "bio": u.get("biography", "") or "",
+                    "followers": followers,
+                    "username": u.get("username") or username,
+                    "_userid": str(u.get("id") or u.get("pk") or ""),
+                }
+            # tiktok
+            resp = httpx.get(
+                f"{BASE_URL}/api/v1/tiktok/web/fetch_user_profile",
+                headers=self._headers, params={"uniqueId": username}, timeout=25,
+            )
+            resp.raise_for_status()
+            ui = (resp.json().get("data", {}) or {}).get("userInfo", {}) or {}
+            user = ui.get("user", {}) or {}
+            stats = ui.get("stats", {}) or {}
+            return {
+                "name": user.get("nickname") or username,
+                "bio": user.get("signature", "") or "",
+                "followers": stats.get("followerCount", 0) or 0,
+                "username": user.get("uniqueId") or username,
+                "_secuid": user.get("secUid", "") or "",
+            }
+        except Exception as e:
+            log.warning("fetch_profile failed (%s/%s): %s", platform, username, e)
+            return {}
+
+    def fetch_user_posts(self, username: str, platform: str = "tiktok", limit: int = 15) -> list[Post]:
+        try:
+            prof = self.fetch_profile(username, platform)
+            if platform == "instagram":
+                uid = prof.get("_userid")
+                if not uid:
+                    return []
+                resp = httpx.get(
+                    f"{BASE_URL}/api/v1/instagram/v1/fetch_user_posts",
+                    headers=self._headers, params={"user_id": uid, "count": limit}, timeout=25,
+                )
+                resp.raise_for_status()
+                data = resp.json().get("data", {}) or {}
+                items = data.get("items") or data.get("medias") or []
+                return [p for it in items if (p := self._safe_parse_ig(it)) is not None][:limit]
+            # tiktok
+            secuid = prof.get("_secuid")
+            if not secuid:
+                return []
+            resp = httpx.get(
+                f"{BASE_URL}/api/v1/tiktok/web/fetch_user_post",
+                headers=self._headers, params={"secUid": secuid, "count": limit}, timeout=25,
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", {}) or {}
+            items = data.get("itemList") or data.get("aweme_list") or []
+            out = []
+            for it in items:
+                try:
+                    out.append(_parse_tiktok_post(it))
+                except Exception:
+                    continue
+            return out[:limit]
+        except Exception as e:
+            log.warning("fetch_user_posts failed (%s/%s): %s", platform, username, e)
+            return []
+
 
 # ── parsers: TikTok ─────────────────────────────────────────────────────────
 def _parse_tiktok_comment(c: dict) -> Comment:

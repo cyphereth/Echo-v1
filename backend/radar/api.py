@@ -159,6 +159,20 @@ def _post_url(m: Mention) -> Optional[str]:
         return f"https://www.instagram.com/p/{m.post_id}/"
     return None
 
+import re as _re
+
+def _parse_handle(s: str) -> str:
+    """Extract a username from @name, a tiktok/instagram URL, or a raw string."""
+    s = (s or "").strip()
+    if not s:
+        return ""
+    if "/" in s:
+        m = _re.search(r'(?:tiktok\.com/@|instagram\.com/)([^/?#]+)', s)
+        if m:
+            return m.group(1).lstrip("@")
+        s = s.rstrip("/").split("/")[-1]
+    return s.lstrip("@")
+
 def _mention_card(m: Mention) -> dict:
     snaps = sorted(m.snapshots, key=lambda s: s.ts)
     snap_views = [s.views for s in snaps] if snaps else [

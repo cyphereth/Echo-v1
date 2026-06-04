@@ -173,6 +173,57 @@ def _parse_handle(s: str) -> str:
         s = s.rstrip("/").split("/")[-1]
     return s.lstrip("@")
 
+def _profile_with_claude(name_hint: str, bio: str, followers: int,
+                         posts_text: list[str], brand_replies: list[str],
+                         sentiment: dict) -> dict:
+    """Distill a brand profile from scanned account content via Claude. Returns {} on failure."""
+    import httpx as _httpx
+    from .drafts import LLM_API_KEY, LLM_API_URL
+    if not LLM_API_KEY:
+        return {}
+
+    system = (
+        "Ты аналитик бренда. На основе реального контента аккаунта в соцсетях определи "
+        "профиль для мониторинга упоминаний и генерации ответов. Отвечай ТОЛЬКО валидным JSON без markdown."
+    )
+    posts_block   = "\n".join(f"- {t[:200]}" for t in posts_text[:15]) or "(нет постов)"
+    replies_block = "\n".join(f"- {r[:200]}" for r in brand_replies[:5]) or "(нет ответов бренда)"
+    user_msg = (
+        f"Профиль: {name_hint}, {bio[:200]}, {followers} подписчиков\n"
+        f"Посты бренда:\n{posts_block}\n"
+        f"Реальные ответы бренда на комментарии:\n{replies_block}\n"
+        f"Тональность аудитории: {sentiment.get('positive',0)} поз / "
+        f"{sentiment.get('negative',0)} нег / {sentiment.get('neutral',0)} нейтр\n\n"
+        'Верни JSON: {"name":"","voice_description":"","tone_examples":[],'
+        '"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[]}'
+    )
+
+    def _call():
+        resp = _httpx.post(
+            LLM_API_URL,
+            headers={"x-api-key": LLM_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            json={"model": "claude-haiku-4-5-20251001", "max_tokens": 600,
+                  "system": system, "messages": [{"role": "user", "content": user_msg}]},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        blocks = resp.json().get("content", [])
+        text = next((b["text"] for b in blocks if b.get("type") == "text"), "")
+        text = text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        return json.loads(text)
+
+    try:
+        return _call()
+    except (json.JSONDecodeError, KeyError):
+        try:
+            return _call()
+        except Exception as e:
+            log.warning("_profile_with_claude retry failed: %s", e)
+            return {}
+    except Exception as e:
+        log.warning("_profile_with_claude failed: %s", e)
+        return {}
+
 def _mention_card(m: Mention) -> dict:
     snaps = sorted(m.snapshots, key=lambda s: s.ts)
     snap_views = [s.views for s in snaps] if snaps else [
@@ -374,6 +425,72 @@ def preview_brand(body: PreviewBody, user: User = Depends(current_user)):
             except Exception as e:
                 log.warning("preview_brand search failed kw=%s pf=%s: %s", kw, pf, e)
     return {"posts": posts[:5]}
+
+
+class ScanBody(BaseModel):
+    tiktok:    str = ""
+    instagram: str = ""
+
+@app.post("/brands/profile-scan")
+def profile_scan(body: ScanBody, user: User = Depends(current_user)):
+    """Scan brand's own accounts → Claude-distilled profile for onboarding."""
+    provider = _get_provider()
+    platforms = []
+    if body.tiktok.strip():
+        platforms.append(("tiktok", _parse_handle(body.tiktok)))
+    if body.instagram.strip():
+        platforms.append(("instagram", _parse_handle(body.instagram)))
+    if not platforms:
+        raise HTTPException(400, "Provide at least one account")
+
+    name_hint, bio, followers = "", "", 0
+    posts_text: list[str] = []
+    brand_replies: list[str] = []
+    sentiment = {"positive": 0, "negative": 0, "neutral": 0}
+    scanned = {"tiktok": False, "instagram": False}
+
+    for platform, handle in platforms:
+        if not handle:
+            continue
+        prof = provider.fetch_profile(handle, platform)
+        if not prof:
+            continue
+        scanned[platform] = True
+        name_hint = name_hint or prof.get("name", "")
+        bio = bio or prof.get("bio", "")
+        followers = max(followers, prof.get("followers", 0))
+
+        posts = provider.fetch_user_posts(handle, platform, limit=15)
+        posts_text.extend(p.text for p in posts if p.text)
+
+        top = sorted(posts, key=lambda p: (p.likes + p.views), reverse=True)[:3]
+        for p in top:
+            for c in provider.fetch_comments(p.post_id, None, platform):
+                if c.author.lower() == handle.lower():
+                    brand_replies.append(c.text)
+                t = c.text.lower()
+                if any(w in t for w in ("отлично", "супер", "спасибо", "люблю", "класс", "👍", "❤")):
+                    sentiment["positive"] += 1
+                elif any(w in t for w in ("ужас", "плохо", "обман", "верните", "кошмар", "👎")):
+                    sentiment["negative"] += 1
+                else:
+                    sentiment["neutral"] += 1
+
+    if not any(scanned.values()):
+        raise HTTPException(422, "No accounts could be read")
+
+    profile = _profile_with_claude(name_hint, bio, followers, posts_text, brand_replies, sentiment)
+    return {
+        "name":              profile.get("name") or name_hint,
+        "voice_description": profile.get("voice_description", ""),
+        "tone_examples":     profile.get("tone_examples", []) or brand_replies[:3],
+        "keywords":          profile.get("keywords", []),
+        "hashtags":          profile.get("hashtags", []),
+        "competitors":       profile.get("competitors", []),
+        "niche_keywords":    profile.get("niche_keywords", []),
+        "audience_sentiment": sentiment,
+        "scanned":           scanned,
+    }
 
 
 class OnboardingBody(BaseModel):

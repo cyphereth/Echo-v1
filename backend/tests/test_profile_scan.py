@@ -18,3 +18,17 @@ def test_parse_handle_instagram_url():
 def test_parse_handle_empty():
     assert _parse_handle("") == ""
     assert _parse_handle("   ") == ""
+
+def test_profile_scan_with_mock(monkeypatch):
+    """profile_scan returns a profile when provider is the mock (no real TikHub)."""
+    from radar import api
+    from radar.providers.mock import MockProvider
+    monkeypatch.setattr(api, "_get_provider", lambda: MockProvider())
+
+    class FakeUser:
+        id = 1
+    body = api.ScanBody(tiktok="@testbrand", instagram="")
+    result = api.profile_scan(body, user=FakeUser())
+    assert result["scanned"]["tiktok"] is True
+    assert result["name"]
+    assert "audience_sentiment" in result

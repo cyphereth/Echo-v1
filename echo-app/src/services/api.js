@@ -42,10 +42,16 @@ export const getInbox        = (brandId)     => request(`/inbox?brand_id=${brand
 export const collectBrand    = (brandId)     => request(`/brands/${brandId}/collect`, { method: 'POST' });
 export const searchMentions  = (q)           => request(`/search?query=${encodeURIComponent(q)}`);
 
-export const createBrand = (name, keywords = [], hashtags = [], competitors = [], niche_keywords = []) =>
+export const createBrand = (name, keywords = [], hashtags = [], competitors = [], niche_keywords = [], tone_examples = []) =>
   request('/onboarding', {
     method: 'POST',
-    body: JSON.stringify({ name, keywords, hashtags, competitors, niche_keywords }),
+    body: JSON.stringify({ name, keywords, hashtags, competitors, niche_keywords, tone_examples }),
+  });
+
+export const scanProfile = (tiktok, instagram) =>
+  request('/brands/profile-scan', {
+    method: 'POST',
+    body: JSON.stringify({ tiktok, instagram }),
   });
 
 export const updateBrandConfig = (brandId, config) =>

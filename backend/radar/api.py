@@ -499,6 +499,7 @@ class OnboardingBody(BaseModel):
     hashtags:       list[str] = []
     competitors:    list[str] = []
     niche_keywords: list[str] = []
+    tone_examples:  list[str] = []
 
 @app.post("/onboarding")
 def onboarding(body: OnboardingBody, user: User = Depends(current_user), session: Session = Depends(db)):
@@ -512,6 +513,7 @@ def onboarding(body: OnboardingBody, user: User = Depends(current_user), session
         hashtags=json.dumps(body.hashtags),
         competitors=json.dumps(body.competitors),
         niche_keywords=json.dumps(body.niche_keywords),
+        tone_examples=json.dumps(body.tone_examples),
         auto_collect=True,
     )
     session.add(b)

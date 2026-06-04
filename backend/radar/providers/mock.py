@@ -48,3 +48,25 @@ class MockProvider(SearchProvider):
             likes=(i + 1) * 15,
             created_at=now - timedelta(minutes=(i + 1) * 7),
         ) for i in range(6)]
+
+    def fetch_profile(self, username: str, platform: str = "tiktok") -> dict:
+        return {
+            "name": f"Mock {username.title()}",
+            "bio": "Демо-бренд для тестов",
+            "followers": 12000,
+            "username": username,
+        }
+
+    def fetch_user_posts(self, username: str, platform: str = "tiktok", limit: int = 15) -> list[Post]:
+        now = datetime.now(timezone.utc)
+        return [Post(
+            post_id=f"{platform}_{username}_own_{i}",
+            platform=platform,
+            author=username,
+            followers=12000,
+            text=f"Пост бренда {username} №{i}: {_FLAVORS[i % len(_FLAVORS)]} #бренд",
+            hashtags=["бренд"],
+            created_at=now - timedelta(hours=i + 1),
+            likes=(i + 1) * 200, views=(i + 1) * 8000,
+            comments=(i + 1) * 25, shares=(i + 1) * 5,
+        ) for i in range(min(limit, 5))]

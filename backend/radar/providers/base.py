@@ -39,3 +39,11 @@ class SearchProvider(ABC):
     def fetch_comments(self, post_id: str, cursor: Optional[str], platform: str = "tiktok") -> list["Comment"]:
         """Fetch comments for a post. Providers that don't support it return []."""
         return []
+
+    def fetch_profile(self, username: str, platform: str = "tiktok") -> dict:
+        """Account profile: {name, bio, followers, username, _secuid?, _userid?}. Empty dict if unavailable."""
+        return {}
+
+    def fetch_user_posts(self, username: str, platform: str = "tiktok", limit: int = 15) -> list["Post"]:
+        """Posts authored by the account. Empty list if unavailable."""
+        return []

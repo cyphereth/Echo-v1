@@ -26,7 +26,7 @@ function buildQueue(source) {
 
 // ── Reply card ──────────────────────────────────────────────────────────────
 
-function ReplyCard({ c, onApprove, onSkip }) {
+function ReplyCard({ c, postUrl, onApprove, onSkip }) {
   const [draft, setDraft]     = useState(c.suggestedReply || c.pendingReply || '');
   const [editing, setEditing] = useState(false);
   const [done, setDone]       = useState(false);
@@ -58,6 +58,13 @@ function ReplyCard({ c, onApprove, onSkip }) {
           <span className={styles.followers} style={{ marginLeft: 2, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
             <Icon name="clock" size={10} color="var(--fg-4)" />{fmtAgo(c.minsAgo)}
           </span>
+          {postUrl && (
+            <a href={postUrl} target="_blank" rel="noopener noreferrer"
+              title="Открыть пост в соцсети"
+              style={{ marginLeft: 4, color: 'var(--fg-4)', display: 'inline-flex', alignItems: 'center' }}>
+              <Icon name="externalLink" size={10} color="var(--fg-4)" />
+            </a>
+          )}
           {done && (
             <span className={styles.sentBadge} style={{
               background: doneType === 'sent' ? 'var(--calm-dim)' : 'var(--surface-3)',
@@ -263,10 +270,17 @@ export function QueueScreen({ items }) {
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: laneColor, flexShrink: 0 }} />
                     <span className={styles.groupTitle}>{video.title}</span>
                     <span className={styles.groupCount}>{liveCount} ожидают</span>
+                    {video.url && (
+                      <a href={video.url} target="_blank" rel="noopener noreferrer"
+                        title="Открыть пост"
+                        style={{ marginLeft: 'auto', color: 'var(--fg-4)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                        <Icon name="externalLink" size={13} color="var(--fg-4)" />
+                      </a>
+                    )}
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {comments.map(c => (
-                      <ReplyCard key={c.id} c={c} onApprove={onApprove} onSkip={onSkip} />
+                      <ReplyCard key={c.id} c={c} postUrl={video.url} onApprove={onApprove} onSkip={onSkip} />
                     ))}
                   </div>
                 </div>

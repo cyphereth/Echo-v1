@@ -57,7 +57,12 @@ class Scheduler:
 
     def start(self):
         self._running = True
-        self._tick()
+        # Schedule the first tick on a background timer instead of running it
+        # inline — running _run_once() synchronously here would block FastAPI
+        # startup on slow TikHub calls and the server would never bind its port.
+        self._timer = threading.Timer(self._tick_sec, self._tick)
+        self._timer.daemon = True
+        self._timer.start()
 
     def stop(self):
         self._running = False

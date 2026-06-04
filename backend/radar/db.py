@@ -17,7 +17,9 @@ engine = create_engine(
 def _enable_wal(connection, _record):
     if _DATABASE_URL.startswith("sqlite"):
         connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA busy_timeout=5000")
+        # 30s: collect (wizard-triggered) and the scheduler can both write at
+        # once; SQLite allows one writer, so the other waits instead of erroring.
+        connection.execute("PRAGMA busy_timeout=30000")
 
 
 from sqlalchemy import event

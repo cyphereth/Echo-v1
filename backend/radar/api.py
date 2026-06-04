@@ -161,6 +161,24 @@ def _post_url(m: Mention) -> Optional[str]:
 
 import re as _re
 
+def _clean_list(items) -> list[str]:
+    """Normalize a list of terms: split comma-joined entries, trim, drop empties, dedupe.
+
+    Guards against AI or user input that puts several terms in one string
+    (e.g. ['Aviasales, KupiBilet, Skyscanner']) which would otherwise become a
+    single useless probe query.
+    """
+    out: list[str] = []
+    seen = set()
+    for raw in (items or []):
+        for part in str(raw).split(","):
+            t = part.strip()
+            if t and t.lower() not in seen:
+                seen.add(t.lower())
+                out.append(t)
+    return out
+
+
 def _parse_handle(s: str) -> str:
     """Extract a username from @name, a tiktok/instagram URL, or a raw string."""
     s = (s or "").strip()
@@ -322,12 +340,12 @@ class BrandConfigBody(BaseModel):
 def update_brand_config(brand_id: int, body: BrandConfigBody, user: User = Depends(current_user), session: Session = Depends(db)):
     b = _owned_brand(session, brand_id, user)
     if body.name           is not None: b.name           = body.name
-    if body.hashtags       is not None: b.hashtags       = json.dumps(body.hashtags)
-    if body.exclusions     is not None: b.exclusions     = json.dumps(body.exclusions)
-    if body.competitors    is not None: b.competitors    = json.dumps(body.competitors)
-    if body.niche_keywords is not None: b.niche_keywords = json.dumps(body.niche_keywords)
+    if body.hashtags       is not None: b.hashtags       = json.dumps(_clean_list(body.hashtags))
+    if body.exclusions     is not None: b.exclusions     = json.dumps(_clean_list(body.exclusions))
+    if body.competitors    is not None: b.competitors    = json.dumps(_clean_list(body.competitors))
+    if body.niche_keywords is not None: b.niche_keywords = json.dumps(_clean_list(body.niche_keywords))
     if body.tone_examples  is not None: b.tone_examples  = json.dumps(body.tone_examples)
-    if body.keywords       is not None: b.keywords       = json.dumps(body.keywords)
+    if body.keywords       is not None: b.keywords       = json.dumps(_clean_list(body.keywords))
     # Rebuild probes (brand + competitor + niche) so collect picks up every source
     if any(v is not None for v in (body.keywords, body.competitors, body.niche_keywords)):
         _rebuild_probes(session, b)
@@ -509,10 +527,10 @@ def onboarding(body: OnboardingBody, user: User = Depends(current_user), session
     b = Brand(
         user_id=user.id,
         name=body.name,
-        keywords=json.dumps(body.keywords),
-        hashtags=json.dumps(body.hashtags),
-        competitors=json.dumps(body.competitors),
-        niche_keywords=json.dumps(body.niche_keywords),
+        keywords=json.dumps(_clean_list(body.keywords)),
+        hashtags=json.dumps(_clean_list(body.hashtags)),
+        competitors=json.dumps(_clean_list(body.competitors)),
+        niche_keywords=json.dumps(_clean_list(body.niche_keywords)),
         tone_examples=json.dumps(body.tone_examples),
         auto_collect=True,
     )

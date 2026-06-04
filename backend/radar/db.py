@@ -34,6 +34,7 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "niche_keywords": "TEXT DEFAULT '[]'",
         "auto_collect":   "BOOLEAN DEFAULT 0",
         "user_id":        "INTEGER",
+        "market":         "TEXT DEFAULT 'global'",
     },
     "probes": {
         "source": "TEXT DEFAULT 'brand'",

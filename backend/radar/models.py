@@ -27,6 +27,7 @@ class Brand(Base):
     tone_examples:         Mapped[str]      = mapped_column(Text, default="[]")
     competitors:           Mapped[str]      = mapped_column(Text, default="[]")
     niche_keywords:        Mapped[str]      = mapped_column(Text, default="[]")
+    market:                Mapped[str]      = mapped_column(Text, default="global")  # ru | global
     auto_collect:          Mapped[bool]     = mapped_column(Boolean, default=False)
     mention_limit_monthly: Mapped[int]      = mapped_column(Integer, default=10000)
     created_at:            Mapped[datetime] = mapped_column(default=_now)

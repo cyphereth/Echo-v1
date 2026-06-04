@@ -212,8 +212,11 @@ def _profile_with_claude(name_hint: str, bio: str, followers: int,
         f"Реальные ответы бренда на комментарии:\n{replies_block}\n"
         f"Тональность аудитории: {sentiment.get('positive',0)} поз / "
         f"{sentiment.get('negative',0)} нег / {sentiment.get('neutral',0)} нейтр\n\n"
+        'Определи рынок: если бренд русскоязычный или ориентирован на СНГ — '
+        'верни "market":"ru" и предлагай ТОЛЬКО русскоязычных конкурентов из СНГ '
+        '(без иностранных). Иначе "market":"global".\n'
         'Верни JSON: {"name":"","voice_description":"","tone_examples":[],'
-        '"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[]}'
+        '"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[],"market":""}'
     )
 
     def _call():
@@ -285,6 +288,8 @@ def _brand_card(b: Brand) -> dict:
         "exclusions":    b.exclusions_list(),
         "competitors":   b.competitors_list(),
         "niche_keywords": b.niche_keywords_list(),
+        "tone_examples": b.tone_examples_list(),
+        "market":        getattr(b, "market", "global") or "global",
         "auto_collect":  bool(b.auto_collect),
         "probes":        [{"id": p.id, "query": p.query, "kind": p.kind, "source": p.source, "platform": p.platform} for p in b.probes],
     }
@@ -335,6 +340,7 @@ class BrandConfigBody(BaseModel):
     competitors:    Optional[list[str]] = None
     niche_keywords: Optional[list[str]] = None
     tone_examples:  Optional[list[str]] = None
+    market:         Optional[str]       = None
 
 @app.post("/brands/{brand_id}/config")
 def update_brand_config(brand_id: int, body: BrandConfigBody, user: User = Depends(current_user), session: Session = Depends(db)):
@@ -345,6 +351,7 @@ def update_brand_config(brand_id: int, body: BrandConfigBody, user: User = Depen
     if body.competitors    is not None: b.competitors    = json.dumps(_clean_list(body.competitors))
     if body.niche_keywords is not None: b.niche_keywords = json.dumps(_clean_list(body.niche_keywords))
     if body.tone_examples  is not None: b.tone_examples  = json.dumps(body.tone_examples)
+    if body.market         is not None: b.market         = body.market
     if body.keywords       is not None: b.keywords       = json.dumps(_clean_list(body.keywords))
     # Rebuild probes (brand + competitor + niche) so collect picks up every source
     if any(v is not None for v in (body.keywords, body.competitors, body.niche_keywords)):
@@ -376,7 +383,10 @@ def suggest_brand(body: SuggestBody, user: User = Depends(current_user)):
         f'3-5 хэштегов (с #), '
         f'3-5 прямых конкурентов (только названия компаний), '
         f'3-5 нишевых терминов для мониторинга тематики. '
-        f'Ответ строго в JSON: {{"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[]}}'
+        f'Определи рынок: если бренд русскоязычный или ориентирован на СНГ — '
+        f'верни "market":"ru" и предлагай ТОЛЬКО русскоязычных конкурентов из СНГ '
+        f'(без иностранных). Иначе "market":"global". '
+        f'Ответ строго в JSON: {{"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[],"market":""}}'
     )
 
     def _call():
@@ -410,6 +420,7 @@ def suggest_brand(body: SuggestBody, user: User = Depends(current_user)):
         "hashtags":       data.get("hashtags", []),
         "competitors":    data.get("competitors", []),
         "niche_keywords": data.get("niche_keywords", []),
+        "market":         data.get("market") or "global",
     }
 
 
@@ -506,6 +517,7 @@ def profile_scan(body: ScanBody, user: User = Depends(current_user)):
         "hashtags":          profile.get("hashtags", []),
         "competitors":       profile.get("competitors", []),
         "niche_keywords":    profile.get("niche_keywords", []),
+        "market":            profile.get("market") or "global",
         "audience_sentiment": sentiment,
         "scanned":           scanned,
     }
@@ -518,6 +530,7 @@ class OnboardingBody(BaseModel):
     competitors:    list[str] = []
     niche_keywords: list[str] = []
     tone_examples:  list[str] = []
+    market:         str = "global"
 
 @app.post("/onboarding")
 def onboarding(body: OnboardingBody, user: User = Depends(current_user), session: Session = Depends(db)):
@@ -532,6 +545,7 @@ def onboarding(body: OnboardingBody, user: User = Depends(current_user), session
         competitors=json.dumps(_clean_list(body.competitors)),
         niche_keywords=json.dumps(_clean_list(body.niche_keywords)),
         tone_examples=json.dumps(body.tone_examples),
+        market=body.market or "global",
         auto_collect=True,
     )
     session.add(b)

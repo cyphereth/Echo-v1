@@ -32,3 +32,33 @@ def test_profile_scan_with_mock(monkeypatch):
     assert result["scanned"]["tiktok"] is True
     assert result["name"]
     assert "audience_sentiment" in result
+
+
+# ── RU/CIS language filter ────────────────────────────────────────────────────
+
+def _mk_post(text, views=0):
+    from radar.providers.base import Post
+    from datetime import datetime, timezone
+    return Post(post_id="1", platform="tiktok", author="a", followers=0,
+                text=text, hashtags=[], created_at=datetime.now(timezone.utc),
+                likes=0, views=views, comments=0, shares=0)
+
+def _mk_brand(market):
+    from radar.models import Brand
+    b = Brand(); b.market = market; return b
+
+def test_lang_ru_keeps_cyrillic():
+    from radar.collector import _passes_language
+    assert _passes_language(_mk_post("купил на озоне, отлично"), _mk_brand("ru")) is True
+
+def test_lang_ru_drops_foreign():
+    from radar.collector import _passes_language
+    assert _passes_language(_mk_post("amazing delivery, loved it"), _mk_brand("ru")) is False
+
+def test_lang_ru_keeps_viral_foreign():
+    from radar.collector import _passes_language
+    assert _passes_language(_mk_post("amazing delivery", views=600_000), _mk_brand("ru")) is True
+
+def test_lang_global_keeps_everything():
+    from radar.collector import _passes_language
+    assert _passes_language(_mk_post("amazing delivery"), _mk_brand("global")) is True

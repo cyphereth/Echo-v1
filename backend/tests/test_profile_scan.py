@@ -217,3 +217,21 @@ def test_rebuild_probes_no_geo():
     q = {(p.source, p.query) for p in s.query(Probe).filter_by(brand_id=b.id).all()}
     assert ("niche", "тема") in q  # no city appended
     s.query(Probe).filter_by(brand_id=b.id).delete(); s.delete(b); s.commit()
+
+
+def test_geo_probe_requires_city():
+    from radar.collector import _matches
+    from radar.providers.base import Post
+    from radar.models import Brand
+    from datetime import datetime, timezone
+    import json
+    b = Brand(); b.exclusions = json.dumps([]); b.market = "ru"
+    class P: source="niche"; label="маникюр"; query="маникюр Казань"
+    def post(t):
+        return Post(post_id="1",platform="tiktok",author="a",followers=500,text=t,
+                    hashtags=[],created_at=datetime.now(timezone.utc),
+                    likes=0,views=0,comments=0,shares=0)
+    # has term but NOT city → geo probe rejects
+    assert _matches(post("красивый маникюр сегодня делала"), b, P()) is False
+    # has both term and city → matches
+    assert _matches(post("маникюр в Казань салон"), b, P()) is True

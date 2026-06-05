@@ -64,9 +64,26 @@ def _matches(post: Post, brand: Brand, probe: Probe) -> bool:
     # exact hashtag (not substring) — reduces false positives on ambiguous names.
     needle = (probe.label or probe.query).lower().lstrip("#")
     post_hashtags = [h.lower().lstrip("#") for h in post.hashtags]
-    pattern = r"(?<!\w)" + re.escape(needle) + r"(?!\w)"
-    in_text = re.search(pattern, text_lower) is not None
-    return in_text or needle in post_hashtags
+
+    def _hit(term: str) -> bool:
+        term = term.lower().lstrip("#")
+        if not term:
+            return False
+        if re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", text_lower):
+            return True
+        return any(term == h or term in h for h in post_hashtags)
+
+    if not _hit(needle):
+        return False
+    # Geo-appended probe (query carries a city beyond the label): require the
+    # city too, so "макияж Казань" doesn't match generic Kazan city content.
+    label = (probe.label or "").lower()
+    query = (probe.query or "").lower()
+    if label and query and query != label:
+        city = query.replace(label, "").strip()
+        if city and not _hit(city):
+            return False
+    return True
 
 def _upsert_mention(session: Session, post: Post, brand_id: int) -> Mention:
     stmt = (
@@ -142,6 +159,14 @@ def collect_geo(session: Session, brand: Brand, provider: SearchProvider) -> int
     city = (getattr(brand, "geo", "") or "").strip()
     if not city:
         return 0
+    # Topical terms: a geotagged post is only relevant if it's about the brand's
+    # niche/category/sphere — otherwise location_posts is just "random city content".
+    terms = [t.lower() for t in (brand.niche_keywords_list() + brand.category_terms_list())]
+    sphere_words = [w.lower() for w in (getattr(brand, "sphere", "") or "").split() if len(w) > 3]
+    def _on_topic(text: str) -> bool:
+        t = text.lower()
+        return any(term in t for term in terms) or any(w in t for w in sphere_words)
+
     count = 0
     try:
         posts = provider.fetch_location_posts(city, "instagram", limit=15)
@@ -150,6 +175,9 @@ def collect_geo(session: Session, brand: Brand, provider: SearchProvider) -> int
                 or _below_follower_floor(post)
             clean = " ".join(w for w in post.text.split() if not w.startswith("#")).strip()
             if len(clean) < MIN_TEXT_LEN and not spam:
+                spam = True
+            # Off-topic city content (museums, cars, sport) → hide.
+            if not spam and not _on_topic(post.text):
                 spam = True
             mention = _upsert_mention(session, post, brand.id)
             mention.source = "niche"

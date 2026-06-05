@@ -235,3 +235,43 @@ def test_geo_probe_requires_city():
     assert _matches(post("красивый маникюр сегодня делала"), b, P()) is False
     # has both term and city → matches
     assert _matches(post("маникюр в Казань салон"), b, P()) is True
+
+
+def test_follower_floor_off_in_local_mode():
+    from radar.collector import _below_follower_floor
+    p = _mk_post("обычный городской пост про красоту", views=0); p.followers = 50
+    assert _below_follower_floor(p, local_mode=True) is False
+    assert _below_follower_floor(p, local_mode=False) is True
+
+def test_local_mode_audience_probes():
+    import json
+    from radar import db
+    from radar.models import Brand, Probe
+    from radar.api import _rebuild_probes
+    s = db.get_session()
+    b = Brand(name="Salon2", user_id=1, keywords=json.dumps(["мой салон"]),
+              competitors=json.dumps([]), niche_keywords=json.dumps([]),
+              category_terms=json.dumps([]), audience_terms=json.dumps(["женское","мода"]),
+              geo="Казань", local_mode=True)
+    s.add(b); s.flush()
+    _rebuild_probes(s, b)
+    q = {(p.source, p.query) for p in s.query(Probe).filter_by(brand_id=b.id).all()}
+    assert ("niche", "женское Казань") in q
+    assert ("niche", "мода Казань") in q
+    s.query(Probe).filter_by(brand_id=b.id).delete(); s.delete(b); s.commit()
+
+def test_local_mode_off_no_audience_probes():
+    import json
+    from radar import db
+    from radar.models import Brand, Probe
+    from radar.api import _rebuild_probes
+    s = db.get_session()
+    b = Brand(name="Fed2", user_id=1, keywords=json.dumps(["б"]),
+              competitors=json.dumps([]), niche_keywords=json.dumps([]),
+              category_terms=json.dumps([]), audience_terms=json.dumps(["женское"]),
+              geo="Казань", local_mode=False)
+    s.add(b); s.flush()
+    _rebuild_probes(s, b)
+    q = {p.query for p in s.query(Probe).filter_by(brand_id=b.id).all()}
+    assert "женское Казань" not in q
+    s.query(Probe).filter_by(brand_id=b.id).delete(); s.delete(b); s.commit()

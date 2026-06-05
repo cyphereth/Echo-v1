@@ -38,6 +38,9 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "sphere":         "TEXT DEFAULT ''",
         "geo":            "TEXT DEFAULT ''",
         "category_terms": "TEXT DEFAULT '[]'",
+        "audience_terms": "TEXT DEFAULT '[]'",
+        "followers":      "INTEGER DEFAULT 0",
+        "local_mode":     "BOOLEAN DEFAULT 0",
     },
     "probes": {
         "source": "TEXT DEFAULT 'brand'",

@@ -217,11 +217,14 @@ def _profile_with_claude(name_hint: str, bio: str, followers: int,
         'Определи город (geo), если бизнес локальный — иначе "". Для локального '
         'сервисного бизнеса сгенерируй category_terms (4-6 категорий ниши города), '
         'иначе [].\n'
+        'Сгенерируй audience_terms — 8-12 широких тем целевой аудитории (для салона: '
+        'женское, лайфстайл, мода, уют, дети, отношения, готовка, шопинг, фитнес). '
+        'Для нетематических — [].\n'
         'Определи рынок: если бренд русскоязычный или ориентирован на СНГ — '
         'верни "market":"ru" и предлагай ТОЛЬКО русскоязычных конкурентов из СНГ '
         '(без иностранных). Иначе "market":"global".\n'
         'Верни JSON: {"name":"","voice_description":"","tone_examples":[],'
-        '"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[],"sphere":"","geo":"","category_terms":[],"market":""}'
+        '"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[],"sphere":"","geo":"","category_terms":[],"audience_terms":[],"market":""}'
     )
 
     def _call():
@@ -298,6 +301,9 @@ def _brand_card(b: Brand) -> dict:
         "sphere":        getattr(b, "sphere", "") or "",
         "geo":           getattr(b, "geo", "") or "",
         "category_terms": b.category_terms_list() if hasattr(b, "category_terms_list") else [],
+        "audience_terms": b.audience_terms_list() if hasattr(b, "audience_terms_list") else [],
+        "followers":      getattr(b, "followers", 0) or 0,
+        "local_mode":     bool(getattr(b, "local_mode", False)),
         "auto_collect":  bool(b.auto_collect),
         "probes":        [{"id": p.id, "query": p.query, "kind": p.kind, "source": p.source, "platform": p.platform} for p in b.probes],
     }
@@ -326,6 +332,10 @@ def _rebuild_probes(session: Session, brand: Brand) -> None:
             session.add(Probe(brand_id=brand.id, platform=pf, kind="keyword", source="competitor", label=cat, query=geoq(cat)))
         for term in brand.niche_keywords_list():
             session.add(Probe(brand_id=brand.id, platform=pf, kind="keyword", source="niche", label=term, query=geoq(term)))
+        # Small local brands: broad city-audience probes (женское Казань, мода Казань).
+        if getattr(brand, "local_mode", False) and geo:
+            for term in brand.audience_terms_list():
+                session.add(Probe(brand_id=brand.id, platform=pf, kind="keyword", source="niche", label=term, query=f"{term} {geo}"))
     session.flush()
 
 
@@ -359,6 +369,9 @@ class BrandConfigBody(BaseModel):
     sphere:         Optional[str]       = None
     geo:            Optional[str]       = None
     category_terms: Optional[list[str]] = None
+    audience_terms: Optional[list[str]] = None
+    followers:      Optional[int]       = None
+    local_mode:     Optional[bool]      = None
 
 @app.post("/brands/{brand_id}/config")
 def update_brand_config(brand_id: int, body: BrandConfigBody, user: User = Depends(current_user), session: Session = Depends(db)):
@@ -373,9 +386,12 @@ def update_brand_config(brand_id: int, body: BrandConfigBody, user: User = Depen
     if body.sphere         is not None: b.sphere         = body.sphere
     if body.geo            is not None: b.geo            = body.geo
     if body.category_terms is not None: b.category_terms = json.dumps(_clean_list(body.category_terms))
+    if body.audience_terms is not None: b.audience_terms = json.dumps(_clean_list(body.audience_terms))
+    if body.followers      is not None: b.followers      = body.followers
+    if body.local_mode     is not None: b.local_mode     = body.local_mode
     if body.keywords       is not None: b.keywords       = json.dumps(_clean_list(body.keywords))
     # Rebuild probes (brand + competitor + niche) so collect picks up every source
-    if any(v is not None for v in (body.keywords, body.competitors, body.niche_keywords, body.category_terms, body.geo)):
+    if any(v is not None for v in (body.keywords, body.competitors, body.niche_keywords, body.category_terms, body.geo, body.audience_terms, body.local_mode)):
         _rebuild_probes(session, b)
     session.commit()
     return _brand_card(b)
@@ -412,10 +428,13 @@ def suggest_brand(body: SuggestBody, user: User = Depends(current_user)):
         f'category_terms (4-6 категорий, по которым ищется вся ниша города: для салона '
         f'«салон красоты», «маникюр», «брови», «косметолог», «бьюти мастер»). Для '
         f'федеральных/онлайн брендов category_terms=[]. '
+        f'Сгенерируй audience_terms — 8-12 широких тем целевой аудитории бренда '
+        f'(для салона красоты: женское, лайфстайл, мода, уют, дети, отношения, '
+        f'готовка, шопинг, фитнес). Для глобальных/нетематических — []. '
         f'Определи рынок: если бренд русскоязычный или ориентирован на СНГ — '
         f'верни "market":"ru" и предлагай ТОЛЬКО русскоязычных конкурентов из СНГ '
         f'(без иностранных). Иначе "market":"global". '
-        f'Ответ строго в JSON: {{"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[],"sphere":"","geo":"","category_terms":[],"market":""}}'
+        f'Ответ строго в JSON: {{"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[],"sphere":"","geo":"","category_terms":[],"audience_terms":[],"market":""}}'
     )
 
     def _call():
@@ -452,6 +471,7 @@ def suggest_brand(body: SuggestBody, user: User = Depends(current_user)):
         "sphere":         data.get("sphere", "") or "",
         "geo":            data.get("geo", "") or "",
         "category_terms": data.get("category_terms", []),
+        "audience_terms": data.get("audience_terms", []),
         "market":         data.get("market") or "global",
     }
 
@@ -552,6 +572,8 @@ def profile_scan(body: ScanBody, user: User = Depends(current_user)):
         "sphere":            profile.get("sphere", "") or "",
         "geo":               profile.get("geo", "") or "",
         "category_terms":    profile.get("category_terms", []),
+        "audience_terms":    profile.get("audience_terms", []),
+        "followers":         followers,
         "market":            profile.get("market") or "global",
         "audience_sentiment": sentiment,
         "scanned":           scanned,
@@ -569,6 +591,9 @@ class OnboardingBody(BaseModel):
     sphere:         str = ""
     geo:            str = ""
     category_terms: list[str] = []
+    audience_terms: list[str] = []
+    followers:      int = 0
+    local_mode:     bool = False
 
 @app.post("/onboarding")
 def onboarding(body: OnboardingBody, user: User = Depends(current_user), session: Session = Depends(db)):
@@ -587,6 +612,9 @@ def onboarding(body: OnboardingBody, user: User = Depends(current_user), session
         sphere=body.sphere or "",
         geo=body.geo or "",
         category_terms=json.dumps(_clean_list(body.category_terms)),
+        audience_terms=json.dumps(_clean_list(body.audience_terms)),
+        followers=body.followers or 0,
+        local_mode=bool(body.local_mode or (0 < (body.followers or 0) <= 1000 and bool(body.geo))),
         auto_collect=True,
     )
     session.add(b)
@@ -790,12 +818,13 @@ def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
 
     # New comments only; cheap spam rules first, then one batched Claude ad-check.
     from .collector import MIN_FOLLOWERS
+    local = bool(getattr(brand, "local_mode", False))
     new = [fc for fc in fetched if fc.comment_id not in existing]
-    # Tiny-account floor for comments: 0 < followers < 100 → hide. followers==0
-    # (no data, common for comments) is not penalized.
+    # Tiny-account floor for comments: 0 < followers < 100 → hide (off in local_mode).
+    # followers==0 (no data, common for comments) is not penalized.
     cheap_spam = {
         fc.comment_id: looks_like_ad_cheap(fc.text, fc.author, [])
-                       or (0 < (fc.followers or 0) < MIN_FOLLOWERS)
+                       or (not local and 0 < (fc.followers or 0) < MIN_FOLLOWERS)
         for fc in new
     }
     survivors = [fc for fc in new if not cheap_spam[fc.comment_id]]

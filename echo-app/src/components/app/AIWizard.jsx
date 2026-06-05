@@ -24,6 +24,9 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
   const [sphere, setSphere]         = useState(brand?.sphere ?? '');
   const [geo, setGeo]               = useState(brand?.geo ?? '');
   const [categoryTerms, setCategoryTerms] = useState(brand?.category_terms ?? []);
+  const [audienceTerms, setAudienceTerms] = useState(brand?.audience_terms ?? []);
+  const [followers, setFollowers]   = useState(brand?.followers ?? 0);
+  const [localMode, setLocalMode]   = useState(brand?.local_mode ?? false);
   const [scanning, setScanning]     = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -49,6 +52,7 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
       if (data.sphere)                 setSphere(data.sphere);
       if (data.geo)                    setGeo(data.geo);
       if (data.category_terms?.length) setCategoryTerms(data.category_terms);
+      if (data.audience_terms?.length) setAudienceTerms(data.audience_terms);
       if (!data.keywords?.length && !data.competitors?.length) {
         showToast('AI не смог подобрать автоматически — заполните вручную.');
       }
@@ -77,6 +81,10 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
       if (data.sphere)                 setSphere(data.sphere);
       if (data.geo)                    setGeo(data.geo);
       if (data.category_terms?.length) setCategoryTerms(data.category_terms);
+      if (data.audience_terms?.length) setAudienceTerms(data.audience_terms);
+      if (typeof data.followers === 'number') setFollowers(data.followers);
+      // auto local mode: small account + a city
+      if (data.geo && data.followers > 0 && data.followers <= 1000) setLocalMode(true);
       setStep(1);
     } catch (e) {
       const msg = String(e.message || '');
@@ -112,7 +120,7 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
     try {
       let result;
       if (mode === 'create') {
-        result = await api.createBrand(name.trim(), keywords, hashtags, competitors, niche, toneExamples, market, sphere, geo, categoryTerms);
+        result = await api.createBrand(name.trim(), keywords, hashtags, competitors, niche, toneExamples, market, sphere, geo, categoryTerms, audienceTerms, followers, localMode);
         api.collectBrand(result.id).catch(() => {});
       } else {
         await api.updateBrandConfig(brand.id, {
@@ -120,8 +128,9 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
           exclusions: brand.exclusions ?? [],
           competitors, niche_keywords: niche,
           tone_examples: toneExamples, market, sphere, geo, category_terms: categoryTerms,
+          audience_terms: audienceTerms, followers, local_mode: localMode,
         });
-        result = { ...brand, name: name.trim(), keywords, hashtags, competitors, niche_keywords: niche, tone_examples: toneExamples, market, sphere, geo, category_terms: categoryTerms };
+        result = { ...brand, name: name.trim(), keywords, hashtags, competitors, niche_keywords: niche, tone_examples: toneExamples, market, sphere, geo, category_terms: categoryTerms, audience_terms: audienceTerms, followers, local_mode: localMode };
       }
       onSaved?.(result);
     } catch (e) {
@@ -259,6 +268,18 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
           </div>
           {categoryTerms.length > 0 && (
             <TagGroup label="Категории конкурентов" list={categoryTerms} setList={setCategoryTerms} />
+          )}
+          <div className={styles.section}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, color: 'var(--fg-2)' }}>
+              <input type="checkbox" checked={localMode} onChange={e => setLocalMode(e.target.checked)} />
+              Локальный бизнес — широкая выдача по городу
+            </label>
+            <div style={{ fontSize: 11, color: 'var(--fg-4)' }}>
+              Показывать весь городской контент аудитории (для салона — женский/лайфстайл). Авто для аккаунтов ≤1000 подписчиков с городом.
+            </div>
+          </div>
+          {localMode && audienceTerms.length > 0 && (
+            <TagGroup label="Темы аудитории" list={audienceTerms} setList={setAudienceTerms} />
           )}
           {voiceDescription && (
             <div className={styles.section}>

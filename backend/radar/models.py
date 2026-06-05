@@ -30,6 +30,9 @@ class Brand(Base):
     sphere:                Mapped[str]      = mapped_column(Text, default="")  # brand DNA / industry
     geo:                   Mapped[str]      = mapped_column(Text, default="")  # city/region, "" = national
     category_terms:        Mapped[str]      = mapped_column(Text, default="[]")  # service-category competitors
+    audience_terms:        Mapped[str]      = mapped_column(Text, default="[]")  # broad audience themes (local mode)
+    followers:             Mapped[int]      = mapped_column(Integer, default=0)
+    local_mode:            Mapped[bool]     = mapped_column(Boolean, default=False)
     market:                Mapped[str]      = mapped_column(Text, default="global")  # ru | global
     auto_collect:          Mapped[bool]     = mapped_column(Boolean, default=False)
     mention_limit_monthly: Mapped[int]      = mapped_column(Integer, default=10000)
@@ -43,6 +46,7 @@ class Brand(Base):
     def competitors_list(self):    return json.loads(self.competitors)
     def niche_keywords_list(self): return json.loads(self.niche_keywords or "[]")
     def category_terms_list(self): return json.loads(self.category_terms or "[]")
+    def audience_terms_list(self): return json.loads(self.audience_terms or "[]")
     def tone_examples_list(self):  return json.loads(self.tone_examples or "[]")
 
 class Probe(Base):

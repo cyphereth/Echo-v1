@@ -20,9 +20,12 @@ def _now(): return datetime.now(timezone.utc)
 def _is_viral(post: Post) -> bool:
     return (post.likes or 0) >= VIRAL_LIKES or (post.views or 0) >= VIRAL_VIEWS
 
-def _below_follower_floor(post: Post) -> bool:
+def _below_follower_floor(post: Post, local_mode: bool = False) -> bool:
     """Tiny account (0 < followers < 100) whose post didn't go viral. followers==0
-    means 'unknown' (no data) — not penalized."""
+    means 'unknown' (no data) — not penalized. In local_mode the floor is off:
+    ordinary city residents (few followers) ARE the local audience."""
+    if local_mode:
+        return False
     f = post.followers or 0
     return 0 < f < MIN_FOLLOWERS and not _is_viral(post)
 
@@ -127,7 +130,7 @@ def collect_probe(session: Session, probe: Probe, provider: SearchProvider) -> i
                 if age > 7: continue
                 # Cheap ad/spam rules + tiny-account floor → store-but-hide.
                 spam = looks_like_ad_cheap(post.text, post.author, post.hashtags) \
-                    or _below_follower_floor(post)
+                    or _below_follower_floor(post, getattr(brand, "local_mode", False))
                 mention = _upsert_mention(session, post, brand.id)
                 mention.source = probe.source
                 mention.competitor = probe.label if probe.source == "competitor" else None
@@ -161,7 +164,10 @@ def collect_geo(session: Session, brand: Brand, provider: SearchProvider) -> int
         return 0
     # Topical terms: a geotagged post is only relevant if it's about the brand's
     # niche/category/sphere — otherwise location_posts is just "random city content".
+    local = getattr(brand, "local_mode", False)
     terms = [t.lower() for t in (brand.niche_keywords_list() + brand.category_terms_list())]
+    if local:
+        terms += [t.lower() for t in brand.audience_terms_list()]
     sphere_words = [w.lower() for w in (getattr(brand, "sphere", "") or "").split() if len(w) > 3]
     def _on_topic(text: str) -> bool:
         t = text.lower()
@@ -172,7 +178,7 @@ def collect_geo(session: Session, brand: Brand, provider: SearchProvider) -> int
         posts = provider.fetch_location_posts(city, "instagram", limit=15)
         for post in posts:
             spam = looks_like_ad_cheap(post.text, post.author, post.hashtags) \
-                or _below_follower_floor(post)
+                or _below_follower_floor(post, local)
             clean = " ".join(w for w in post.text.split() if not w.startswith("#")).strip()
             if len(clean) < MIN_TEXT_LEN and not spam:
                 spam = True

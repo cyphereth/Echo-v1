@@ -36,6 +36,8 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "user_id":        "INTEGER",
         "market":         "TEXT DEFAULT 'global'",
         "sphere":         "TEXT DEFAULT ''",
+        "geo":            "TEXT DEFAULT ''",
+        "category_terms": "TEXT DEFAULT '[]'",
     },
     "probes": {
         "source": "TEXT DEFAULT 'brand'",

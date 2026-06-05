@@ -175,3 +175,45 @@ def test_follower_floor_big_account_kept():
     from radar.collector import _below_follower_floor
     p = _mk_post("нормальный пост", views=0); p.followers = 5000
     assert _below_follower_floor(p) is False
+
+
+def test_rebuild_probes_geo_and_category():
+    import json
+    from radar import db
+    from radar.models import Brand, Probe
+    from radar.api import _rebuild_probes
+    s = db.get_session()
+    b = Brand(name="TestSalon", user_id=1,
+              keywords=json.dumps(["мой салон"]),
+              competitors=json.dumps(["Конкурент1"]),
+              niche_keywords=json.dumps(["маникюр"]),
+              category_terms=json.dumps(["салон красоты"]),
+              geo="Москва")
+    s.add(b); s.flush()
+    _rebuild_probes(s, b)
+    probes = s.query(Probe).filter_by(brand_id=b.id).all()
+    q = {(p.source, p.query) for p in probes}
+    # brand & named competitor: no city
+    assert ("brand", "мой салон") in q
+    assert ("competitor", "Конкурент1") in q
+    # category (competitor source) & niche: city appended
+    assert ("competitor", "салон красоты Москва") in q
+    assert ("niche", "маникюр Москва") in q
+    # cleanup
+    s.query(Probe).filter_by(brand_id=b.id).delete()
+    s.delete(b); s.commit()
+
+def test_rebuild_probes_no_geo():
+    import json
+    from radar import db
+    from radar.models import Brand, Probe
+    from radar.api import _rebuild_probes
+    s = db.get_session()
+    b = Brand(name="Fed", user_id=1, keywords=json.dumps(["бренд"]),
+              competitors=json.dumps([]), niche_keywords=json.dumps(["тема"]),
+              category_terms=json.dumps([]), geo="")
+    s.add(b); s.flush()
+    _rebuild_probes(s, b)
+    q = {(p.source, p.query) for p in s.query(Probe).filter_by(brand_id=b.id).all()}
+    assert ("niche", "тема") in q  # no city appended
+    s.query(Probe).filter_by(brand_id=b.id).delete(); s.delete(b); s.commit()

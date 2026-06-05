@@ -214,11 +214,14 @@ def _profile_with_claude(name_hint: str, bio: str, followers: int,
         f"{sentiment.get('negative',0)} нег / {sentiment.get('neutral',0)} нейтр\n\n"
         'Определи ДНК бренда — сферу и интересы аудитории 1-2 фразами (поле "sphere"). '
         'niche_keywords подбери ШИРОКО: тематика + индустрия + смежные интересы ЦА.\n'
+        'Определи город (geo), если бизнес локальный — иначе "". Для локального '
+        'сервисного бизнеса сгенерируй category_terms (4-6 категорий ниши города), '
+        'иначе [].\n'
         'Определи рынок: если бренд русскоязычный или ориентирован на СНГ — '
         'верни "market":"ru" и предлагай ТОЛЬКО русскоязычных конкурентов из СНГ '
         '(без иностранных). Иначе "market":"global".\n'
         'Верни JSON: {"name":"","voice_description":"","tone_examples":[],'
-        '"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[],"sphere":"","market":""}'
+        '"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[],"sphere":"","geo":"","category_terms":[],"market":""}'
     )
 
     def _call():
@@ -293,6 +296,8 @@ def _brand_card(b: Brand) -> dict:
         "tone_examples": b.tone_examples_list(),
         "market":        getattr(b, "market", "global") or "global",
         "sphere":        getattr(b, "sphere", "") or "",
+        "geo":           getattr(b, "geo", "") or "",
+        "category_terms": b.category_terms_list() if hasattr(b, "category_terms_list") else [],
         "auto_collect":  bool(b.auto_collect),
         "probes":        [{"id": p.id, "query": p.query, "kind": p.kind, "source": p.source, "platform": p.platform} for p in b.probes],
     }
@@ -307,13 +312,20 @@ MONITORED_PLATFORMS = ("tiktok", "instagram")
 def _rebuild_probes(session: Session, brand: Brand) -> None:
     """Replace a brand's probes from its current keywords / competitors / niche."""
     session.query(Probe).filter_by(brand_id=brand.id).delete()
+    geo = (getattr(brand, "geo", "") or "").strip()
+    # City is appended only to audience-discovery probes (category + niche) —
+    # brand & named-competitor mentions don't depend on the city.
+    def geoq(term):
+        return f"{term} {geo}" if geo else term
     for pf in MONITORED_PLATFORMS:
         for kw in brand.keywords_list():
             session.add(Probe(brand_id=brand.id, platform=pf, kind="keyword", source="brand", query=kw))
         for comp in brand.competitors_list():
             session.add(Probe(brand_id=brand.id, platform=pf, kind="keyword", source="competitor", label=comp, query=comp))
+        for cat in brand.category_terms_list():
+            session.add(Probe(brand_id=brand.id, platform=pf, kind="keyword", source="competitor", label=cat, query=geoq(cat)))
         for term in brand.niche_keywords_list():
-            session.add(Probe(brand_id=brand.id, platform=pf, kind="keyword", source="niche", label=term, query=term))
+            session.add(Probe(brand_id=brand.id, platform=pf, kind="keyword", source="niche", label=term, query=geoq(term)))
     session.flush()
 
 
@@ -345,6 +357,8 @@ class BrandConfigBody(BaseModel):
     tone_examples:  Optional[list[str]] = None
     market:         Optional[str]       = None
     sphere:         Optional[str]       = None
+    geo:            Optional[str]       = None
+    category_terms: Optional[list[str]] = None
 
 @app.post("/brands/{brand_id}/config")
 def update_brand_config(brand_id: int, body: BrandConfigBody, user: User = Depends(current_user), session: Session = Depends(db)):
@@ -357,9 +371,11 @@ def update_brand_config(brand_id: int, body: BrandConfigBody, user: User = Depen
     if body.tone_examples  is not None: b.tone_examples  = json.dumps(body.tone_examples)
     if body.market         is not None: b.market         = body.market
     if body.sphere         is not None: b.sphere         = body.sphere
+    if body.geo            is not None: b.geo            = body.geo
+    if body.category_terms is not None: b.category_terms = json.dumps(_clean_list(body.category_terms))
     if body.keywords       is not None: b.keywords       = json.dumps(_clean_list(body.keywords))
     # Rebuild probes (brand + competitor + niche) so collect picks up every source
-    if any(v is not None for v in (body.keywords, body.competitors, body.niche_keywords)):
+    if any(v is not None for v in (body.keywords, body.competitors, body.niche_keywords, body.category_terms, body.geo)):
         _rebuild_probes(session, b)
     session.commit()
     return _brand_card(b)
@@ -391,10 +407,15 @@ def suggest_brand(body: SuggestBody, user: User = Depends(current_user)):
         f'niche_keywords подбери ШИРОКО (5-8): узкая тематика + темы индустрии + смежные '
         f'интересы ЦА (для косметологии: уход за кожей, бьюти-процедуры, тренды красоты, '
         f'макияж, велнес, селф-кер). '
+        f'Определи город (geo), если это локальный бизнес (салон/клиника в конкретном '
+        f'городе) — иначе "". Если это локальный СЕРВИСНЫЙ бизнес — сгенерируй '
+        f'category_terms (4-6 категорий, по которым ищется вся ниша города: для салона '
+        f'«салон красоты», «маникюр», «брови», «косметолог», «бьюти мастер»). Для '
+        f'федеральных/онлайн брендов category_terms=[]. '
         f'Определи рынок: если бренд русскоязычный или ориентирован на СНГ — '
         f'верни "market":"ru" и предлагай ТОЛЬКО русскоязычных конкурентов из СНГ '
         f'(без иностранных). Иначе "market":"global". '
-        f'Ответ строго в JSON: {{"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[],"sphere":"","market":""}}'
+        f'Ответ строго в JSON: {{"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[],"sphere":"","geo":"","category_terms":[],"market":""}}'
     )
 
     def _call():
@@ -429,6 +450,8 @@ def suggest_brand(body: SuggestBody, user: User = Depends(current_user)):
         "competitors":    data.get("competitors", []),
         "niche_keywords": data.get("niche_keywords", []),
         "sphere":         data.get("sphere", "") or "",
+        "geo":            data.get("geo", "") or "",
+        "category_terms": data.get("category_terms", []),
         "market":         data.get("market") or "global",
     }
 
@@ -527,6 +550,8 @@ def profile_scan(body: ScanBody, user: User = Depends(current_user)):
         "competitors":       profile.get("competitors", []),
         "niche_keywords":    profile.get("niche_keywords", []),
         "sphere":            profile.get("sphere", "") or "",
+        "geo":               profile.get("geo", "") or "",
+        "category_terms":    profile.get("category_terms", []),
         "market":            profile.get("market") or "global",
         "audience_sentiment": sentiment,
         "scanned":           scanned,
@@ -542,6 +567,8 @@ class OnboardingBody(BaseModel):
     tone_examples:  list[str] = []
     market:         str = "global"
     sphere:         str = ""
+    geo:            str = ""
+    category_terms: list[str] = []
 
 @app.post("/onboarding")
 def onboarding(body: OnboardingBody, user: User = Depends(current_user), session: Session = Depends(db)):
@@ -558,6 +585,8 @@ def onboarding(body: OnboardingBody, user: User = Depends(current_user), session
         tone_examples=json.dumps(body.tone_examples),
         market=body.market or "global",
         sphere=body.sphere or "",
+        geo=body.geo or "",
+        category_terms=json.dumps(_clean_list(body.category_terms)),
         auto_collect=True,
     )
     session.add(b)
@@ -599,6 +628,13 @@ def _run_collect(brand_id: int) -> dict:
                 total += count
             except Exception as e:
                 log.warning("Probe '%s' failed: %s", probe.query, e)
+
+        # Best-effort geo: IG posts geotagged in the brand's city (fail-open).
+        try:
+            from .collector import collect_geo
+            total += collect_geo(session, brand, provider)
+        except Exception as e:
+            log.warning("collect_geo failed: %s", e)
 
         # Classify + draft (shared with the scheduler)
         result = classify_and_draft(session, brand_id)

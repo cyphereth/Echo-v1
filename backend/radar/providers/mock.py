@@ -57,6 +57,9 @@ class MockProvider(SearchProvider):
             "username": username,
         }
 
+    def fetch_location_posts(self, city: str, platform: str = "instagram", limit: int = 15) -> list[Post]:
+        return []
+
     def fetch_user_posts(self, username: str, platform: str = "tiktok", limit: int = 15) -> list[Post]:
         now = datetime.now(timezone.utc)
         return [Post(

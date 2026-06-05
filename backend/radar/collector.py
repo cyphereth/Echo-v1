@@ -134,3 +134,36 @@ def collect_probe(session: Session, probe: Probe, provider: SearchProvider) -> i
         log.exception("Probe %s failed — watermark NOT moved", probe.id)
         raise
     return count
+
+
+def collect_geo(session: Session, brand: Brand, provider: SearchProvider) -> int:
+    """Best-effort: pull IG posts geotagged in the brand's city and store as niche.
+    Fail-open — never raises into the main collect."""
+    city = (getattr(brand, "geo", "") or "").strip()
+    if not city:
+        return 0
+    count = 0
+    try:
+        posts = provider.fetch_location_posts(city, "instagram", limit=15)
+        for post in posts:
+            spam = looks_like_ad_cheap(post.text, post.author, post.hashtags) \
+                or _below_follower_floor(post)
+            clean = " ".join(w for w in post.text.split() if not w.startswith("#")).strip()
+            if len(clean) < MIN_TEXT_LEN and not spam:
+                spam = True
+            mention = _upsert_mention(session, post, brand.id)
+            mention.source = "niche"
+            mention.is_spam = spam
+            if spam:
+                continue
+            session.add(MentionSnapshot(
+                mention_id=mention.id, ts=_now(),
+                likes=post.likes, views=post.views,
+                comments=post.comments, shares=post.shares,
+            ))
+            count += 1
+        session.commit()
+    except Exception:
+        session.rollback()
+        log.warning("collect_geo failed for brand %s city %r", brand.id, city)
+    return count

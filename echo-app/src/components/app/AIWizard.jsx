@@ -22,6 +22,8 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
   const [audience, setAudience]     = useState(null);
   const [market, setMarket]         = useState(brand?.market ?? 'global');
   const [sphere, setSphere]         = useState(brand?.sphere ?? '');
+  const [geo, setGeo]               = useState(brand?.geo ?? '');
+  const [categoryTerms, setCategoryTerms] = useState(brand?.category_terms ?? []);
   const [scanning, setScanning]     = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -45,6 +47,8 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
       if (data.niche_keywords?.length) setNiche(data.niche_keywords);
       if (data.market)                 setMarket(data.market);
       if (data.sphere)                 setSphere(data.sphere);
+      if (data.geo)                    setGeo(data.geo);
+      if (data.category_terms?.length) setCategoryTerms(data.category_terms);
       if (!data.keywords?.length && !data.competitors?.length) {
         showToast('AI не смог подобрать автоматически — заполните вручную.');
       }
@@ -71,6 +75,8 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
       if (data.audience_sentiment)     setAudience(data.audience_sentiment);
       if (data.market)                 setMarket(data.market);
       if (data.sphere)                 setSphere(data.sphere);
+      if (data.geo)                    setGeo(data.geo);
+      if (data.category_terms?.length) setCategoryTerms(data.category_terms);
       setStep(1);
     } catch (e) {
       const msg = String(e.message || '');
@@ -106,16 +112,16 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
     try {
       let result;
       if (mode === 'create') {
-        result = await api.createBrand(name.trim(), keywords, hashtags, competitors, niche, toneExamples, market, sphere);
+        result = await api.createBrand(name.trim(), keywords, hashtags, competitors, niche, toneExamples, market, sphere, geo, categoryTerms);
         api.collectBrand(result.id).catch(() => {});
       } else {
         await api.updateBrandConfig(brand.id, {
           name: name.trim(), keywords, hashtags,
           exclusions: brand.exclusions ?? [],
           competitors, niche_keywords: niche,
-          tone_examples: toneExamples, market, sphere,
+          tone_examples: toneExamples, market, sphere, geo, category_terms: categoryTerms,
         });
-        result = { ...brand, name: name.trim(), keywords, hashtags, competitors, niche_keywords: niche, tone_examples: toneExamples, market, sphere };
+        result = { ...brand, name: name.trim(), keywords, hashtags, competitors, niche_keywords: niche, tone_examples: toneExamples, market, sphere, geo, category_terms: categoryTerms };
       }
       onSaved?.(result);
     } catch (e) {
@@ -242,6 +248,18 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
               placeholder="Сфера бренда и интересы аудитории (определяется AI)"
             />
           </div>
+          <div className={styles.section}>
+            <div className={styles.sectionLabel}>📍 Город (локальный бизнес)</div>
+            <input
+              className={styles.nameInput}
+              value={geo}
+              onChange={e => setGeo(e.target.value)}
+              placeholder="Напр. Москва — пусто для федерального бренда"
+            />
+          </div>
+          {categoryTerms.length > 0 && (
+            <TagGroup label="Категории конкурентов" list={categoryTerms} setList={setCategoryTerms} />
+          )}
           {voiceDescription && (
             <div className={styles.section}>
               <div className={styles.sectionLabel}>Голос бренда</div>

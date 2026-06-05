@@ -254,6 +254,34 @@ class TikHubProvider(SearchProvider):
             log.warning("fetch_user_posts failed (%s/%s): %s", platform, username, e)
             return []
 
+    def fetch_location_posts(self, city: str, platform: str = "instagram", limit: int = 15) -> list[Post]:
+        """Best-effort geo: resolve city -> IG location -> recent posts. Fail-open."""
+        if platform != "instagram" or not city.strip():
+            return []
+        try:
+            r = httpx.get(
+                f"{BASE_URL}/api/v1/instagram/v2/search_locations",
+                headers=self._headers, params={"keyword": city}, timeout=25,
+            )
+            r.raise_for_status()
+            items = ((r.json().get("data", {}) or {}).get("data", {}) or {}).get("items", []) or []
+            if not items:
+                return []
+            loc_id = items[0].get("id")
+            if not loc_id:
+                return []
+            r2 = httpx.get(
+                f"{BASE_URL}/api/v1/instagram/v2/fetch_location_posts",
+                headers=self._headers, params={"location_id": loc_id}, timeout=25,
+            )
+            r2.raise_for_status()
+            posts_items = ((r2.json().get("data", {}) or {}).get("data", {}) or {}).get("items", []) or []
+            out = [p for it in posts_items if (p := self._safe_parse_ig_v3(it)) is not None]
+            return out[:limit]
+        except Exception as e:
+            log.warning("fetch_location_posts failed for %r: %s", city, e)
+            return []
+
 
 # ── parsers: TikTok ─────────────────────────────────────────────────────────
 def _parse_tiktok_comment(c: dict) -> Comment:

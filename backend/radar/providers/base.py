@@ -47,3 +47,7 @@ class SearchProvider(ABC):
     def fetch_user_posts(self, username: str, platform: str = "tiktok", limit: int = 15) -> list["Post"]:
         """Posts authored by the account. Empty list if unavailable."""
         return []
+
+    def fetch_location_posts(self, city: str, platform: str = "instagram", limit: int = 15) -> list["Post"]:
+        """Posts geotagged in a city. Best-effort; providers that don't support it return []."""
+        return []

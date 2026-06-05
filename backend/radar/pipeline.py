@@ -76,6 +76,22 @@ def classify_and_draft(session: Session, brand_id: int) -> dict:
     # "database is locked".
     session.commit()
 
+    # Local mode: a salon wants CLIENTS in the audience feed, not other masters.
+    # Route service-providers in the niche lane over to the competitor lane.
+    if getattr(brand, "local_mode", False):
+        from .spam import looks_like_provider_cheap, classify_providers_batch
+        niche_ms = [m for m in unclassified if m.source == "niche"]
+        if niche_ms:
+            cheap = {id(m): looks_like_provider_cheap(m.text, m.author) for m in niche_ms}
+            undecided = [m for m in niche_ms if not cheap[id(m)]]
+            flags = classify_providers_batch([m.text for m in undecided])
+            ai = {id(m): bool(f) for m, f in zip(undecided, flags)}
+            for m in niche_ms:
+                if cheap[id(m)] or ai.get(id(m)):
+                    m.source = "competitor"
+                    m.competitor = m.author
+            session.commit()
+
     tone_examples = brand.tone_examples_list()
     edits         = recent_edits(session, brand_id)
     drafted = 0

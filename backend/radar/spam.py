@@ -33,6 +33,80 @@ SELLER_NAME_HINTS = [
 ]
 
 
+PROVIDER_NAME_HINTS = ["nails", "nail", "brows", "brow", "makeup", "lash", "studio",
+    "beauty", "salon", "мастер", "master", "stylist", "barber", "manicure", "permanent"]
+PROVIDER_PHRASES = ["запись", "записаться", "по записи", "записывайтесь", "прайс",
+    "услуги", "директ для записи", "запись в директ", "коррекция", "наращивание",
+    "свободные окошки", "свободное время", "адрес студии"]
+
+
+def looks_like_provider_cheap(text: str, author: str) -> bool:
+    """A service provider (master/salon/business) rather than a regular person.
+    Used in local_mode to route providers to the competitor lane."""
+    a = (author or "").lower()
+    # Hint must be a segment of the handle (bounded by . _ digits / ends), not a
+    # substring inside a word — otherwise "nail" matches "Наилевна" (a patronymic).
+    for h in PROVIDER_NAME_HINTS:
+        if re.search(r"(?<![a-zа-яё])" + re.escape(h) + r"(?![a-zа-яё])", a):
+            return True
+    t = (text or "").lower()
+    return any(p in t for p in PROVIDER_PHRASES)
+
+
+def classify_providers_batch(texts: list) -> list:
+    """Claude per text: service PROVIDER (master/salon/business) vs regular person
+    (potential client)? Returns list[bool] is_provider. Fail-open = all False."""
+    n = len(texts)
+    if n == 0:
+        return []
+    if not LLM_API_KEY:
+        return [False] * n
+    import httpx
+    numbered = "\n".join(f"{i}. {(t or '')[:200]}" for i, t in enumerate(texts))
+    system = (
+        "Ты фильтр аудитории. Для каждого текста реши: это аккаунт ПРОВАЙДЕРА услуг "
+        "(мастер, салон, студия, бизнес — предлагает услуги/записи) или ОБЫЧНЫЙ человек "
+        "(потенциальный клиент, делится жизнью). Отвечай ТОЛЬКО валидным JSON."
+    )
+    user = (
+        f"Тексты:\n{numbered}\n\n"
+        f'Верни JSON-массив: [{{"i":0,"is_provider":false}}, ...]. '
+        f'is_provider=true только для мастеров/салонов/бизнеса.'
+    )
+
+    def _call():
+        resp = httpx.post(
+            LLM_API_URL,
+            headers={"x-api-key": LLM_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            json={"model": "claude-haiku-4-5-20251001", "max_tokens": 40 + n * 20,
+                  "system": system, "messages": [{"role": "user", "content": user}]},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        blocks = resp.json().get("content", [])
+        text = next((b["text"] for b in blocks if b.get("type") == "text"), "")
+        text = text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        return json.loads(text)
+
+    try:
+        data = _call()
+    except Exception:
+        try:
+            data = _call()
+        except Exception as e:
+            log.warning("classify_providers_batch failed: %s", e)
+            return [False] * n
+    flags = [False] * n
+    try:
+        for obj in data:
+            i = obj.get("i")
+            if isinstance(i, int) and 0 <= i < n:
+                flags[i] = bool(obj.get("is_provider"))
+    except Exception:
+        return [False] * n
+    return flags
+
+
 def looks_like_ad_cheap(text: str, author: str, hashtags: Optional[list] = None,
                         min_len: int = MIN_LEN, max_len: int = MAX_LEN) -> bool:
     """Level-1 rules — no network. True = obvious ad/spam."""

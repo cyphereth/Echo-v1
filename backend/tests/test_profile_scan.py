@@ -275,3 +275,39 @@ def test_local_mode_off_no_audience_probes():
     q = {p.query for p in s.query(Probe).filter_by(brand_id=b.id).all()}
     assert "женское Казань" not in q
     s.query(Probe).filter_by(brand_id=b.id).delete(); s.delete(b); s.commit()
+
+
+def test_provider_by_handle():
+    from radar.spam import looks_like_provider_cheap
+    assert looks_like_provider_cheap("красивый дизайн сегодня", "aiva.nails") is True
+    assert looks_like_provider_cheap("работаем для вас", "kazan_brows_studio") is True
+
+def test_provider_by_phrase():
+    from radar.spam import looks_like_provider_cheap
+    assert looks_like_provider_cheap("свободные окошки на завтра, запись в директ", "anna_k") is True
+
+def test_client_not_provider():
+    from radar.spam import looks_like_provider_cheap
+    assert looks_like_provider_cheap("когда лето чувствуется не только на улице", "lu_happy13") is False
+
+def test_tgk_not_provider_signal():
+    from radar.spam import looks_like_provider_cheap
+    # тгк link alone should not flag a regular person as provider
+    assert looks_like_provider_cheap("мой тгк: мойканал, заходите", "vasya_petrov") is False
+
+def test_classify_providers_no_key():
+    import radar.spam as sp
+    old = sp.LLM_API_KEY; sp.LLM_API_KEY = ""
+    try:
+        from radar.spam import classify_providers_batch
+        assert classify_providers_batch(["a","b"]) == [False, False]
+    finally:
+        sp.LLM_API_KEY = old
+
+
+def test_provider_handle_no_substring_collision():
+    from radar.spam import looks_like_provider_cheap
+    # "nail" inside the patronymic "Наилевна" must NOT flag a provider
+    assert looks_like_provider_cheap("ценить каждый момент", "leilanailevna.ph") is False
+    # but a real nail handle does
+    assert looks_like_provider_cheap("дизайн", "aiva.nails") is True

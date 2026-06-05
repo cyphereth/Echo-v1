@@ -182,8 +182,10 @@ def collect_geo(session: Session, brand: Brand, provider: SearchProvider) -> int
             clean = " ".join(w for w in post.text.split() if not w.startswith("#")).strip()
             if len(clean) < MIN_TEXT_LEN and not spam:
                 spam = True
-            # Off-topic city content (museums, cars, sport) → hide.
-            if not spam and not _on_topic(post.text):
+            # Off-topic city content (museums, cars, sport) → hide. In local_mode
+            # relevance is decided later by client/provider persona (a real
+            # client's lifestyle post won't contain a literal niche word).
+            if not spam and not local and not _on_topic(post.text):
                 spam = True
             mention = _upsert_mention(session, post, brand.id)
             mention.source = "niche"

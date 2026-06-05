@@ -212,11 +212,13 @@ def _profile_with_claude(name_hint: str, bio: str, followers: int,
         f"Реальные ответы бренда на комментарии:\n{replies_block}\n"
         f"Тональность аудитории: {sentiment.get('positive',0)} поз / "
         f"{sentiment.get('negative',0)} нег / {sentiment.get('neutral',0)} нейтр\n\n"
+        'Определи ДНК бренда — сферу и интересы аудитории 1-2 фразами (поле "sphere"). '
+        'niche_keywords подбери ШИРОКО: тематика + индустрия + смежные интересы ЦА.\n'
         'Определи рынок: если бренд русскоязычный или ориентирован на СНГ — '
         'верни "market":"ru" и предлагай ТОЛЬКО русскоязычных конкурентов из СНГ '
         '(без иностранных). Иначе "market":"global".\n'
         'Верни JSON: {"name":"","voice_description":"","tone_examples":[],'
-        '"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[],"market":""}'
+        '"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[],"sphere":"","market":""}'
     )
 
     def _call():
@@ -290,6 +292,7 @@ def _brand_card(b: Brand) -> dict:
         "niche_keywords": b.niche_keywords_list(),
         "tone_examples": b.tone_examples_list(),
         "market":        getattr(b, "market", "global") or "global",
+        "sphere":        getattr(b, "sphere", "") or "",
         "auto_collect":  bool(b.auto_collect),
         "probes":        [{"id": p.id, "query": p.query, "kind": p.kind, "source": p.source, "platform": p.platform} for p in b.probes],
     }
@@ -341,6 +344,7 @@ class BrandConfigBody(BaseModel):
     niche_keywords: Optional[list[str]] = None
     tone_examples:  Optional[list[str]] = None
     market:         Optional[str]       = None
+    sphere:         Optional[str]       = None
 
 @app.post("/brands/{brand_id}/config")
 def update_brand_config(brand_id: int, body: BrandConfigBody, user: User = Depends(current_user), session: Session = Depends(db)):
@@ -352,6 +356,7 @@ def update_brand_config(brand_id: int, body: BrandConfigBody, user: User = Depen
     if body.niche_keywords is not None: b.niche_keywords = json.dumps(_clean_list(body.niche_keywords))
     if body.tone_examples  is not None: b.tone_examples  = json.dumps(body.tone_examples)
     if body.market         is not None: b.market         = body.market
+    if body.sphere         is not None: b.sphere         = body.sphere
     if body.keywords       is not None: b.keywords       = json.dumps(_clean_list(body.keywords))
     # Rebuild probes (brand + competitor + niche) so collect picks up every source
     if any(v is not None for v in (body.keywords, body.competitors, body.niche_keywords)):
@@ -382,11 +387,14 @@ def suggest_brand(body: SuggestBody, user: User = Depends(current_user)):
         f'5-7 ключевых слов (на русском и латинице, вариации написания бренда), '
         f'3-5 хэштегов (с #), '
         f'3-5 прямых конкурентов (только названия компаний), '
-        f'3-5 нишевых терминов для мониторинга тематики. '
+        f'Определи ДНК бренда — его сферу и интересы аудитории 1-2 фразами (поле "sphere"). '
+        f'niche_keywords подбери ШИРОКО (5-8): узкая тематика + темы индустрии + смежные '
+        f'интересы ЦА (для косметологии: уход за кожей, бьюти-процедуры, тренды красоты, '
+        f'макияж, велнес, селф-кер). '
         f'Определи рынок: если бренд русскоязычный или ориентирован на СНГ — '
         f'верни "market":"ru" и предлагай ТОЛЬКО русскоязычных конкурентов из СНГ '
         f'(без иностранных). Иначе "market":"global". '
-        f'Ответ строго в JSON: {{"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[],"market":""}}'
+        f'Ответ строго в JSON: {{"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[],"sphere":"","market":""}}'
     )
 
     def _call():
@@ -420,6 +428,7 @@ def suggest_brand(body: SuggestBody, user: User = Depends(current_user)):
         "hashtags":       data.get("hashtags", []),
         "competitors":    data.get("competitors", []),
         "niche_keywords": data.get("niche_keywords", []),
+        "sphere":         data.get("sphere", "") or "",
         "market":         data.get("market") or "global",
     }
 
@@ -517,6 +526,7 @@ def profile_scan(body: ScanBody, user: User = Depends(current_user)):
         "hashtags":          profile.get("hashtags", []),
         "competitors":       profile.get("competitors", []),
         "niche_keywords":    profile.get("niche_keywords", []),
+        "sphere":            profile.get("sphere", "") or "",
         "market":            profile.get("market") or "global",
         "audience_sentiment": sentiment,
         "scanned":           scanned,
@@ -531,6 +541,7 @@ class OnboardingBody(BaseModel):
     niche_keywords: list[str] = []
     tone_examples:  list[str] = []
     market:         str = "global"
+    sphere:         str = ""
 
 @app.post("/onboarding")
 def onboarding(body: OnboardingBody, user: User = Depends(current_user), session: Session = Depends(db)):
@@ -546,6 +557,7 @@ def onboarding(body: OnboardingBody, user: User = Depends(current_user), session
         niche_keywords=json.dumps(_clean_list(body.niche_keywords)),
         tone_examples=json.dumps(body.tone_examples),
         market=body.market or "global",
+        sphere=body.sphere or "",
         auto_collect=True,
     )
     session.add(b)
@@ -741,8 +753,15 @@ def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
     is_comp_niche = mention.source in ("competitor", "niche")
 
     # New comments only; cheap spam rules first, then one batched Claude ad-check.
+    from .collector import MIN_FOLLOWERS
     new = [fc for fc in fetched if fc.comment_id not in existing]
-    cheap_spam = {fc.comment_id: looks_like_ad_cheap(fc.text, fc.author, []) for fc in new}
+    # Tiny-account floor for comments: 0 < followers < 100 → hide. followers==0
+    # (no data, common for comments) is not penalized.
+    cheap_spam = {
+        fc.comment_id: looks_like_ad_cheap(fc.text, fc.author, [])
+                       or (0 < (fc.followers or 0) < MIN_FOLLOWERS)
+        for fc in new
+    }
     survivors = [fc for fc in new if not cheap_spam[fc.comment_id]]
     ad_flags = classify_ads_batch([fc.text for fc in survivors])
     ad_spam = {fc.comment_id: bool(flag) for fc, flag in zip(survivors, ad_flags)}

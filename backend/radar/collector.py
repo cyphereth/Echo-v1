@@ -13,11 +13,18 @@ VIRAL_VIEWS  = 500_000  # views above this = viral (post passes filters regardle
 VIRAL_LIKES  = 1_500    # smaller RU market: 1.5k likes already means a post took off
 MAX_HASHTAGS = 3        # posts with more hashtags are usually low-value spam
 MIN_TEXT_LEN = 20       # posts/comments shorter than this are noise ("огонь", "👍")
+MIN_FOLLOWERS = 100     # accounts below this are hidden unless the post went viral
 
 def _now(): return datetime.now(timezone.utc)
 
 def _is_viral(post: Post) -> bool:
     return (post.likes or 0) >= VIRAL_LIKES or (post.views or 0) >= VIRAL_VIEWS
+
+def _below_follower_floor(post: Post) -> bool:
+    """Tiny account (0 < followers < 100) whose post didn't go viral. followers==0
+    means 'unknown' (no data) — not penalized."""
+    f = post.followers or 0
+    return 0 < f < MIN_FOLLOWERS and not _is_viral(post)
 
 def _passes_language(post: Post, brand: Brand) -> bool:
     """For RU/CIS brands keep only Cyrillic posts — unless the post is viral,
@@ -101,8 +108,9 @@ def collect_probe(session: Session, probe: Probe, provider: SearchProvider) -> i
                 if not _matches(post, brand, probe): continue
                 age = (_now().replace(tzinfo=None) - post.created_at.replace(tzinfo=None)).days
                 if age > 7: continue
-                # Cheap ad/spam rules → store-but-hide (is_spam), not a hard drop.
-                spam = looks_like_ad_cheap(post.text, post.author, post.hashtags)
+                # Cheap ad/spam rules + tiny-account floor → store-but-hide.
+                spam = looks_like_ad_cheap(post.text, post.author, post.hashtags) \
+                    or _below_follower_floor(post)
                 mention = _upsert_mention(session, post, brand.id)
                 mention.source = probe.source
                 mention.competitor = probe.label if probe.source == "competitor" else None

@@ -154,3 +154,24 @@ def test_competitor_word_boundary_no_substring():
     assert _matches(post("красивая обувь на лето"), b, P()) is False
     # but matches as a whole word
     assert _matches(post("заказал в ВБ вчера"), b, P()) is True
+
+
+def test_follower_floor_small_nonviral():
+    from radar.collector import _below_follower_floor
+    p = _mk_post("нормальный пост про доставку озон сегодня", views=0); p.followers = 50
+    assert _below_follower_floor(p) is True
+
+def test_follower_floor_small_viral_kept():
+    from radar.collector import _below_follower_floor
+    p = _mk_post("нормальный пост", views=600_000); p.followers = 50
+    assert _below_follower_floor(p) is False
+
+def test_follower_floor_unknown_not_penalized():
+    from radar.collector import _below_follower_floor
+    p = _mk_post("нормальный пост", views=0); p.followers = 0
+    assert _below_follower_floor(p) is False
+
+def test_follower_floor_big_account_kept():
+    from radar.collector import _below_follower_floor
+    p = _mk_post("нормальный пост", views=0); p.followers = 5000
+    assert _below_follower_floor(p) is False

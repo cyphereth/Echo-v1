@@ -35,6 +35,7 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "auto_collect":   "BOOLEAN DEFAULT 0",
         "user_id":        "INTEGER",
         "market":         "TEXT DEFAULT 'global'",
+        "sphere":         "TEXT DEFAULT ''",
     },
     "probes": {
         "source": "TEXT DEFAULT 'brand'",

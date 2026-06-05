@@ -21,6 +21,7 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
   const [toneExamples, setToneExamples] = useState(brand?.tone_examples ?? []);
   const [audience, setAudience]     = useState(null);
   const [market, setMarket]         = useState(brand?.market ?? 'global');
+  const [sphere, setSphere]         = useState(brand?.sphere ?? '');
   const [scanning, setScanning]     = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -43,6 +44,7 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
       if (data.competitors?.length)    setCompetitors(data.competitors);
       if (data.niche_keywords?.length) setNiche(data.niche_keywords);
       if (data.market)                 setMarket(data.market);
+      if (data.sphere)                 setSphere(data.sphere);
       if (!data.keywords?.length && !data.competitors?.length) {
         showToast('AI не смог подобрать автоматически — заполните вручную.');
       }
@@ -68,6 +70,7 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
       if (data.voice_description)      setVoiceDescription(data.voice_description);
       if (data.audience_sentiment)     setAudience(data.audience_sentiment);
       if (data.market)                 setMarket(data.market);
+      if (data.sphere)                 setSphere(data.sphere);
       setStep(1);
     } catch (e) {
       const msg = String(e.message || '');
@@ -103,16 +106,16 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
     try {
       let result;
       if (mode === 'create') {
-        result = await api.createBrand(name.trim(), keywords, hashtags, competitors, niche, toneExamples, market);
+        result = await api.createBrand(name.trim(), keywords, hashtags, competitors, niche, toneExamples, market, sphere);
         api.collectBrand(result.id).catch(() => {});
       } else {
         await api.updateBrandConfig(brand.id, {
           name: name.trim(), keywords, hashtags,
           exclusions: brand.exclusions ?? [],
           competitors, niche_keywords: niche,
-          tone_examples: toneExamples, market,
+          tone_examples: toneExamples, market, sphere,
         });
-        result = { ...brand, name: name.trim(), keywords, hashtags, competitors, niche_keywords: niche, tone_examples: toneExamples, market };
+        result = { ...brand, name: name.trim(), keywords, hashtags, competitors, niche_keywords: niche, tone_examples: toneExamples, market, sphere };
       }
       onSaved?.(result);
     } catch (e) {
@@ -229,6 +232,16 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
           <TagGroup label="Конкуренты"     list={competitors} setList={setCompetitors} />
           <TagGroup label="Ниша"           list={niche}       setList={setNiche} />
 
+          <div className={styles.section}>
+            <div className={styles.sectionLabel}>🧬 ДНК бренда (сфера)</div>
+            <textarea
+              className={styles.nameInput}
+              style={{ resize: 'vertical', minHeight: 48, fontFamily: 'var(--font-sans)' }}
+              value={sphere}
+              onChange={e => setSphere(e.target.value)}
+              placeholder="Сфера бренда и интересы аудитории (определяется AI)"
+            />
+          </div>
           {voiceDescription && (
             <div className={styles.section}>
               <div className={styles.sectionLabel}>Голос бренда</div>

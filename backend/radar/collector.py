@@ -11,6 +11,7 @@ log = logging.getLogger(__name__)
 VIRAL_VIEWS  = 500_000  # views above this = viral (post passes filters regardless)
 VIRAL_LIKES  = 1_500    # smaller RU market: 1.5k likes already means a post took off
 MAX_HASHTAGS = 3        # posts with more hashtags are usually low-value spam
+MIN_TEXT_LEN = 20       # posts/comments shorter than this are noise ("огонь", "👍")
 
 def _now(): return datetime.now(timezone.utc)
 
@@ -97,7 +98,7 @@ def collect_probe(session: Session, probe: Probe, provider: SearchProvider) -> i
                 age = (_now().replace(tzinfo=None) - post.created_at.replace(tzinfo=None)).days
                 if age > 7: continue
                 clean = " ".join(w for w in post.text.split() if not w.startswith("#")).strip()
-                if len(clean) < 10: continue
+                if len(clean) < MIN_TEXT_LEN: continue
                 mention = _upsert_mention(session, post, brand.id)
                 mention.source = probe.source
                 mention.competitor = probe.label if probe.source == "competitor" else None

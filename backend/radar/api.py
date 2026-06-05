@@ -736,6 +736,7 @@ def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
     existing      = {c.comment_id for c in mention.comment_rows}
 
     from .drafts import _is_opportunity_candidate, evaluate_opportunity
+    from .collector import MIN_TEXT_LEN
     is_comp_niche = mention.source in ("competitor", "niche")
 
     stored, drafted = 0, 0
@@ -743,6 +744,9 @@ def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
     fetched.sort(key=lambda fc: fc.likes, reverse=True)
     for fc in fetched:
         if fc.comment_id in existing:
+            continue
+        # Skip noise — too short to be meaningful ("огонь", "👍", "+").
+        if len((fc.text or "").strip()) < MIN_TEXT_LEN:
             continue
         sentiment = classify(fc.text).tone
         draft = draft_flag = opp_reason = None

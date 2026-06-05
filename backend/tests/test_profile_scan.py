@@ -89,3 +89,8 @@ def test_opportunity_candidate_negative():
 def test_opportunity_candidate_noise():
     from radar.drafts import _is_opportunity_candidate
     assert _is_opportunity_candidate("спасибо, классное видео", "positive") is False
+
+
+def test_min_text_len_is_20():
+    from radar.collector import MIN_TEXT_LEN
+    assert MIN_TEXT_LEN == 20

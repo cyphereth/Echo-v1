@@ -131,3 +131,26 @@ def test_classify_ads_batch_no_key():
         assert classify_ads_batch(["a", "b", "c"]) == [False, False, False]
     finally:
         sp.LLM_API_KEY = old
+
+
+def test_spam_inline_hashtag_stuffing():
+    from radar.spam import looks_like_ad_cheap
+    # hashtags glued into text, empty list — should still be caught
+    assert looks_like_ad_cheap("крутая подборка #дача#идеи#ремонт#скидки#вб", "user1", []) is True
+
+def test_competitor_word_boundary_no_substring():
+    from radar.collector import _matches
+    from radar.providers.base import Post
+    from radar.models import Brand
+    from datetime import datetime, timezone
+    import json
+    b = Brand(); b.exclusions = json.dumps([]); b.market = "global"
+    class P: source="competitor"; label="ВБ"; query="ВБ"
+    def post(t, tags=None):
+        return Post(post_id="1",platform="tiktok",author="a",followers=0,text=t,
+                    hashtags=tags or [],created_at=datetime.now(timezone.utc),
+                    likes=0,views=0,comments=0,shares=0)
+    # "вб" must NOT match inside "обувь"
+    assert _matches(post("красивая обувь на лето"), b, P()) is False
+    # but matches as a whole word
+    assert _matches(post("заказал в ВБ вчера"), b, P()) is True

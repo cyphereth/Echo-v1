@@ -6,10 +6,12 @@ Two levels:
   2. classify_ads_batch — Claude decides human-vs-ad for survivors in one batched
      call (catches promotional tone without explicit sales phrases). Fail-open.
 """
-import json, logging, os
+import json, logging, os, re
 from typing import Optional
 
 log = logging.getLogger(__name__)
+
+_HASHTAG_RE = re.compile(r"#\w+", re.UNICODE)
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_API_URL = os.getenv("LLM_API_URL", "https://api.anthropic.com/v1/messages")
 
@@ -43,7 +45,11 @@ def looks_like_ad_cheap(text: str, author: str, hashtags: Optional[list] = None,
     a = (author or "").lower()
     if any(h in a for h in SELLER_NAME_HINTS):
         return True
-    if len(hashtags or []) > MAX_HASHTAGS:
+    # Count hashtags from both the provider list AND inline #tags glued into text
+    # (#дача#идеи#скидки) — dropshippers stuff them straight into the caption.
+    tags = {h.lower().lstrip("#") for h in (hashtags or [])}
+    tags |= {m.lower().lstrip("#") for m in _HASHTAG_RE.findall(raw)}
+    if len(tags) > MAX_HASHTAGS:
         return True
     return False
 

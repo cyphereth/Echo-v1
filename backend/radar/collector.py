@@ -52,10 +52,14 @@ def _matches(post: Post, brand: Brand, probe: Probe) -> bool:
             any(ht in post_hashtags for ht in hashtags)
         )
 
-    # competitor / niche: the probe query already targets the term, so we only
-    # require that the search label/query actually shows up in the post text.
+    # competitor / niche: require the term as a whole word/phrase in text (word
+    # boundaries avoid substring collisions like "вб" inside "обувь") OR as an
+    # exact hashtag (not substring) — reduces false positives on ambiguous names.
     needle = (probe.label or probe.query).lower().lstrip("#")
-    return needle in text_lower or any(needle in h.lower().lstrip("#") for h in post.hashtags)
+    post_hashtags = [h.lower().lstrip("#") for h in post.hashtags]
+    pattern = r"(?<!\w)" + re.escape(needle) + r"(?!\w)"
+    in_text = re.search(pattern, text_lower) is not None
+    return in_text or needle in post_hashtags
 
 def _upsert_mention(session: Session, post: Post, brand_id: int) -> Mention:
     stmt = (

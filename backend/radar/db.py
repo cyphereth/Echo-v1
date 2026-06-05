@@ -44,10 +44,12 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "source":      "TEXT DEFAULT 'brand'",
         "competitor":  "TEXT",
         "opportunity": "TEXT",
+        "is_spam":     "BOOLEAN DEFAULT 0",
     },
     "comments": {
         "is_opportunity": "BOOLEAN DEFAULT 0",
         "opportunity":    "TEXT",
+        "is_spam":        "BOOLEAN DEFAULT 0",
     },
 }
 

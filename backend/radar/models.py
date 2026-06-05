@@ -76,6 +76,7 @@ class Mention(Base):
     phase:        Mapped[str]           = mapped_column(Text, default="unknown")
     tone:         Mapped[str]           = mapped_column(Text, default="neutral")
     is_hot:       Mapped[bool]          = mapped_column(Boolean, default=False)
+    is_spam:      Mapped[bool]          = mapped_column(Boolean, default=False)
     category:     Mapped[Optional[str]] = mapped_column(Text)
     lane:         Mapped[Optional[str]] = mapped_column(Text)
     source:       Mapped[str]           = mapped_column(Text, default="brand")  # brand | competitor | niche
@@ -118,6 +119,7 @@ class Comment(Base):
     draft_flag: Mapped[Optional[str]]   = mapped_column(Text)
     is_opportunity: Mapped[bool]        = mapped_column(Boolean, default=False)
     opportunity:    Mapped[Optional[str]] = mapped_column(Text)   # short reason
+    is_spam:    Mapped[bool]            = mapped_column(Boolean, default=False)
     status:     Mapped[str]             = mapped_column(Text, default="pending")  # pending | sent | skipped
     created_at: Mapped[datetime]        = mapped_column(nullable=False)
     fetched_at: Mapped[datetime]        = mapped_column(default=_now)

@@ -619,14 +619,15 @@ def set_autocollect(brand_id: int, body: AutoCollectBody, user: User = Depends(c
 # ── Inbox ─────────────────────────────────────────────────────────────────────
 
 @app.get("/inbox")
-def inbox(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+def inbox(brand_id: int, include_hidden: int = 0, user: User = Depends(current_user), session: Session = Depends(db)):
     _owned_brand(session, brand_id, user)
-    mentions = (
+    q = (
         session.query(Mention)
         .filter(Mention.brand_id == brand_id, Mention.status != "rejected")
-        .order_by(Mention.severity.desc())
-        .all()
     )
+    if not include_hidden:
+        q = q.filter(Mention.is_spam.is_(False))
+    mentions = q.order_by(Mention.severity.desc()).all()
     pr  = [_mention_card(m) for m in mentions if m.lane == "pr"]
     smm = [_mention_card(m) for m in mentions if m.lane in ("smm", "none")]
     return {"pr": pr, "smm": smm}
@@ -736,23 +737,27 @@ def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
     existing      = {c.comment_id for c in mention.comment_rows}
 
     from .drafts import _is_opportunity_candidate, evaluate_opportunity
-    from .collector import MIN_TEXT_LEN
+    from .spam import looks_like_ad_cheap, classify_ads_batch
     is_comp_niche = mention.source in ("competitor", "niche")
 
+    # New comments only; cheap spam rules first, then one batched Claude ad-check.
+    new = [fc for fc in fetched if fc.comment_id not in existing]
+    cheap_spam = {fc.comment_id: looks_like_ad_cheap(fc.text, fc.author, []) for fc in new}
+    survivors = [fc for fc in new if not cheap_spam[fc.comment_id]]
+    ad_flags = classify_ads_batch([fc.text for fc in survivors])
+    ad_spam = {fc.comment_id: bool(flag) for fc, flag in zip(survivors, ad_flags)}
+
     stored, drafted = 0, 0
-    # Draft for negatives first (brand) / opportunities (competitor+niche)
     fetched.sort(key=lambda fc: fc.likes, reverse=True)
-    for fc in fetched:
-        if fc.comment_id in existing:
-            continue
-        # Skip noise — too short to be meaningful ("огонь", "👍", "+").
-        if len((fc.text or "").strip()) < MIN_TEXT_LEN:
-            continue
+    for fc in new:
+        is_spam = cheap_spam.get(fc.comment_id) or ad_spam.get(fc.comment_id, False)
         sentiment = classify(fc.text).tone
         draft = draft_flag = opp_reason = None
         is_opp = False
 
-        if is_comp_niche:
+        if is_spam:
+            pass  # stored hidden, no draft
+        elif is_comp_niche:
             # Opportunity interception: prefilter cheaply, then let Claude decide
             # and write the intercept reply in one call.
             if _is_opportunity_candidate(fc.text, sentiment) and drafted < MAX_COMMENT_DRAFTS:
@@ -780,7 +785,7 @@ def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
             mention_id=mention.id, comment_id=fc.comment_id, author=fc.author,
             followers=fc.followers, text=fc.text, likes=fc.likes,
             sentiment=sentiment, draft=draft, draft_flag=draft_flag,
-            is_opportunity=is_opp, opportunity=opp_reason,
+            is_opportunity=is_opp, opportunity=opp_reason, is_spam=is_spam,
             created_at=fc.created_at,
         ))
         stored += 1
@@ -789,7 +794,7 @@ def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
 
 
 @app.get("/mentions/{mention_id}/comments")
-def get_comments(mention_id: int, refresh: int = 0, user: User = Depends(current_user), session: Session = Depends(db)):
+def get_comments(mention_id: int, refresh: int = 0, include_hidden: int = 0, user: User = Depends(current_user), session: Session = Depends(db)):
     m = _owned_mention(session, mention_id, user)
     if refresh or not m.comment_rows:
         try:
@@ -797,7 +802,8 @@ def get_comments(mention_id: int, refresh: int = 0, user: User = Depends(current
         except Exception:
             log.exception("Comment fetch failed for mention %s", mention_id)
         session.refresh(m)
-    return [_comment_card(c) for c in m.comment_rows]
+    rows = m.comment_rows if include_hidden else [c for c in m.comment_rows if not getattr(c, "is_spam", False)]
+    return [_comment_card(c) for c in rows]
 
 
 @app.get("/opportunities")
@@ -807,7 +813,8 @@ def opportunities(brand_id: int, user: User = Depends(current_user), session: Se
     _owned_brand(session, brand_id, user)
     rows = (
         session.query(Comment).join(Mention)
-        .filter(Mention.brand_id == brand_id, Comment.is_opportunity.is_(True))
+        .filter(Mention.brand_id == brand_id, Comment.is_opportunity.is_(True),
+                Comment.is_spam.is_(False))
         .order_by(Comment.likes.desc())
         .all()
     )

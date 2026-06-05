@@ -94,3 +94,40 @@ def test_opportunity_candidate_noise():
 def test_min_text_len_is_20():
     from radar.collector import MIN_TEXT_LEN
     assert MIN_TEXT_LEN == 20
+
+
+# ── Ad / spam cheap rules ─────────────────────────────────────────────────────
+
+def test_spam_sales_phrase():
+    from radar.spam import looks_like_ad_cheap
+    assert looks_like_ad_cheap("Лучшие товары! Артикул в профиле, заказывайте", "user1", []) is True
+
+def test_spam_seller_username():
+    from radar.spam import looks_like_ad_cheap
+    assert looks_like_ad_cheap("классная штука для дома и кухни каждый день", "wb_goldy", []) is True
+
+def test_spam_too_short():
+    from radar.spam import looks_like_ad_cheap
+    assert looks_like_ad_cheap("огонь", "user1", []) is True
+
+def test_spam_too_long():
+    from radar.spam import looks_like_ad_cheap
+    assert looks_like_ad_cheap("ж" * 200, "user1", []) is True
+
+def test_spam_hashtag_stuffing():
+    from radar.spam import looks_like_ad_cheap
+    assert looks_like_ad_cheap("норм пост про доставку озон сегодня", "user1",
+                               ["a", "b", "c", "d", "e"]) is True
+
+def test_spam_real_post_passes():
+    from radar.spam import looks_like_ad_cheap
+    assert looks_like_ad_cheap("заказал на озоне, доставили за два дня, всё отлично", "katya_msk", ["озон"]) is False
+
+def test_classify_ads_batch_no_key():
+    from radar.spam import classify_ads_batch
+    import radar.spam as sp
+    old = sp.LLM_API_KEY; sp.LLM_API_KEY = ""
+    try:
+        assert classify_ads_batch(["a", "b", "c"]) == [False, False, False]
+    finally:
+        sp.LLM_API_KEY = old

@@ -45,9 +45,23 @@ def classify_and_draft(session: Session, brand_id: int) -> dict:
 
     unclassified = (
         session.query(Mention)
-        .filter(Mention.brand_id == brand_id, Mention.category.is_(None))
+        .filter(Mention.brand_id == brand_id, Mention.category.is_(None),
+                Mention.is_spam.is_(False))
         .all()
     )
+    # Level-2 ad filter: Claude flags promotional-tone posts the cheap rules missed.
+    from .spam import classify_ads_batch
+    if unclassified:
+        flags = classify_ads_batch([m.text for m in unclassified])
+        kept = []
+        for m, is_ad in zip(unclassified, flags):
+            if is_ad:
+                m.is_spam = True
+            else:
+                kept.append(m)
+        session.commit()
+        unclassified = kept
+
     for m in unclassified:
         result = classify(m.text, m.views, m.likes)
         m.tone        = result.tone

@@ -5,6 +5,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from .models import Brand, Mention, MentionSnapshot, Probe
 from .providers.base import Post, SearchProvider
+from .spam import looks_like_ad_cheap
 
 log = logging.getLogger(__name__)
 
@@ -37,9 +38,8 @@ def _matches(post: Post, brand: Brand, probe: Probe) -> bool:
     if not _passes_language(post, brand):
         return False
 
-    # Hashtag spam: >3 hashtags usually means a low-value post — drop unless viral.
-    if len(post.hashtags) > MAX_HASHTAGS and not _is_viral(post):
-        return False
+    # Note: ad/spam/length/hashtag checks are NOT a hard drop anymore — matched
+    # posts are stored with is_spam=True (store-but-hide) in collect_probe.
 
     if probe.source == "brand":
         keywords      = [k.lower() for k in brand.keywords_list()]
@@ -97,11 +97,14 @@ def collect_probe(session: Session, probe: Probe, provider: SearchProvider) -> i
                 if not _matches(post, brand, probe): continue
                 age = (_now().replace(tzinfo=None) - post.created_at.replace(tzinfo=None)).days
                 if age > 7: continue
-                clean = " ".join(w for w in post.text.split() if not w.startswith("#")).strip()
-                if len(clean) < MIN_TEXT_LEN: continue
+                # Cheap ad/spam rules → store-but-hide (is_spam), not a hard drop.
+                spam = looks_like_ad_cheap(post.text, post.author, post.hashtags)
                 mention = _upsert_mention(session, post, brand.id)
                 mention.source = probe.source
                 mention.competitor = probe.label if probe.source == "competitor" else None
+                mention.is_spam = spam
+                if spam:
+                    continue  # stored hidden; no snapshot, doesn't count toward pipeline volume
                 session.add(MentionSnapshot(
                     mention_id=mention.id, ts=_now(),
                     likes=post.likes, views=post.views,

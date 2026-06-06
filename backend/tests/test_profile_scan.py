@@ -367,3 +367,65 @@ def test_build_suggest_payload_asks_for_many_keywords():
     p = _build_suggest_payload("Ozon")
     user_msg = p["messages"][0]["content"]
     assert "20-30" in user_msg
+
+
+# ── suggest_brand: transient retry ────────────────────────────────────────────
+
+def _httpx_status_error(code):
+    import httpx
+    req = httpx.Request("POST", "http://x")
+    resp = httpx.Response(code, request=req)
+    return httpx.HTTPStatusError("err", request=req, response=resp)
+
+def test_is_transient_parse_and_value_errors():
+    import json as _json
+    from radar.api import _is_transient_suggest_error
+    assert _is_transient_suggest_error(ValueError("x")) is True
+    assert _is_transient_suggest_error(KeyError("x")) is True
+    assert _is_transient_suggest_error(_json.JSONDecodeError("e", "", 0)) is True
+
+def test_is_transient_network_error():
+    import httpx
+    from radar.api import _is_transient_suggest_error
+    assert _is_transient_suggest_error(httpx.TimeoutException("t")) is True
+    assert _is_transient_suggest_error(httpx.ConnectError("c")) is True
+
+def test_is_transient_http_status():
+    from radar.api import _is_transient_suggest_error
+    assert _is_transient_suggest_error(_httpx_status_error(503)) is True
+    assert _is_transient_suggest_error(_httpx_status_error(429)) is True
+    assert _is_transient_suggest_error(_httpx_status_error(400)) is False
+
+def test_is_transient_other_false():
+    from radar.api import _is_transient_suggest_error
+    assert _is_transient_suggest_error(RuntimeError("nope")) is False
+
+def test_suggest_with_retry_succeeds_after_transient():
+    from radar.api import _suggest_with_retry
+    calls = {"n": 0}
+    def call():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise ValueError("empty body")
+        return {"ok": True}
+    assert _suggest_with_retry(call, attempts=3) == {"ok": True}
+    assert calls["n"] == 3
+
+def test_suggest_with_retry_exhausts_and_raises_last():
+    import pytest
+    from radar.api import _suggest_with_retry
+    def call():
+        raise ValueError("still bad")
+    with pytest.raises(ValueError):
+        _suggest_with_retry(call, attempts=2)
+
+def test_suggest_with_retry_non_transient_raises_immediately():
+    import pytest
+    from radar.api import _suggest_with_retry
+    calls = {"n": 0}
+    def call():
+        calls["n"] += 1
+        raise RuntimeError("fatal")
+    with pytest.raises(RuntimeError):
+        _suggest_with_retry(call, attempts=3)
+    assert calls["n"] == 1  # non-transient → no retry

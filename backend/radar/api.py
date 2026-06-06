@@ -453,6 +453,35 @@ def _build_suggest_payload(name: str) -> dict:
     }
 
 
+# Upstream statuses worth retrying when calling the suggest LLM.
+_SUGGEST_TRANSIENT_STATUS = {429, 500, 502, 503, 504, 529}
+
+def _is_transient_suggest_error(exc: Exception) -> bool:
+    """True if a /brands/suggest call failure is worth retrying: parse errors
+    (empty/partial body), network/timeout errors, or transient HTTP statuses.
+    Non-transient failures (e.g. 400 bad request) fail fast."""
+    import httpx
+    if isinstance(exc, (json.JSONDecodeError, KeyError, ValueError, httpx.TransportError)):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in _SUGGEST_TRANSIENT_STATUS
+    return False
+
+def _suggest_with_retry(call, attempts: int = 3):
+    """Run `call`, retrying transient failures up to `attempts` times. Re-raises
+    the last error after exhausting retries, or immediately on a non-transient one."""
+    last_err = None
+    for i in range(attempts):
+        try:
+            return call()
+        except Exception as e:
+            if not _is_transient_suggest_error(e):
+                raise
+            last_err = e
+            log.warning("suggest_brand attempt %d/%d failed: %s", i + 1, attempts, e)
+    raise last_err
+
+
 class SuggestBody(BaseModel):
     name: str
 
@@ -476,13 +505,7 @@ def suggest_brand(body: SuggestBody, user: User = Depends(current_user)):
         return _extract_suggest_json(resp.json().get("content", []))
 
     try:
-        data = _call()
-    except (json.JSONDecodeError, KeyError, ValueError):
-        try:
-            data = _call()
-        except Exception as e:
-            log.warning("suggest_brand retry failed: %s", e)
-            raise HTTPException(502, "AI suggestion failed")
+        data = _suggest_with_retry(_call)
     except Exception as e:
         log.warning("suggest_brand failed: %s", e)
         raise HTTPException(502, "AI suggestion failed")

@@ -464,50 +464,20 @@ def suggest_brand(body: SuggestBody, user: User = Depends(current_user)):
     if not LLM_API_KEY:
         raise HTTPException(503, "LLM_API_KEY not configured")
 
-    system = (
-        "Ты эксперт по SMM и мониторингу брендов в русскоязычных соцсетях (TikTok, Instagram). "
-        "Отвечай ТОЛЬКО валидным JSON без пояснений и markdown-блоков."
-    )
-    user_msg = (
-        f'Для бренда "{body.name}" подбери для мониторинга в TikTok и Instagram: '
-        f'5-7 ключевых слов (на русском и латинице, вариации написания бренда), '
-        f'3-5 хэштегов (с #), '
-        f'3-5 прямых конкурентов (только названия компаний), '
-        f'Определи ДНК бренда — его сферу и интересы аудитории 1-2 фразами (поле "sphere"). '
-        f'niche_keywords подбери ШИРОКО (5-8): узкая тематика + темы индустрии + смежные '
-        f'интересы ЦА (для косметологии: уход за кожей, бьюти-процедуры, тренды красоты, '
-        f'макияж, велнес, селф-кер). '
-        f'Определи город (geo), если это локальный бизнес (салон/клиника в конкретном '
-        f'городе) — иначе "". Если это локальный СЕРВИСНЫЙ бизнес — сгенерируй '
-        f'category_terms (4-6 категорий, по которым ищется вся ниша города: для салона '
-        f'«салон красоты», «маникюр», «брови», «косметолог», «бьюти мастер»). Для '
-        f'федеральных/онлайн брендов category_terms=[]. '
-        f'Сгенерируй audience_terms — 8-12 широких тем целевой аудитории бренда '
-        f'(для салона красоты: женское, лайфстайл, мода, уют, дети, отношения, '
-        f'готовка, шопинг, фитнес). Для глобальных/нетематических — []. '
-        f'Определи рынок: если бренд русскоязычный или ориентирован на СНГ — '
-        f'верни "market":"ru" и предлагай ТОЛЬКО русскоязычных конкурентов из СНГ '
-        f'(без иностранных). Иначе "market":"global". '
-        f'Ответ строго в JSON: {{"keywords":[],"hashtags":[],"competitors":[],"niche_keywords":[],"sphere":"","geo":"","category_terms":[],"audience_terms":[],"market":""}}'
-    )
-
     def _call():
         resp = httpx.post(
             LLM_API_URL,
-            headers={"x-api-key": LLM_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-            json={"model": "claude-haiku-4-5-20251001", "max_tokens": 300,
-                  "system": system, "messages": [{"role": "user", "content": user_msg}]},
-            timeout=60,
+            headers={"x-api-key": LLM_API_KEY, "anthropic-version": "2023-06-01",
+                     "content-type": "application/json"},
+            json=_build_suggest_payload(body.name),
+            timeout=120,
         )
         resp.raise_for_status()
-        blocks = resp.json().get("content", [])
-        text = next((b["text"] for b in blocks if b.get("type") == "text"), "")
-        text = text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-        return json.loads(text)
+        return _extract_suggest_json(resp.json().get("content", []))
 
     try:
         data = _call()
-    except (json.JSONDecodeError, KeyError):
+    except (json.JSONDecodeError, KeyError, ValueError):
         try:
             data = _call()
         except Exception as e:

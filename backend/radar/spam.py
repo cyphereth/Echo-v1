@@ -1,10 +1,11 @@
 """Ad / dropshipper / spam detection for collected posts and comments.
 
 Two levels:
-  1. looks_like_ad_cheap — instant, free rules (sales phrases, seller usernames,
-     hashtag stuffing, length out of 20–150). Catches obvious commercial spam.
-  2. classify_ads_batch — Claude decides human-vs-ad for survivors in one batched
-     call (catches promotional tone without explicit sales phrases). Fail-open.
+  1. looks_like_ad_cheap — instant, free, sphere-INDEPENDENT rules (too-short text,
+     dropshipper/seller usernames). Catches only universal junk.
+  2. classify_ads_batch — Claude decides noise-vs-relevant for survivors in one batched
+     call, judged for the brand's sphere (so marketplace and food get different calls).
+     Fail-open.
 """
 import json, logging, os, re
 from typing import Optional

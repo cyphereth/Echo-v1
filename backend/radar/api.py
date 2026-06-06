@@ -179,6 +179,18 @@ def _clean_list(items) -> list[str]:
     return out
 
 
+def _ensure_name_in_keywords(name: str, keywords: list[str]) -> list[str]:
+    """The brand lane is useless without the brand name. If no keyword already
+    contains the brand name (case-insensitive), prepend it."""
+    nm = (name or "").strip()
+    if not nm:
+        return keywords
+    low = nm.lower()
+    if any(low in (k or "").lower() for k in keywords):
+        return keywords
+    return [nm] + list(keywords)
+
+
 def _parse_handle(s: str) -> str:
     """Extract a username from @name, a tiktok/instagram URL, or a raw string."""
     s = (s or "").strip()
@@ -212,6 +224,8 @@ def _profile_with_claude(name_hint: str, bio: str, followers: int,
         f"Реальные ответы бренда на комментарии:\n{replies_block}\n"
         f"Тональность аудитории: {sentiment.get('positive',0)} поз / "
         f"{sentiment.get('negative',0)} нег / {sentiment.get('neutral',0)} нейтр\n\n"
+        'keywords — варианты НАЗВАНИЯ бренда (рус + латиница, включая хэндл и частые '
+        'написания), а НЕ нишевые слова. niche_keywords — это про тематику.\n'
         'Определи ДНК бренда — сферу и интересы аудитории 1-2 фразами (поле "sphere"). '
         'niche_keywords подбери ШИРОКО: тематика + индустрия + смежные интересы ЦА.\n'
         'Определи город (geo), если бизнес локальный — иначе "". Для локального '
@@ -389,7 +403,7 @@ def update_brand_config(brand_id: int, body: BrandConfigBody, user: User = Depen
     if body.audience_terms is not None: b.audience_terms = json.dumps(_clean_list(body.audience_terms))
     if body.followers      is not None: b.followers      = body.followers
     if body.local_mode     is not None: b.local_mode     = body.local_mode
-    if body.keywords       is not None: b.keywords       = json.dumps(_clean_list(body.keywords))
+    if body.keywords       is not None: b.keywords       = json.dumps(_ensure_name_in_keywords(body.name or b.name, _clean_list(body.keywords)))
     # Rebuild probes (brand + competitor + niche) so collect picks up every source
     if any(v is not None for v in (body.keywords, body.competitors, body.niche_keywords, body.category_terms, body.geo, body.audience_terms, body.local_mode)):
         _rebuild_probes(session, b)
@@ -650,7 +664,7 @@ def onboarding(body: OnboardingBody, user: User = Depends(current_user), session
     b = Brand(
         user_id=user.id,
         name=body.name,
-        keywords=json.dumps(_clean_list(body.keywords)),
+        keywords=json.dumps(_ensure_name_in_keywords(body.name, _clean_list(body.keywords))),
         hashtags=json.dumps(_clean_list(body.hashtags)),
         competitors=json.dumps(_clean_list(body.competitors)),
         niche_keywords=json.dumps(_clean_list(body.niche_keywords)),

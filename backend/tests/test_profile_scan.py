@@ -451,3 +451,20 @@ def test_build_ads_payload_no_sphere_ok():
     p = _build_ads_classify_payload(["a", "b"], sphere="")
     assert p["model"] == "claude-haiku-4-5-20251001"
     assert isinstance(p["max_tokens"], int) and p["max_tokens"] > 0
+
+
+# ── brand-name guaranteed in keywords ─────────────────────────────────────────
+
+def test_ensure_name_prepends_when_missing():
+    from radar.api import _ensure_name_in_keywords
+    assert _ensure_name_in_keywords("Тануки", ["суши", "роллы"]) == ["Тануки", "суши", "роллы"]
+
+def test_ensure_name_noop_when_present_substring_ci():
+    from radar.api import _ensure_name_in_keywords
+    # already covered (case-insensitive substring) → unchanged
+    assert _ensure_name_in_keywords("Самокат", ["самокат доставка", "еда"]) == ["самокат доставка", "еда"]
+
+def test_ensure_name_empty_name_noop():
+    from radar.api import _ensure_name_in_keywords
+    assert _ensure_name_in_keywords("", ["суши"]) == ["суши"]
+    assert _ensure_name_in_keywords("   ", ["суши"]) == ["суши"]

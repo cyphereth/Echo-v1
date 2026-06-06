@@ -432,3 +432,22 @@ def test_suggest_with_retry_non_transient_raises_immediately():
     with pytest.raises(RuntimeError):
         _suggest_with_retry(call, attempts=3)
     assert calls["n"] == 1  # non-transient → no retry
+
+
+# ── sphere-aware ad classifier payload ────────────────────────────────────────
+
+def test_build_ads_payload_includes_sphere():
+    from radar.spam import _build_ads_classify_payload
+    p = _build_ads_classify_payload(["текст про роллы"], sphere="сеть японских ресторанов")
+    assert "сеть японских ресторанов" in p["system"]
+
+def test_build_ads_payload_includes_texts():
+    from radar.spam import _build_ads_classify_payload
+    p = _build_ads_classify_payload(["уникальный_маркер_текста"], sphere="")
+    assert "уникальный_маркер_текста" in p["messages"][0]["content"]
+
+def test_build_ads_payload_no_sphere_ok():
+    from radar.spam import _build_ads_classify_payload
+    p = _build_ads_classify_payload(["a", "b"], sphere="")
+    assert p["model"] == "claude-haiku-4-5-20251001"
+    assert isinstance(p["max_tokens"], int) and p["max_tokens"] > 0

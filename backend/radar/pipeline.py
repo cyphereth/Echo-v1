@@ -52,7 +52,7 @@ def classify_and_draft(session: Session, brand_id: int) -> dict:
     # Level-2 ad filter: Claude flags promotional-tone posts the cheap rules missed.
     from .spam import classify_ads_batch
     if unclassified:
-        flags = classify_ads_batch([m.text for m in unclassified])
+        flags = classify_ads_batch([m.text for m in unclassified], sphere=getattr(brand, "sphere", "") or "")
         kept = []
         for m, is_ad in zip(unclassified, flags):
             if is_ad:

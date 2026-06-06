@@ -468,3 +468,39 @@ def test_ensure_name_empty_name_noop():
     from radar.api import _ensure_name_in_keywords
     assert _ensure_name_in_keywords("", ["суши"]) == ["суши"]
     assert _ensure_name_in_keywords("   ", ["суши"]) == ["суши"]
+
+
+# ── pipeline: brand-lane bypasses the noise judge ─────────────────────────────
+
+def test_brand_lane_bypasses_noise_judge(monkeypatch):
+    """Even when the judge flags EVERYTHING as noise, brand-lane mentions survive;
+    niche-lane mentions are hidden."""
+    from datetime import datetime, timezone
+    import radar.spam as spam
+    import radar.pipeline as pipeline
+    from radar import db
+    from radar.models import Brand, Mention
+    monkeypatch.setattr(spam, "classify_ads_batch", lambda texts, sphere="": [True] * len(texts))
+    monkeypatch.setattr(pipeline, "generate_draft", lambda *a, **k: None)
+    monkeypatch.setattr(pipeline, "rescore_mention", lambda *a, **k: None)
+    s = db.get_session()
+    b = Brand(name="Тануки", user_id=1, keywords='["тануки"]', sphere="суши-рестораны")
+    s.add(b); s.flush()
+
+    def mk(src, pid, txt):
+        m = Mention(brand_id=b.id, platform="tiktok", post_id=pid, author="a",
+                    text=txt, source=src, is_spam=False,
+                    created_at=datetime.now(timezone.utc))
+        s.add(m); return m
+    brand_m = mk("brand", "bnz-b", "зашли поужинать в тануки, очень вкусно")
+    niche_m = mk("niche", "bnz-n", "случайный пост вообще про суши где-то")
+    s.flush()
+
+    pipeline.classify_and_draft(s, b.id)
+    s.refresh(brand_m); s.refresh(niche_m)
+    try:
+        assert brand_m.is_spam is False   # brand lane bypassed the judge
+        assert niche_m.is_spam is True    # niche lane judged as noise
+    finally:
+        s.query(Mention).filter_by(brand_id=b.id).delete()
+        s.delete(b); s.commit()

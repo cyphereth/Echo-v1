@@ -889,7 +889,8 @@ def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
         for fc in new
     }
     survivors = [fc for fc in new if not cheap_spam[fc.comment_id]]
-    ad_flags = classify_ads_batch([fc.text for fc in survivors])
+    ad_flags = classify_ads_batch([fc.text for fc in survivors],
+                                  sphere=getattr(brand, "sphere", "") or "")
     ad_spam = {fc.comment_id: bool(flag) for fc, flag in zip(survivors, ad_flags)}
 
     stored, drafted = 0, 0

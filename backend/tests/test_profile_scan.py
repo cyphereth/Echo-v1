@@ -341,3 +341,29 @@ def test_extract_suggest_json_no_text_raises():
     from radar.api import _extract_suggest_json
     with pytest.raises(ValueError):
         _extract_suggest_json([{"type": "web_search_tool_result", "content": []}])
+
+
+# ── suggest_brand: request payload ────────────────────────────────────────────
+
+def test_build_suggest_payload_has_web_search_tool():
+    from radar.api import _build_suggest_payload
+    p = _build_suggest_payload("Ozon")
+    tools = p["tools"]
+    assert any(t.get("type") == "web_search_20250305" for t in tools)
+
+def test_build_suggest_payload_large_token_budget():
+    from radar.api import _build_suggest_payload
+    p = _build_suggest_payload("Ozon")
+    assert p["max_tokens"] >= 4000
+
+def test_build_suggest_payload_includes_brand_name():
+    from radar.api import _build_suggest_payload
+    p = _build_suggest_payload("CafeBlanche")
+    user_msg = p["messages"][0]["content"]
+    assert "CafeBlanche" in user_msg
+
+def test_build_suggest_payload_asks_for_many_keywords():
+    from radar.api import _build_suggest_payload
+    p = _build_suggest_payload("Ozon")
+    user_msg = p["messages"][0]["content"]
+    assert "20-30" in user_msg

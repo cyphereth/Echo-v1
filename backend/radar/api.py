@@ -413,6 +413,46 @@ def _extract_suggest_json(blocks: list[dict]) -> dict:
     return json.loads(text)
 
 
+def _build_suggest_payload(name: str) -> dict:
+    """Anthropic Messages request for brand suggestion: web_search tool + a prompt
+    that asks for large, relevance-validated term lists."""
+    system = (
+        "Ты эксперт по SMM и мониторингу брендов в русскоязычных соцсетях "
+        "(TikTok, Instagram). Сначала ИЩИ информацию о бренде в интернете "
+        "(чем занимается, реальные конкуренты, как о нём пишут), затем дай ответ. "
+        "Финальный ответ — ТОЛЬКО валидный JSON без пояснений и markdown-блоков."
+    )
+    user_msg = (
+        f'Изучи бренд "{name}" через веб-поиск и его сферу деятельности, затем '
+        f'подбери для мониторинга в TikTok и Instagram МАКСИМАЛЬНО ШИРОКО: '
+        f'keywords — 20-30 (вариации названия рус/лат, продукты, фирменные термины); '
+        f'niche_keywords — 15-25 (тематика индустрии + смежные интересы ЦА); '
+        f'competitors — 10-15 ТОЛЬКО реально существующих компаний, '
+        f'подтверждённых веб-поиском (никаких выдуманных); '
+        f'audience_terms — 15-20 широких тем целевой аудитории. '
+        f'Определи ДНК бренда — сферу и интересы аудитории 1-2 фразами (поле "sphere"). '
+        f'Определи город (geo), если это локальный бизнес (салон/клиника в конкретном '
+        f'городе) — иначе "". Если это локальный СЕРВИСНЫЙ бизнес — сгенерируй '
+        f'category_terms (4-6 категорий ниши города); для федеральных/онлайн брендов '
+        f'category_terms=[]. '
+        f'Определи рынок: если бренд русскоязычный или ориентирован на СНГ — '
+        f'верни "market":"ru" и предлагай ТОЛЬКО русскоязычных конкурентов из СНГ; '
+        f'иначе "market":"global". '
+        f'РАНЖИРУЙ все термины по релевантности и ОТСЕКАЙ явно нерелевантное '
+        f'(омонимы, мусор, не относящееся к бренду). '
+        f'Ответ строго в JSON: {{"keywords":[],"hashtags":[],"competitors":[],'
+        f'"niche_keywords":[],"sphere":"","geo":"","category_terms":[],'
+        f'"audience_terms":[],"market":""}}'
+    )
+    return {
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 4000,
+        "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}],
+        "system": system,
+        "messages": [{"role": "user", "content": user_msg}],
+    }
+
+
 class SuggestBody(BaseModel):
     name: str
 

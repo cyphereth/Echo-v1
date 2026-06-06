@@ -399,10 +399,12 @@ def update_brand_config(brand_id: int, body: BrandConfigBody, user: User = Depen
 
 # ── AI Brand Suggest ──────────────────────────────────────────────────────────
 
-def _extract_suggest_json(blocks: list) -> dict:
+def _extract_suggest_json(blocks: list[dict]) -> dict:
     """Pull the brand-suggest JSON out of Claude's response content blocks.
     With the web_search tool the model emits server_tool_use / web_search_tool_result
-    blocks and writes its final JSON in the LAST text block."""
+    blocks and writes its final JSON in the LAST text block.
+    Raises ValueError if no text block; json.JSONDecodeError if the final block
+    is not valid JSON (suggest_brand catches both and retries)."""
     texts = [b["text"] for b in blocks if b.get("type") == "text" and b.get("text")]
     if not texts:
         raise ValueError("no text block in suggest response")

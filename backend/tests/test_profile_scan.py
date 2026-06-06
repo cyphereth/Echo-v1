@@ -98,10 +98,6 @@ def test_min_text_len_is_20():
 
 # ── Ad / spam cheap rules ─────────────────────────────────────────────────────
 
-def test_spam_sales_phrase():
-    from radar.spam import looks_like_ad_cheap
-    assert looks_like_ad_cheap("Лучшие товары! Артикул в профиле, заказывайте", "user1", []) is True
-
 def test_spam_seller_username():
     from radar.spam import looks_like_ad_cheap
     assert looks_like_ad_cheap("классная штука для дома и кухни каждый день", "wb_goldy", []) is True
@@ -110,18 +106,30 @@ def test_spam_too_short():
     from radar.spam import looks_like_ad_cheap
     assert looks_like_ad_cheap("огонь", "user1", []) is True
 
-def test_spam_too_long():
-    from radar.spam import looks_like_ad_cheap
-    assert looks_like_ad_cheap("ж" * 200, "user1", []) is True
-
-def test_spam_hashtag_stuffing():
-    from radar.spam import looks_like_ad_cheap
-    assert looks_like_ad_cheap("норм пост про доставку озон сегодня", "user1",
-                               ["a", "b", "c", "d", "e"]) is True
-
 def test_spam_real_post_passes():
     from radar.spam import looks_like_ad_cheap
     assert looks_like_ad_cheap("заказал на озоне, доставили за два дня, всё отлично", "katya_msk", ["озон"]) is False
+
+def test_cheap_ignores_marketplace_phrase():
+    # "промокод"/"артикул" are sphere-specific noise now judged by the AI, not the cheap layer
+    from radar.spam import looks_like_ad_cheap
+    assert looks_like_ad_cheap("заказал по промокоду в тануки, ролл огонь", "katya_msk", []) is False
+
+def test_cheap_allows_long_caption():
+    from radar.spam import looks_like_ad_cheap
+    long_caption = "Сегодня заехали в новый ресторан японской кухни, " * 5  # ~250 chars, normal
+    assert looks_like_ad_cheap(long_caption, "foodie_anna", []) is False
+
+def test_cheap_allows_many_hashtags():
+    # food/lifestyle posts routinely use >3 hashtags — not junk by itself
+    from radar.spam import looks_like_ad_cheap
+    assert looks_like_ad_cheap(
+        "обалденные роллы в тануки сегодня", "user_masha",
+        ["суши", "роллы", "японскаякухня", "вкусно", "доставка", "ужин"]) is False
+
+def test_cheap_allows_inline_hashtags():
+    from radar.spam import looks_like_ad_cheap
+    assert looks_like_ad_cheap("крутая подборка роллов #суши#роллы#еда#доставка#ужин", "user1", []) is False
 
 def test_classify_ads_batch_no_key():
     from radar.spam import classify_ads_batch
@@ -132,11 +140,6 @@ def test_classify_ads_batch_no_key():
     finally:
         sp.LLM_API_KEY = old
 
-
-def test_spam_inline_hashtag_stuffing():
-    from radar.spam import looks_like_ad_cheap
-    # hashtags glued into text, empty list — should still be caught
-    assert looks_like_ad_cheap("крутая подборка #дача#идеи#ремонт#скидки#вб", "user1", []) is True
 
 def test_competitor_word_boundary_no_substring():
     from radar.collector import _matches

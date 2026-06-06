@@ -11,21 +11,10 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-_HASHTAG_RE = re.compile(r"#\w+", re.UNICODE)
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_API_URL = os.getenv("LLM_API_URL", "https://api.anthropic.com/v1/messages")
 
 MIN_LEN = 20
-MAX_LEN = 150
-MAX_HASHTAGS = 3
-
-SALES_PHRASES = [
-    "артикул в профил", "артикул в опис", "ссылка в шапк", "ссылка в профил",
-    "пиши в директ", "пишите в директ", "заказать тут", "заказать здесь",
-    "промокод", "скидка по ссылк", "оптом", "доставка по росси", "в наличии",
-    "закажи", "купить со скидк", "по ссылке в", "артикул:", "арт.", "цена:",
-    "наш магазин", "переходи по", "переходите по", "ссылка в био", "в био",
-]
 
 SELLER_NAME_HINTS = [
     "shop", "store", "magazin", "магазин", "_opt", "opt_", "artikul",
@@ -108,22 +97,16 @@ def classify_providers_batch(texts: list) -> list:
 
 
 def looks_like_ad_cheap(text: str, author: str, hashtags: Optional[list] = None,
-                        min_len: int = MIN_LEN, max_len: int = MAX_LEN) -> bool:
-    """Level-1 rules — no network. True = obvious ad/spam."""
+                        min_len: int = MIN_LEN) -> bool:
+    """Level-1 UNIVERSAL junk — no network, sphere-independent. True only for junk in
+    EVERY sphere: too-short text, or a dropshipper/seller handle. Sphere-specific noise
+    (marketplace sales phrases, heavy hashtags, long promos) is left to the sphere-aware
+    AI judge in classify_ads_batch."""
     raw = text or ""
-    if len(raw) < min_len or len(raw) > max_len:
-        return True
-    t = raw.lower()
-    if any(p in t for p in SALES_PHRASES):
+    if len(raw) < min_len:
         return True
     a = (author or "").lower()
     if any(h in a for h in SELLER_NAME_HINTS):
-        return True
-    # Count hashtags from both the provider list AND inline #tags glued into text
-    # (#дача#идеи#скидки) — dropshippers stuff them straight into the caption.
-    tags = {h.lower().lstrip("#") for h in (hashtags or [])}
-    tags |= {m.lower().lstrip("#") for m in _HASHTAG_RE.findall(raw)}
-    if len(tags) > MAX_HASHTAGS:
         return True
     return False
 

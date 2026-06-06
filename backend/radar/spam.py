@@ -133,8 +133,9 @@ def _build_ads_classify_payload(texts: list, sphere: str = "") -> dict:
 
 
 def classify_ads_batch(texts: list, sphere: str = "") -> list:
-    """Level-2 — Claude human-vs-ad per text, one batched call.
-    Returns list[bool] (is_ad) aligned to input. Fail-open: all False on no-key/error."""
+    """Level-2 — Claude sphere-aware relevance filter (NOISE vs RELEVANT), one batched
+    call. Returns list[bool] (is_ad=True means noise) aligned to input. Fail-open: all
+    False on no-key/error."""
     n = len(texts)
     if n == 0:
         return []

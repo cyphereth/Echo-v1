@@ -50,3 +50,51 @@ def test_is_duplicate_reply_allows_distinct():
 
 def test_is_duplicate_reply_empty_history():
     assert is_duplicate_reply("любой текст", []) is False
+
+
+def _mem_session():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as _S
+    from radar.models import Base
+    eng = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(eng)
+    return _S(eng)
+
+
+def test_thread_already_engaged_true_after_sent():
+    from datetime import datetime, timezone
+    from radar.models import Mention, Comment
+    from radar.engagement import thread_already_engaged
+    s = _mem_session()
+    m = Mention(brand_id=1, platform="tiktok", post_id="p1", author="a",
+                text="t", created_at=datetime.now(timezone.utc))
+    s.add(m); s.flush()
+    s.add(Comment(mention_id=m.id, comment_id="c1", text="x",
+                  status="sent", created_at=datetime.now(timezone.utc)))
+    s.commit()
+    assert thread_already_engaged(s, m.id) is True
+
+
+def test_thread_already_engaged_false_when_only_pending():
+    from datetime import datetime, timezone
+    from radar.models import Mention, Comment
+    from radar.engagement import thread_already_engaged
+    s = _mem_session()
+    m = Mention(brand_id=1, platform="tiktok", post_id="p2", author="a",
+                text="t", created_at=datetime.now(timezone.utc))
+    s.add(m); s.flush()
+    s.add(Comment(mention_id=m.id, comment_id="c1", text="x",
+                  status="pending", created_at=datetime.now(timezone.utc)))
+    s.commit()
+    assert thread_already_engaged(s, m.id) is False
+
+
+def test_log_engagement_writes_row():
+    from radar.models import EngagementLog
+    from radar.engagement import log_engagement
+    s = _mem_session()
+    log_engagement(s, brand_id=1, mention_id=5, comment_id=9,
+                   action="posted", actor="ops@x.com", text="hi")
+    s.commit()
+    row = s.query(EngagementLog).one()
+    assert row.action == "posted" and row.actor == "ops@x.com"

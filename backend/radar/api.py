@@ -970,7 +970,7 @@ def get_comments(mention_id: int, refresh: int = 0, include_hidden: int = 0, use
 
 @app.get("/opportunities")
 def opportunities(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
-    """All opportunity comments (competitor/niche intercepts) for a brand, grouped
+    """All opportunity comments (competitor/niche engagement opportunities) for a brand, grouped
     by their source mention — feeds the Queue's 'Возможности' view."""
     _owned_brand(session, brand_id, user)
     rows = (
@@ -1121,7 +1121,7 @@ def analytics(brand_id: int, user: User = Depends(current_user), session: Sessio
 
     sent_comments = (
         session.query(Comment).join(Mention)
-        .filter(Mention.brand_id == brand_id, Comment.status == "sent").count()
+        .filter(Mention.brand_id == brand_id, Comment.status.in_(("sent", "posted"))).count()
     )
     sent_total = sum(1 for m in mentions if m.status == "sent") + sent_comments
     hot = sum(1 for m in mentions if m.is_hot)

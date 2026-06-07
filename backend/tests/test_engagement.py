@@ -158,3 +158,31 @@ def test_comment_action_posted_logs_and_sets_status(monkeypatch):
     assert s.get(Comment, c.id).status == "posted"
     log = s.query(EngagementLog).filter_by(action="posted").one()
     assert log.actor == "ops@x.com" and log.comment_id == c.id
+
+
+def test_analytics_sent_stat_includes_posted_comments(monkeypatch):
+    """Analytics 'Ответов отправлено' must count both sent AND posted comments."""
+    from datetime import datetime, timezone
+    from radar import api
+    from radar.models import Brand, Mention, Comment
+    s = _mem_session()
+    s.add(Brand(id=1, name="Tanuki", sphere="суши"))
+    m = Mention(brand_id=1, platform="tiktok", post_id="pa", author="a",
+                text="t", created_at=datetime.now(timezone.utc))
+    s.add(m); s.flush()
+    s.add(Comment(mention_id=m.id, comment_id="c_sent", text="x",
+                  status="sent", created_at=datetime.now(timezone.utc)))
+    s.add(Comment(mention_id=m.id, comment_id="c_posted", text="y",
+                  status="posted", created_at=datetime.now(timezone.utc)))
+    s.commit()
+
+    monkeypatch.setattr(api, "_owned_brand", lambda session, brand_id, user: None)
+
+    class U: id = 1; email = "ops@x.com"
+    result = api.analytics(brand_id=1, user=U(), session=s)
+
+    sent_stat = next(item for item in result["stats"] if item["key"] == "sent")
+    # Both sent + posted comments must be counted: value should be "2"
+    assert sent_stat["value"] == "2", (
+        f"Expected sent stat value '2' (sent + posted), got {sent_stat['value']!r}"
+    )

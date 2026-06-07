@@ -52,7 +52,7 @@ function CommentCard({ c, onApprove, onSkip, onRegenerate }) {
           <span className={styles.commentFollowers}>{fmtNum(c.followers)} подп.</span>
           {c.is_opportunity && (
             <span className={styles.sentBadge}
-              title={c.opportunity || 'Возможность перехватить аудиторию'}
+              title={c.opportunity || 'Уместный повод ответить от бренда'}
               style={{ background: 'var(--brand-dim, rgba(99,102,241,0.15))', color: 'var(--brand-bright, #818cf8)', marginLeft: 4 }}>
               🎯
             </span>

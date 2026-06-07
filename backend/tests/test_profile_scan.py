@@ -535,3 +535,33 @@ def test_disambiguate_brand_batch_fail_open_no_key():
 def test_disambiguate_brand_batch_empty():
     from radar.spam import disambiguate_brand_batch
     assert disambiguate_brand_batch([], "Тануки", "еда") == []
+
+
+# ── intent reach ──────────────────────────────────────────────────────────────
+
+def test_looks_like_intent_true():
+    from radar.pipeline import _looks_like_intent
+    assert _looks_like_intent("посоветуйте, где вкусно поесть?") is True
+    assert _looks_like_intent("куда сходить на выходных?") is True
+
+def test_looks_like_intent_false():
+    from radar.pipeline import _looks_like_intent
+    assert _looks_like_intent("купил роллы вчера, очень вкусно") is False
+    assert _looks_like_intent("просто красивое видео про суши") is False
+
+def test_opportunity_niche_intent_vs_plain():
+    from radar.pipeline import opportunity_for
+    from radar.models import Mention
+    intent = Mention(source="niche", text="подскажите, куда сходить поесть?")
+    plain  = Mention(source="niche", text="люблю японскую кухню")
+    o_intent = opportunity_for(intent)
+    o_plain  = opportunity_for(plain)
+    assert "ищет" in o_intent          # stronger intent hint
+    assert o_intent != o_plain
+    assert o_plain is not None         # plain niche keeps the existing hint
+
+def test_opportunity_competitor_unchanged():
+    from radar.pipeline import opportunity_for
+    from radar.models import Mention
+    m = Mention(source="competitor", competitor="Якитория", text="был в якитории")
+    assert "Якитория" in opportunity_for(m)

@@ -16,11 +16,23 @@ from .models import Brand, Mention, DraftEdit
 MAX_DRAFTS_PER_COLLECT = int(os.getenv("MAX_DRAFTS_PER_COLLECT", "50"))
 
 
+_INTENT_CUES = ("куда", "где", "посовет", "подскажите", "что попробовать",
+                "что выбрать", "стоит ли", "который лучше")
+
+def _looks_like_intent(text: str) -> bool:
+    """Recommendation-seeking / where-to-go post — sphere-agnostic. Needs a question
+    mark plus a recommendation cue."""
+    t = (text or "").lower()
+    return "?" in t and any(c in t for c in _INTENT_CUES)
+
+
 def opportunity_for(m: Mention) -> Optional[str]:
     if m.source == "competitor":
         who = m.competitor or "конкурента"
         return f"Аудитория обсуждает {who} — момент предложить ваш бренд как альтернативу."
     if m.source == "niche":
+        if _looks_like_intent(m.text):
+            return "Человек ищет, куда пойти / что выбрать — отличный момент предложить бренд нативно."
         return "Тематическая аудитория без упоминания бренда — хороший момент зайти нативно."
     return None
 

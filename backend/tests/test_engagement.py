@@ -29,3 +29,24 @@ def test_opportunity_prompts_are_transparent():
     blob = (system + " " + user).lower()
     assert "официальн" in blob
     assert not any(w in blob for w in COVERT)
+
+
+from radar.engagement import normalize_reply, is_duplicate_reply
+
+
+def test_normalize_reply_strips_case_punct_space():
+    assert normalize_reply("  Привет!!  Заходи  ") == normalize_reply("привет заходи")
+
+
+def test_is_duplicate_reply_detects_near_identical():
+    recent = ["Заходите к нам в Tanuki, у нас акция!"]
+    assert is_duplicate_reply("заходите к нам в tanuki у нас акция", recent) is True
+
+
+def test_is_duplicate_reply_allows_distinct():
+    recent = ["Заходите к нам в Tanuki, у нас акция!"]
+    assert is_duplicate_reply("Спасибо за отзыв! Чем можем помочь?", recent) is False
+
+
+def test_is_duplicate_reply_empty_history():
+    assert is_duplicate_reply("любой текст", []) is False

@@ -43,7 +43,7 @@ function buildQueue(source) {
 
 // ── Reply card ──────────────────────────────────────────────────────────────
 
-function ReplyCard({ c, postUrl, onApprove, onSkip }) {
+function ReplyCard({ c, postUrl, onApprove, onSkip, onPosted }) {
   const [draft, setDraft]     = useState(c.suggestedReply || c.pendingReply || '');
   const [editing, setEditing] = useState(false);
   const [done, setDone]       = useState(false);
@@ -66,7 +66,7 @@ function ReplyCard({ c, postUrl, onApprove, onSkip }) {
           <span className={styles.followers}>{fmtNum(c.followers)} подп.</span>
           {c.is_opportunity && (
             <span className={styles.sentBadge}
-              title={c.opportunity || 'Возможность перехватить аудиторию'}
+              title={c.opportunity || 'Уместный повод ответить от бренда'}
               style={{ background: 'var(--brand-dim, rgba(99,102,241,0.15))', color: 'var(--brand-bright, #818cf8)' }}>
               🎯 Возможность
             </span>
@@ -123,8 +123,11 @@ function ReplyCard({ c, postUrl, onApprove, onSkip }) {
                 <Icon name="edit" size={13} />Изменить
               </button>
             )}
-            <button className={`${styles.btn} ${styles.btnPrimary}`} onClick={() => { onApprove(c.id, draft); setDone(true); setDoneType('sent'); }}>
-              <Icon name="send" size={13} />Отправить
+            <button className={`${styles.btn} ${styles.btnGhost}`} onClick={() => { onApprove(c.id, draft); setDone(true); setDoneType('sent'); }}>
+              <Icon name="check" size={13} />Одобрить
+            </button>
+            <button className={`${styles.btn} ${styles.btnPrimary}`} onClick={() => { onPosted(c.id, draft); setDone(true); setDoneType('sent'); }}>
+              <Icon name="send" size={13} />Опубликовано
             </button>
           </div>
         </div>
@@ -173,6 +176,10 @@ export function QueueScreen({ items, brandId }) {
   const onSkip = (id) => {
     setStates(s => ({ ...s, [id]: 'skipped' }));
     if (oppIds.has(id)) api.commentAction(id, 'skip').catch(() => {});
+  };
+  const onPosted = (id, draft) => {
+    setStates(s => ({ ...s, [id]: 'approved' }));
+    if (oppIds.has(id)) api.commentAction(id, 'posted', draft).catch(() => {});
   };
 
   const totalPending = raw.reduce((sum, g) => sum + g.comments.length, 0);
@@ -251,7 +258,7 @@ export function QueueScreen({ items, brandId }) {
             ))}
             <button className={styles.chip} data-active={onlyOpps ? '1' : '0'}
               onClick={() => setOnlyOpps(v => !v)}
-              title="Только перехват аудитории конкурентов">
+              title="Только поводы ответить от бренда">
               🎯 Только возможности
             </button>
           </div>
@@ -332,7 +339,7 @@ export function QueueScreen({ items, brandId }) {
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {comments.map(c => (
-                      <ReplyCard key={c.id} c={c} postUrl={video.url} onApprove={onApprove} onSkip={onSkip} />
+                      <ReplyCard key={c.id} c={c} postUrl={video.url} onApprove={onApprove} onSkip={onSkip} onPosted={onPosted} />
                     ))}
                   </div>
                 </div>

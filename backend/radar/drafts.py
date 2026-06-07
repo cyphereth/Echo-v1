@@ -22,28 +22,42 @@ def _is_opportunity_candidate(text: str, sentiment: str) -> bool:
     return sentiment == "negative" or any(trig in t for trig in OPPORTUNITY_TRIGGERS)
 
 
+def _opportunity_prompts(comment_text: str, source: str,
+                         competitor: Optional[str], brand_name: Optional[str]) -> tuple[str, str]:
+    """Build (system, user) prompts for judging+drafting a public brand reply.
+    The reply is posted openly from the brand's official account — it must read
+    as the brand helping, never as an anonymous user pushing the brand."""
+    brand = brand_name or "бренд"
+    where = (f"под постом о конкуренте {competitor}" if (source == "competitor" and competitor)
+             else "под тематическим (нишевым) постом")
+    system = (
+        f"Ты — SMM-менеджер бренда {brand}. Ты пишешь публичные ответы "
+        f"ОТ ОФИЦИАЛЬНОГО аккаунта {brand} в комментариях соцсетей. "
+        f"Читатель видит, что отвечает бренд. Твоя цель — реально помочь автору "
+        f"(ответить на вопрос, дать пользу), а уже потом — мягко предложить {brand}. "
+        f"Никогда не выдавай себя за обычного пользователя и не очерняй конкурентов. "
+        f"Отвечай ТОЛЬКО валидным JSON без markdown."
+    )
+    user = (
+        f'Комментарий {where}: "{comment_text}". '
+        f'Есть ли здесь уместный повод для официального ответа бренда {brand}, '
+        f'который сначала поможет автору? '
+        f'Если да — короткий дружелюбный честный ответ от лица {brand} '
+        f'(польза + мягкое предложение, без агрессии к конкуренту). '
+        f'JSON: {{"is_opportunity": false, "reason": "", "reply": ""}}'
+    )
+    return system, user
+
+
 def evaluate_opportunity(comment_text: str, source: str,
                          competitor: Optional[str], brand_name: Optional[str]) -> dict:
     """Ask Claude whether a competitor/niche comment is an opening for the brand to
-    win the commenter, and draft an intercept reply. Returns
+    reply helpfully from the official account, and draft a transparent reply. Returns
     {is_opportunity, reason, reply} or {} on no-key/error."""
     if not LLM_API_KEY:
         return {}
     import httpx
-    brand = brand_name or "бренд"
-    where = f"под постом конкурента {competitor}" if (source == "competitor" and competitor) \
-            else "под тематическим (нишевым) постом"
-    system = (
-        "Ты помогаешь бренду нативно перехватывать аудиторию у конкурентов в "
-        "комментариях соцсетей. Отвечай ТОЛЬКО валидным JSON без markdown."
-    )
-    user = (
-        f'Комментарий {where}: "{comment_text}". '
-        f'Это возможность для бренда {brand} нативно зайти и привлечь этого человека? '
-        f'Если да — напиши короткий дружелюбный ненавязчивый ответ от лица {brand} '
-        f'с мягкой выгодой (без агрессии к конкуренту). '
-        f'JSON: {{"is_opportunity": false, "reason": "", "reply": ""}}'
-    )
+    system, user = _opportunity_prompts(comment_text, source, competitor, brand_name)
 
     def _call():
         resp = httpx.post(
@@ -81,21 +95,23 @@ def _system_prompt(source: str, brand_name: Optional[str], tone_examples: list[s
     brand = brand_name or "бренд"
     if source == "competitor":
         system = (
-            f"You write short, friendly social-media replies on behalf of {brand}. "
-            f"The post criticizes a COMPETITOR. Gently, without bashing the competitor, "
-            f"invite the author to try {brand} as an alternative. Reply in Russian, 1-3 sentences, "
-            f"natural and non-spammy. Include a soft call to action."
+            f"Ты пишешь короткие дружелюбные ответы ОТ ОФИЦИАЛЬНОГО аккаунта {brand} "
+            f"в соцсетях. Пост касается конкурента. Не очерняя конкурента, по-доброму "
+            f"предложи автору попробовать {brand} как альтернативу. По-русски, 1-3 "
+            f"предложения, естественно, без спама, с мягким призывом."
         )
     elif source == "niche":
         system = (
-            f"You write short, friendly social-media replies on behalf of {brand}. "
-            f"The post is about the niche but does NOT mention {brand}. Add value to the discussion "
-            f"and mention {brand} naturally where relevant. Reply in Russian, 1-3 sentences, non-spammy."
+            f"Ты пишешь короткие дружелюбные ответы ОТ ОФИЦИАЛЬНОГО аккаунта {brand} "
+            f"в соцсетях. Пост по теме ниши, но {brand} не упомянут. Сначала добавь "
+            f"пользы в обсуждение, затем уместно упомяни {brand}. По-русски, 1-3 "
+            f"предложения, без спама."
         )
     else:
         system = (
-            f"You are a brand reputation manager for {brand} writing response drafts in Russian. "
-            f"Always include a concrete next step. Be concise (2-4 sentences)."
+            f"Ты — менеджер по репутации бренда {brand}, пишешь черновики ответов "
+            f"ОТ ОФИЦИАЛЬНОГО аккаунта по-русски. Всегда давай конкретный следующий "
+            f"шаг. Кратко (2-4 предложения)."
         )
     if tone_examples:
         system += "\nMatch this brand voice. Examples:\n" + "\n".join(f"- {e}" for e in tone_examples[:5])

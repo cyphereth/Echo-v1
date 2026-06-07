@@ -19,7 +19,12 @@
 .context {
   padding: 20px 24px 18px;
   border-bottom: 1px solid var(--line);
-  flex-shrink: 0;
+  /* Cap the post/context block so a long caption can't starve the comments list;
+     it scrolls internally instead of pushing the comments to ~0 height. */
+  flex-shrink: 1;
+  min-height: 0;
+  max-height: 50%;
+  overflow-y: auto;
 }
 
 .contextTop {
@@ -145,6 +150,7 @@
 
 .commentsList {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 10px 16px;
   display: flex;

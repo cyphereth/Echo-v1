@@ -879,6 +879,10 @@ def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
 
     from .drafts import _is_opportunity_candidate, evaluate_opportunity
     from .spam import looks_like_ad_cheap, classify_ads_batch
+    from .engagement import thread_already_engaged, is_duplicate_reply
+    engaged = thread_already_engaged(session, mention.id)
+    sent_replies = [c.draft for c in mention.comment_rows
+                    if c.draft and c.status in ("sent", "posted")]
     is_comp_niche = mention.source in ("competitor", "niche")
 
     # New comments only; cheap spam rules first, then one batched Claude ad-check.
@@ -907,19 +911,22 @@ def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
 
         if is_spam:
             pass  # stored hidden, no draft
-        elif is_comp_niche:
-            # Opportunity interception: prefilter cheaply, then let Claude decide
-            # and write the intercept reply in one call.
+        elif is_comp_niche and not engaged:
+            # Honest engagement: one brand reply per thread, prefilter cheaply,
+            # then let Claude decide and write an openly-branded reply. Skip
+            # near-duplicate drafts so the brand never repeats a canned line.
             if _is_opportunity_candidate(fc.text, sentiment) and drafted < MAX_COMMENT_DRAFTS:
                 ev = evaluate_opportunity(
                     fc.text, mention.source, mention.competitor,
                     brand.name if brand else None,
                 )
-                if ev.get("is_opportunity") and ev.get("reply"):
-                    draft      = ev["reply"]
+                reply = ev.get("reply")
+                if ev.get("is_opportunity") and reply and not is_duplicate_reply(reply, sent_replies):
+                    draft      = reply
                     opp_reason = ev.get("reason") or None
                     is_opp     = True
                     drafted   += 1
+                    engaged    = True  # cap to one fresh draft per thread per fetch
         elif sentiment == "negative" and drafted < MAX_COMMENT_DRAFTS:
             # brand-lane: reply to negative comments as before
             dr = generate_draft(

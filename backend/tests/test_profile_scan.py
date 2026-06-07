@@ -470,17 +470,21 @@ def test_ensure_name_empty_name_noop():
     assert _ensure_name_in_keywords("   ", ["суши"]) == ["суши"]
 
 
-# ── pipeline: brand-lane bypasses the noise judge ─────────────────────────────
+# ── pipeline: brand-lane disambiguation ───────────────────────────────────────
 
-def test_brand_lane_bypasses_noise_judge(monkeypatch):
-    """Even when the judge flags EVERYTHING as noise, brand-lane mentions survive;
-    niche-lane mentions are hidden."""
+def test_brand_lane_disambiguated_not_ad_judged(monkeypatch):
+    """Brand-lane mentions go through disambiguation (off-topic homonyms hidden,
+    real ones kept), NOT the ad/noise judge; niche lane still uses the noise judge."""
     from datetime import datetime, timezone
     import radar.spam as spam
     import radar.pipeline as pipeline
     from radar import db
     from radar.models import Brand, Mention
+    # noise judge would hide everything if (wrongly) applied to the brand lane
     monkeypatch.setattr(spam, "classify_ads_batch", lambda texts, sphere="": [True] * len(texts))
+    # disambiguation: first brand text off-topic, second on-topic
+    monkeypatch.setattr(spam, "disambiguate_brand_batch",
+                        lambda texts, brand_name, sphere="": [True, False][:len(texts)])
     monkeypatch.setattr(pipeline, "generate_draft", lambda *a, **k: None)
     monkeypatch.setattr(pipeline, "rescore_mention", lambda *a, **k: None)
     s = db.get_session()
@@ -492,15 +496,72 @@ def test_brand_lane_bypasses_noise_judge(monkeypatch):
                     text=txt, source=src, is_spam=False,
                     created_at=datetime.now(timezone.utc))
         s.add(m); return m
-    brand_m = mk("brand", "bnz-b", "зашли поужинать в тануки, очень вкусно")
-    niche_m = mk("niche", "bnz-n", "случайный пост вообще про суши где-то")
+    brand_off = mk("brand", "d-off", "прошёл уровень за тануки в игре сегодня")
+    brand_on  = mk("brand", "d-on", "ужинали в тануки, роллы супер")
+    niche_m   = mk("niche", "d-niche", "вообще про суши где-то в мире")
     s.flush()
 
     pipeline.classify_and_draft(s, b.id)
-    s.refresh(brand_m); s.refresh(niche_m)
+    s.refresh(brand_off); s.refresh(brand_on); s.refresh(niche_m)
     try:
-        assert brand_m.is_spam is False   # brand lane bypassed the judge
-        assert niche_m.is_spam is True    # niche lane judged as noise
+        assert brand_off.is_spam is True    # off-topic homonym hidden
+        assert brand_on.is_spam is False    # real brand mention kept
+        assert niche_m.is_spam is True      # niche judged as noise
     finally:
         s.query(Mention).filter_by(brand_id=b.id).delete()
         s.delete(b); s.commit()
+
+
+# ── brand-lane disambiguation ─────────────────────────────────────────────────
+
+def test_build_disambiguate_payload_includes_brand_and_sphere():
+    from radar.spam import _build_disambiguate_payload
+    p = _build_disambiguate_payload(["пост про #tanuki в игре"], brand_name="Тануки",
+                                    sphere="сеть японских ресторанов")
+    blob = p["system"] + p["messages"][0]["content"]
+    assert "Тануки" in blob
+    assert "сеть японских ресторанов" in blob
+    assert "пост про #tanuki в игре" in blob
+
+def test_disambiguate_brand_batch_fail_open_no_key():
+    import radar.spam as sp
+    old = sp.LLM_API_KEY; sp.LLM_API_KEY = ""
+    try:
+        from radar.spam import disambiguate_brand_batch
+        assert disambiguate_brand_batch(["a", "b"], "Тануки", "еда") == [False, False]
+    finally:
+        sp.LLM_API_KEY = old
+
+def test_disambiguate_brand_batch_empty():
+    from radar.spam import disambiguate_brand_batch
+    assert disambiguate_brand_batch([], "Тануки", "еда") == []
+
+
+# ── intent reach ──────────────────────────────────────────────────────────────
+
+def test_looks_like_intent_true():
+    from radar.pipeline import _looks_like_intent
+    assert _looks_like_intent("посоветуйте, где вкусно поесть?") is True
+    assert _looks_like_intent("куда сходить на выходных?") is True
+
+def test_looks_like_intent_false():
+    from radar.pipeline import _looks_like_intent
+    assert _looks_like_intent("купил роллы вчера, очень вкусно") is False
+    assert _looks_like_intent("просто красивое видео про суши") is False
+
+def test_opportunity_niche_intent_vs_plain():
+    from radar.pipeline import opportunity_for
+    from radar.models import Mention
+    intent = Mention(source="niche", text="подскажите, куда сходить поесть?")
+    plain  = Mention(source="niche", text="люблю японскую кухню")
+    o_intent = opportunity_for(intent)
+    o_plain  = opportunity_for(plain)
+    assert "ищет" in o_intent          # stronger intent hint
+    assert o_intent != o_plain
+    assert o_plain is not None         # plain niche keeps the existing hint
+
+def test_opportunity_competitor_unchanged():
+    from radar.pipeline import opportunity_for
+    from radar.models import Mention
+    m = Mention(source="competitor", competitor="Якитория", text="был в якитории")
+    assert "Якитория" in opportunity_for(m)

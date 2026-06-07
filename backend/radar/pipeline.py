@@ -16,11 +16,23 @@ from .models import Brand, Mention, DraftEdit
 MAX_DRAFTS_PER_COLLECT = int(os.getenv("MAX_DRAFTS_PER_COLLECT", "50"))
 
 
+_INTENT_CUES = ("куда", "где", "посовет", "подскажите", "что попробовать",
+                "что выбрать", "стоит ли", "который лучше")
+
+def _looks_like_intent(text: str) -> bool:
+    """Recommendation-seeking / where-to-go post — sphere-agnostic. Needs a question
+    mark plus a recommendation cue."""
+    t = (text or "").lower()
+    return "?" in t and any(c in t for c in _INTENT_CUES)
+
+
 def opportunity_for(m: Mention) -> Optional[str]:
     if m.source == "competitor":
         who = m.competitor or "конкурента"
         return f"Аудитория обсуждает {who} — момент предложить ваш бренд как альтернативу."
     if m.source == "niche":
+        if _looks_like_intent(m.text):
+            return "Человек ищет, куда пойти / что выбрать — отличный момент предложить бренд нативно."
         return "Тематическая аудитория без упоминания бренда — хороший момент зайти нативно."
     return None
 
@@ -49,21 +61,29 @@ def classify_and_draft(session: Session, brand_id: int) -> dict:
                 Mention.is_spam.is_(False))
         .all()
     )
-    # Level-2 noise filter: Claude flags off-topic/foreign-ad posts the cheap rules
-    # missed, judged for the brand's sphere. Brand-lane mentions are NOT judged — they
-    # already matched a brand keyword, so they are real mentions, never noise (even if
-    # the brand's own copy reads promotional). Only niche/competitor lanes, where broad
-    # terms catch random content, go through the judge.
-    from .spam import classify_ads_batch
+    # Level-2 relevance filter. Brand-lane mentions matched a brand keyword, so they are
+    # kept unless they are an off-topic homonym (default-keep disambiguation). Niche and
+    # competitor lanes, where broad terms catch random content, go through the sphere
+    # noise judge.
+    from .spam import classify_ads_batch, disambiguate_brand_batch
     if unclassified:
-        judged = [m for m in unclassified if m.source != "brand"]
-        flags = classify_ads_batch([m.text for m in judged],
-                                    sphere=getattr(brand, "sphere", "") or "") if judged else []
+        sphere = getattr(brand, "sphere", "") or ""
+        brand_ms = [m for m in unclassified if m.source == "brand"]
+        other_ms = [m for m in unclassified if m.source != "brand"]
         noise = set()
-        for m, is_ad in zip(judged, flags):
-            if is_ad:
-                m.is_spam = True
-                noise.add(id(m))
+        if brand_ms:
+            off = disambiguate_brand_batch([m.text for m in brand_ms],
+                                           brand_name=brand.name, sphere=sphere)
+            for m, is_off in zip(brand_ms, off):
+                if is_off:
+                    m.is_spam = True
+                    noise.add(id(m))
+        if other_ms:
+            flags = classify_ads_batch([m.text for m in other_ms], sphere=sphere)
+            for m, is_ad in zip(other_ms, flags):
+                if is_ad:
+                    m.is_spam = True
+                    noise.add(id(m))
         kept = [m for m in unclassified if id(m) not in noise]
         session.commit()
         unclassified = kept

@@ -134,3 +134,27 @@ def test_fetch_skips_when_thread_already_engaged(monkeypatch):
     api._fetch_and_store_comments(s, m)
     stored = s.query(Comment).filter_by(comment_id="new1").one()
     assert stored.is_opportunity is False and stored.draft is None
+
+
+def test_comment_action_posted_logs_and_sets_status(monkeypatch):
+    from datetime import datetime, timezone
+    from radar import api
+    from radar.models import Brand, Mention, Comment, EngagementLog
+    s = _mem_session()
+    s.add(Brand(id=1, name="Tanuki"))
+    m = Mention(brand_id=1, platform="tiktok", post_id="p", author="a",
+                text="t", created_at=datetime.now(timezone.utc))
+    s.add(m); s.flush()
+    c = Comment(mention_id=m.id, comment_id="c", text="q", draft="ответ",
+                status="pending", created_at=datetime.now(timezone.utc))
+    s.add(c); s.commit()
+
+    monkeypatch.setattr(api, "_owned_mention", lambda session, mid, user: m)
+    body = api.CommentActionBody(action="posted")
+
+    class U: id = 1; email = "ops@x.com"
+    api.comment_action(c.id, body, user=U(), session=s)
+
+    assert s.get(Comment, c.id).status == "posted"
+    log = s.query(EngagementLog).filter_by(action="posted").one()
+    assert log.actor == "ops@x.com" and log.comment_id == c.id

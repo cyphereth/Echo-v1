@@ -812,6 +812,11 @@ def post_action(mention_id: int, body: ActionBody, user: User = Depends(current_
     else:
         raise HTTPException(400, f"Unknown action: {body.action}")
 
+    from .engagement import log_engagement
+    _action_map = {"approve": "approved", "reject": "rejected", "pr": "pr"}
+    log_engagement(session, brand_id=m.brand_id, mention_id=m.id, comment_id=None,
+                   action=_action_map.get(body.action, body.action),
+                   actor=getattr(user, "email", "") or "", text=m.draft)
     session.commit()
     return {"ok": True}
 
@@ -837,7 +842,7 @@ def regenerate_draft(mention_id: int, user: User = Depends(current_user), sessio
 # ── Comments ──────────────────────────────────────────────────────────────────
 
 MAX_COMMENT_DRAFTS = int(os.getenv("MAX_COMMENT_DRAFTS", "10"))
-_STATUS_OUT = {"sent": "approved", "skipped": "skipped", "pending": "pending"}
+_STATUS_OUT = {"sent": "approved", "posted": "posted", "skipped": "skipped", "pending": "pending"}
 
 
 def _minutes_ago(dt: datetime) -> int:
@@ -992,7 +997,7 @@ def opportunities(brand_id: int, user: User = Depends(current_user), session: Se
 
 
 class CommentActionBody(BaseModel):
-    action: str                 # approve | skip
+    action: str                 # approve | posted | skip
     draft:  Optional[str] = None
 
 @app.post("/comments/{comment_id}/action")
@@ -1000,18 +1005,31 @@ def comment_action(comment_id: int, body: CommentActionBody, user: User = Depend
     c = session.get(Comment, comment_id)
     if not c:
         raise HTTPException(404, "Comment not found")
-    _owned_mention(session, c.mention_id, user)
+    mention = _owned_mention(session, c.mention_id, user)
+    actor = getattr(user, "email", "") or ""
+    from .engagement import log_engagement
     if body.action == "approve":
         if body.draft and body.draft != c.draft:
-            mention = session.get(Mention, c.mention_id)
             session.add(DraftEdit(
                 mention_id=c.mention_id, brand_id=mention.brand_id if mention else None,
                 category="comment", original=c.draft or "", edited=body.draft,
             ))
         c.draft  = body.draft or c.draft
         c.status = "sent"
+        log_engagement(session, brand_id=mention.brand_id if mention else None,
+                       mention_id=c.mention_id, comment_id=c.id,
+                       action="approved", actor=actor, text=c.draft)
+    elif body.action == "posted":
+        c.draft  = body.draft or c.draft
+        c.status = "posted"
+        log_engagement(session, brand_id=mention.brand_id if mention else None,
+                       mention_id=c.mention_id, comment_id=c.id,
+                       action="posted", actor=actor, text=c.draft)
     elif body.action == "skip":
         c.status = "skipped"
+        log_engagement(session, brand_id=mention.brand_id if mention else None,
+                       mention_id=c.mention_id, comment_id=c.id,
+                       action="skipped", actor=actor, text=c.draft)
     else:
         raise HTTPException(400, f"Unknown action: {body.action}")
     session.commit()

@@ -132,6 +132,71 @@ def _build_ads_classify_payload(texts: list, sphere: str = "") -> dict:
             "system": system, "messages": [{"role": "user", "content": user}]}
 
 
+def _build_disambiguate_payload(texts: list, brand_name: str, sphere: str = "") -> dict:
+    """Anthropic request for brand-lane disambiguation. Each text already matched a
+    brand keyword; decide whether it is really about the brand or an unrelated meaning
+    of the word (homonym/off-topic). Default-keep: flag off-topic only when confident."""
+    numbered = "\n".join(f"{i}. {(t or '')[:200]}" for i, t in enumerate(texts))
+    sph = f' в сфере "{sphere}"' if sphere else ""
+    system = (
+        f'Каждый текст упоминает бренд "{brand_name}"{sph}. Реши: текст действительно '
+        f'про ЭТОТ бренд — или это ДРУГОЕ значение слова (игра, животное, имя, оффтоп, '
+        f'не относится к сфере бренда)? По умолчанию считай, что про бренд; помечай '
+        f'off-topic ТОЛЬКО при явной уверенности. Отвечай ТОЛЬКО валидным JSON.'
+    )
+    user = (
+        f"Тексты:\n{numbered}\n\n"
+        f'Верни JSON-массив по одному объекту на текст: '
+        f'[{{"i":0,"is_offtopic":false}}, ...]. is_offtopic=true только для явного оффтопа.'
+    )
+    return {"model": "claude-haiku-4-5-20251001", "max_tokens": 40 + len(texts) * 20,
+            "system": system, "messages": [{"role": "user", "content": user}]}
+
+
+def disambiguate_brand_batch(texts: list, brand_name: str, sphere: str = "") -> list:
+    """Level-2 brand-lane filter: True = off-topic homonym (hide). Default-keep,
+    fail-open: all False on no-key/error."""
+    n = len(texts)
+    if n == 0:
+        return []
+    if not LLM_API_KEY:
+        return [False] * n
+
+    import httpx
+
+    def _call():
+        resp = httpx.post(
+            LLM_API_URL,
+            headers={"x-api-key": LLM_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            json=_build_disambiguate_payload(texts, brand_name, sphere),
+            timeout=60,
+        )
+        resp.raise_for_status()
+        blocks = resp.json().get("content", [])
+        text = next((b["text"] for b in blocks if b.get("type") == "text"), "")
+        text = text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        return json.loads(text)
+
+    try:
+        data = _call()
+    except Exception:
+        try:
+            data = _call()
+        except Exception as e:
+            log.warning("disambiguate_brand_batch failed: %s", e)
+            return [False] * n
+
+    flags = [False] * n
+    try:
+        for obj in data:
+            i = obj.get("i")
+            if isinstance(i, int) and 0 <= i < n:
+                flags[i] = bool(obj.get("is_offtopic"))
+    except Exception:
+        return [False] * n
+    return flags
+
+
 def classify_ads_batch(texts: list, sphere: str = "") -> list:
     """Level-2 — Claude sphere-aware relevance filter (NOISE vs RELEVANT), one batched
     call. Returns list[bool] (is_ad=True means noise) aligned to input. Fail-open: all

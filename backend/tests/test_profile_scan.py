@@ -504,3 +504,28 @@ def test_brand_lane_bypasses_noise_judge(monkeypatch):
     finally:
         s.query(Mention).filter_by(brand_id=b.id).delete()
         s.delete(b); s.commit()
+
+
+# ── brand-lane disambiguation ─────────────────────────────────────────────────
+
+def test_build_disambiguate_payload_includes_brand_and_sphere():
+    from radar.spam import _build_disambiguate_payload
+    p = _build_disambiguate_payload(["пост про #tanuki в игре"], brand_name="Тануки",
+                                    sphere="сеть японских ресторанов")
+    blob = p["system"] + p["messages"][0]["content"]
+    assert "Тануки" in blob
+    assert "сеть японских ресторанов" in blob
+    assert "пост про #tanuki в игре" in blob
+
+def test_disambiguate_brand_batch_fail_open_no_key():
+    import radar.spam as sp
+    old = sp.LLM_API_KEY; sp.LLM_API_KEY = ""
+    try:
+        from radar.spam import disambiguate_brand_batch
+        assert disambiguate_brand_batch(["a", "b"], "Тануки", "еда") == [False, False]
+    finally:
+        sp.LLM_API_KEY = old
+
+def test_disambiguate_brand_batch_empty():
+    from radar.spam import disambiguate_brand_batch
+    assert disambiguate_brand_batch([], "Тануки", "еда") == []

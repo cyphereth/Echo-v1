@@ -49,16 +49,22 @@ def classify_and_draft(session: Session, brand_id: int) -> dict:
                 Mention.is_spam.is_(False))
         .all()
     )
-    # Level-2 ad filter: Claude flags promotional-tone posts the cheap rules missed.
+    # Level-2 noise filter: Claude flags off-topic/foreign-ad posts the cheap rules
+    # missed, judged for the brand's sphere. Brand-lane mentions are NOT judged — they
+    # already matched a brand keyword, so they are real mentions, never noise (even if
+    # the brand's own copy reads promotional). Only niche/competitor lanes, where broad
+    # terms catch random content, go through the judge.
     from .spam import classify_ads_batch
     if unclassified:
-        flags = classify_ads_batch([m.text for m in unclassified])
-        kept = []
-        for m, is_ad in zip(unclassified, flags):
+        judged = [m for m in unclassified if m.source != "brand"]
+        flags = classify_ads_batch([m.text for m in judged],
+                                    sphere=getattr(brand, "sphere", "") or "") if judged else []
+        noise = set()
+        for m, is_ad in zip(judged, flags):
             if is_ad:
                 m.is_spam = True
-            else:
-                kept.append(m)
+                noise.add(id(m))
+        kept = [m for m in unclassified if id(m) not in noise]
         session.commit()
         unclassified = kept
 

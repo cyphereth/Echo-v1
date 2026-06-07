@@ -11,7 +11,6 @@ log = logging.getLogger(__name__)
 
 VIRAL_VIEWS  = 500_000  # views above this = viral (post passes filters regardless)
 VIRAL_LIKES  = 1_500    # smaller RU market: 1.5k likes already means a post took off
-MAX_HASHTAGS = 3        # posts with more hashtags are usually low-value spam
 MIN_TEXT_LEN = 20       # posts/comments shorter than this are noise ("огонь", "👍")
 MIN_FOLLOWERS = 100     # accounts below this are hidden unless the post went viral
 

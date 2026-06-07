@@ -1,31 +1,21 @@
 """Ad / dropshipper / spam detection for collected posts and comments.
 
 Two levels:
-  1. looks_like_ad_cheap — instant, free rules (sales phrases, seller usernames,
-     hashtag stuffing, length out of 20–150). Catches obvious commercial spam.
-  2. classify_ads_batch — Claude decides human-vs-ad for survivors in one batched
-     call (catches promotional tone without explicit sales phrases). Fail-open.
+  1. looks_like_ad_cheap — instant, free, sphere-INDEPENDENT rules (too-short text,
+     dropshipper/seller usernames). Catches only universal junk.
+  2. classify_ads_batch — Claude decides noise-vs-relevant for survivors in one batched
+     call, judged for the brand's sphere (so marketplace and food get different calls).
+     Fail-open.
 """
 import json, logging, os, re
 from typing import Optional
 
 log = logging.getLogger(__name__)
 
-_HASHTAG_RE = re.compile(r"#\w+", re.UNICODE)
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_API_URL = os.getenv("LLM_API_URL", "https://api.anthropic.com/v1/messages")
 
 MIN_LEN = 20
-MAX_LEN = 150
-MAX_HASHTAGS = 3
-
-SALES_PHRASES = [
-    "артикул в профил", "артикул в опис", "ссылка в шапк", "ссылка в профил",
-    "пиши в директ", "пишите в директ", "заказать тут", "заказать здесь",
-    "промокод", "скидка по ссылк", "оптом", "доставка по росси", "в наличии",
-    "закажи", "купить со скидк", "по ссылке в", "артикул:", "арт.", "цена:",
-    "наш магазин", "переходи по", "переходите по", "ссылка в био", "в био",
-]
 
 SELLER_NAME_HINTS = [
     "shop", "store", "magazin", "магазин", "_opt", "opt_", "artikul",
@@ -108,29 +98,44 @@ def classify_providers_batch(texts: list) -> list:
 
 
 def looks_like_ad_cheap(text: str, author: str, hashtags: Optional[list] = None,
-                        min_len: int = MIN_LEN, max_len: int = MAX_LEN) -> bool:
-    """Level-1 rules — no network. True = obvious ad/spam."""
+                        min_len: int = MIN_LEN) -> bool:
+    """Level-1 UNIVERSAL junk — no network, sphere-independent. True only for junk in
+    EVERY sphere: too-short text, or a dropshipper/seller handle. Sphere-specific noise
+    (marketplace sales phrases, heavy hashtags, long promos) is left to the sphere-aware
+    AI judge in classify_ads_batch."""
     raw = text or ""
-    if len(raw) < min_len or len(raw) > max_len:
-        return True
-    t = raw.lower()
-    if any(p in t for p in SALES_PHRASES):
+    if len(raw) < min_len:
         return True
     a = (author or "").lower()
     if any(h in a for h in SELLER_NAME_HINTS):
         return True
-    # Count hashtags from both the provider list AND inline #tags glued into text
-    # (#дача#идеи#скидки) — dropshippers stuff them straight into the caption.
-    tags = {h.lower().lstrip("#") for h in (hashtags or [])}
-    tags |= {m.lower().lstrip("#") for m in _HASHTAG_RE.findall(raw)}
-    if len(tags) > MAX_HASHTAGS:
-        return True
     return False
 
 
-def classify_ads_batch(texts: list) -> list:
-    """Level-2 — Claude human-vs-ad per text, one batched call.
-    Returns list[bool] (is_ad) aligned to input. Fail-open: all False on no-key/error."""
+def _build_ads_classify_payload(texts: list, sphere: str = "") -> dict:
+    """Anthropic request for the sphere-aware noise judge. Marks NOISE (foreign
+    ads/sellers, off-topic) vs RELEVANT mentions, judged for the brand's sphere."""
+    numbered = "\n".join(f"{i}. {(t or '')[:200]}" for i, t in enumerate(texts))
+    ctx = f'Бренд работает в сфере: "{sphere}". ' if sphere else ""
+    system = (
+        "Ты фильтр релевантности для мониторинга бренда. " + ctx +
+        "Для каждого текста реши: это ШУМ (чужая реклама, продавец-дропшиппер, "
+        "оффтоп, не относится к сфере бренда) — или РЕЛЕВАНТНЫЙ пост/упоминание "
+        "(мнение, опыт, вопрос, обсуждение по теме бренда). Отвечай ТОЛЬКО валидным JSON."
+    )
+    user = (
+        f"Тексты:\n{numbered}\n\n"
+        f'Верни JSON-массив по одному объекту на текст: '
+        f'[{{"i":0,"is_ad":false}}, ...]. is_ad=true только для шума.'
+    )
+    return {"model": "claude-haiku-4-5-20251001", "max_tokens": 40 + len(texts) * 20,
+            "system": system, "messages": [{"role": "user", "content": user}]}
+
+
+def classify_ads_batch(texts: list, sphere: str = "") -> list:
+    """Level-2 — Claude sphere-aware relevance filter (NOISE vs RELEVANT), one batched
+    call. Returns list[bool] (is_ad=True means noise) aligned to input. Fail-open: all
+    False on no-key/error."""
     n = len(texts)
     if n == 0:
         return []
@@ -138,24 +143,12 @@ def classify_ads_batch(texts: list) -> list:
         return [False] * n
 
     import httpx
-    numbered = "\n".join(f"{i}. {(t or '')[:200]}" for i, t in enumerate(texts))
-    system = (
-        "Ты фильтр контента. Для каждого текста реши: это живой пост/комментарий "
-        "реального человека (мнение, опыт, вопрос, мем, обсуждение) — или реклама/"
-        "продажа товара (продавец, дропшиппер, промо). Отвечай ТОЛЬКО валидным JSON."
-    )
-    user = (
-        f"Тексты:\n{numbered}\n\n"
-        f'Верни JSON-массив по одному объекту на текст: '
-        f'[{{"i":0,"is_ad":false}}, ...]. is_ad=true только для рекламы/продажи.'
-    )
 
     def _call():
         resp = httpx.post(
             LLM_API_URL,
             headers={"x-api-key": LLM_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-            json={"model": "claude-haiku-4-5-20251001", "max_tokens": 40 + n * 20,
-                  "system": system, "messages": [{"role": "user", "content": user}]},
+            json=_build_ads_classify_payload(texts, sphere),
             timeout=60,
         )
         resp.raise_for_status()

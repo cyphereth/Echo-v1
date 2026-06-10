@@ -23,8 +23,12 @@ from . import seed as seed_module
 log = logging.getLogger(__name__)
 
 TIKHUB_TOKEN = os.getenv("TIKHUB_TOKEN", "")
+SOCIALCRAWL_TOKEN = os.getenv("SOCIALCRAWL_TOKEN", "")
 
 def _get_provider():
+    if SOCIALCRAWL_TOKEN:
+        from .providers.socialcrawl import SocialCrawlProvider
+        return SocialCrawlProvider(SOCIALCRAWL_TOKEN)
     if TIKHUB_TOKEN:
         from .providers.tikhub import TikHubProvider
         return TikHubProvider(TIKHUB_TOKEN)

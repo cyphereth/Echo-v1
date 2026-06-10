@@ -3,6 +3,7 @@
 Standalone audience research — no brand coupling. SocialCrawl has no native geo
 search, so "by city" means keyword/hashtag search for city terms.
 """
+import httpx
 import json, logging, os
 from typing import Optional
 
@@ -62,3 +63,57 @@ def run_city_search(provider, city: str) -> tuple[list[dict], int, list[str]]:
             platforms.add(platform)
             all_posts.extend(page.posts)
     return aggregate_posts(all_posts), len(all_posts), sorted(platforms)
+
+
+_SUMMARY_SCHEMA = ('{"overview":"","themes":[{"title":"","description":""}],'
+                   '"wants":[],"trends":[],"sentiment":{"overall":"neutral","note":""},'
+                   '"top_hashtags":[]}')
+
+
+def summarize_city(city: str, agg_posts: list[dict]) -> dict:
+    """Claude summary of city interests. Returns the schema dict, or {} on no-key/error."""
+    if not LLM_API_KEY:
+        return {}
+    sample = "\n".join(f"- {p['text']} (likes {p.get('likes',0)})" for p in agg_posts[:40])
+    system = (
+        "Ты аналитик соцсетей. По постам, упоминающим город, опиши интересы местной "
+        "аудитории. Отвечай ТОЛЬКО валидным JSON без markdown."
+    )
+    user = (
+        f"Город: {city}. Посты:\n{sample}\n\n"
+        f"Сделай сводку интересов: о чём говорят, что хотят/ищут, тренды, общее настроение. "
+        f"Строго JSON по форме: {_SUMMARY_SCHEMA}"
+    )
+
+    def _call():
+        resp = httpx.post(
+            LLM_API_URL,
+            headers={"x-api-key": LLM_API_KEY, "anthropic-version": "2023-06-01",
+                     "content-type": "application/json"},
+            json={"model": "claude-haiku-4-5-20251001", "max_tokens": 900,
+                  "system": system, "messages": [{"role": "user", "content": user}]},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        blocks = resp.json().get("content", [])
+        text = next((b["text"] for b in blocks if b.get("type") == "text"), "")
+        text = text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        data = json.loads(text)
+        return {
+            "overview":     data.get("overview", "") or "",
+            "themes":       data.get("themes", []) or [],
+            "wants":        data.get("wants", []) or [],
+            "trends":       data.get("trends", []) or [],
+            "sentiment":    data.get("sentiment", {}) or {},
+            "top_hashtags": data.get("top_hashtags", []) or [],
+        }
+
+    try:
+        return _call()
+    except (json.JSONDecodeError, KeyError):
+        try:
+            return _call()
+        except Exception as e:
+            log.warning("summarize_city retry failed: %s", e); return {}
+    except Exception as e:
+        log.warning("summarize_city failed: %s", e); return {}

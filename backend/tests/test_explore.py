@@ -52,3 +52,29 @@ def test_run_city_search_skips_failing_platform():
     agg, n, platforms = run_city_search(FakeProvider(), "Москва")
     assert n > 0
     assert "tiktok" in platforms and "instagram" not in platforms
+
+
+def _fake_llm_response(text):
+    class R:
+        def raise_for_status(self): pass
+        def json(self): return {"content": [{"type": "text", "text": text}]}
+    return R()
+
+
+def test_summarize_city_parses_json(monkeypatch):
+    import radar.explore as ex
+    monkeypatch.setattr(ex, "LLM_API_KEY", "k")
+    payload = '{"overview":"ok","themes":[{"title":"Еда","description":"кафе"}],' \
+              '"wants":["куда сходить"],"trends":["t"],' \
+              '"sentiment":{"overall":"positive","note":"n"},"top_hashtags":["#м"]}'
+    monkeypatch.setattr(ex.httpx, "post", lambda *a, **k: _fake_llm_response(payload))
+    out = ex.summarize_city("Москва", [{"text": "x", "likes": 1, "views": 1, "hashtags": []}])
+    assert out["overview"] == "ok"
+    assert out["themes"][0]["title"] == "Еда"
+    assert out["sentiment"]["overall"] == "positive"
+
+
+def test_summarize_city_no_key_returns_empty(monkeypatch):
+    import radar.explore as ex
+    monkeypatch.setattr(ex, "LLM_API_KEY", "")
+    assert ex.summarize_city("Москва", [{"text": "x"}]) == {}

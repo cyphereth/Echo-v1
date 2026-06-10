@@ -163,3 +163,29 @@ def test_explore_city_live_when_missing(monkeypatch):
     out = api.explore_city(api.ExploreCityBody(city="Казань"), user=U(), session=s)
     assert out["cached"] is False and out["summary"]["overview"] == "fresh"
     assert s.query(CityReport).filter_by(city="казань").count() == 1
+
+
+def test_explore_city_refresh_bypasses_fresh_cache(monkeypatch):
+    from datetime import datetime, timezone
+    from radar import api
+    from radar.models import CityReport
+    s = _mem_session()
+    s.add(CityReport(city="москва", display_city="Москва",
+                     summary='{"overview":"stale-but-fresh-dated"}', post_count=1,
+                     platforms="tiktok", created_at=datetime.now(timezone.utc)))
+    s.commit()
+    used = {"live": False}
+
+    def live(provider, city):
+        used["live"] = True
+        return ([{"text": "p"}], 9, ["tiktok", "instagram"])
+
+    monkeypatch.setattr(api, "_get_provider", lambda: object())
+    monkeypatch.setattr("radar.explore.run_city_search", live)
+    monkeypatch.setattr("radar.explore.summarize_city",
+                        lambda city, posts: {"overview": "regenerated"})
+    class U: id = 1; email = "u@x.com"
+    out = api.explore_city(api.ExploreCityBody(city="Москва", refresh=True), user=U(), session=s)
+    assert used["live"] is True                       # cache bypassed, live run happened
+    assert out["cached"] is False and out["summary"]["overview"] == "regenerated"
+    assert s.query(CityReport).filter_by(city="москва").count() == 2  # new row added

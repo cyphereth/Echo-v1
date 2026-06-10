@@ -109,3 +109,23 @@ def test_summarize_city_returns_empty_when_retry_also_fails(monkeypatch):
     monkeypatch.setattr(ex, "LLM_API_KEY", "k")
     monkeypatch.setattr(ex.httpx, "post", lambda *a, **k: _fake_llm_response("still not json"))
     assert ex.summarize_city("Москва", [{"text": "x"}]) == {}
+
+
+def _mem_session():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as _S
+    from radar.models import Base
+    eng = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(eng)
+    return _S(eng)
+
+
+def test_city_report_roundtrip():
+    from radar.models import CityReport
+    s = _mem_session()
+    s.add(CityReport(city="москва", display_city="Москва", summary='{"overview":"x"}',
+                     post_count=12, platforms="tiktok,instagram"))
+    s.commit()
+    r = s.query(CityReport).filter_by(city="москва").one()
+    assert r.display_city == "Москва" and r.post_count == 12
+    assert r.created_at is not None

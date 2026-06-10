@@ -129,3 +129,37 @@ def test_city_report_roundtrip():
     r = s.query(CityReport).filter_by(city="москва").one()
     assert r.display_city == "Москва" and r.post_count == 12
     assert r.created_at is not None
+
+
+def test_explore_city_uses_cache(monkeypatch):
+    from datetime import datetime, timezone
+    from radar import api
+    from radar.models import CityReport
+    s = _mem_session()
+    s.add(CityReport(city="москва", display_city="Москва",
+                     summary='{"overview":"cached"}', post_count=5, platforms="tiktok",
+                     created_at=datetime.now(timezone.utc)))
+    s.commit()
+
+    class U: id = 1; email = "u@x.com"
+    def boom(*a, **k): raise AssertionError("provider must not be called on fresh cache")
+    monkeypatch.setattr(api, "_get_provider", boom)
+    body = api.ExploreCityBody(city="Москва")
+    out = api.explore_city(body, user=U(), session=s)
+    assert out["cached"] is True
+    assert out["summary"]["overview"] == "cached"
+
+
+def test_explore_city_live_when_missing(monkeypatch):
+    from radar import api
+    from radar.models import CityReport
+    s = _mem_session()
+    monkeypatch.setattr(api, "_get_provider", lambda: object())
+    monkeypatch.setattr("radar.explore.run_city_search",
+                        lambda provider, city: ([{"text": "p"}], 3, ["tiktok"]))
+    monkeypatch.setattr("radar.explore.summarize_city",
+                        lambda city, posts: {"overview": "fresh", "themes": []})
+    class U: id = 1; email = "u@x.com"
+    out = api.explore_city(api.ExploreCityBody(city="Казань"), user=U(), session=s)
+    assert out["cached"] is False and out["summary"]["overview"] == "fresh"
+    assert s.query(CityReport).filter_by(city="казань").count() == 1

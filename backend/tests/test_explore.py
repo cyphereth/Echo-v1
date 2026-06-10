@@ -78,3 +78,34 @@ def test_summarize_city_no_key_returns_empty(monkeypatch):
     import radar.explore as ex
     monkeypatch.setattr(ex, "LLM_API_KEY", "")
     assert ex.summarize_city("Москва", [{"text": "x"}]) == {}
+
+
+def test_aggregate_posts_caps_at_limit():
+    from radar.explore import aggregate_posts
+    posts = [_post(str(i), f"post {i}", likes=i) for i in range(50)]
+    out = aggregate_posts(posts)
+    assert len(out) == 40                      # capped at default limit
+    assert out[0]["likes"] == 49               # highest engagement first
+
+
+def test_summarize_city_retries_once_then_succeeds(monkeypatch):
+    import radar.explore as ex
+    monkeypatch.setattr(ex, "LLM_API_KEY", "k")
+    good = '{"overview":"second try"}'
+    calls = {"n": 0}
+
+    def flaky(*a, **k):
+        calls["n"] += 1
+        return _fake_llm_response("not json!!" if calls["n"] == 1 else good)
+
+    monkeypatch.setattr(ex.httpx, "post", flaky)
+    out = ex.summarize_city("Москва", [{"text": "x"}])
+    assert calls["n"] == 2                      # retried exactly once
+    assert out["overview"] == "second try"
+
+
+def test_summarize_city_returns_empty_when_retry_also_fails(monkeypatch):
+    import radar.explore as ex
+    monkeypatch.setattr(ex, "LLM_API_KEY", "k")
+    monkeypatch.setattr(ex.httpx, "post", lambda *a, **k: _fake_llm_response("still not json"))
+    assert ex.summarize_city("Москва", [{"text": "x"}]) == {}

@@ -5,7 +5,6 @@ search, so "by city" means keyword/hashtag search for city terms.
 """
 import httpx
 import json, logging, os
-from typing import Optional
 
 log = logging.getLogger(__name__)
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")

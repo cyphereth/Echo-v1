@@ -18,3 +18,37 @@ def test_build_city_queries_shape():
     assert ("tiktok", "keyword", "что попробовать Москва") in qs
     assert ("instagram", "hashtag", "москва") in qs
     assert len(qs) == 4
+
+
+from datetime import datetime, timezone
+from radar.providers.base import Post
+
+
+def _post(pid, text, likes=0, views=0, tags=None):
+    return Post(post_id=pid, platform="tiktok", author="a", followers=0, text=text,
+                hashtags=tags or [], created_at=datetime.now(timezone.utc),
+                likes=likes, views=views, comments=0, shares=0)
+
+
+def test_aggregate_posts_dedup_rank_cap_truncate():
+    from radar.explore import aggregate_posts
+    posts = [_post("1", "x"*400, likes=5), _post("1", "dup", likes=99),
+             _post("2", "hi", likes=100, views=500, tags=["#a"])]
+    out = aggregate_posts(posts)
+    assert len(out) == 2                      # dedup by post_id (keeps first "1")
+    assert out[0]["likes"] == 100             # highest engagement first ("2")
+    assert all(len(o["text"]) <= 280 for o in out)
+    assert out[0]["hashtags"] == ["#a"]
+
+
+def test_run_city_search_skips_failing_platform():
+    from radar.explore import run_city_search
+    from radar.providers.base import SearchPage
+    class FakeProvider:
+        def search(self, query, kind, cursor, platform):
+            if platform == "instagram":
+                raise RuntimeError("ig down")
+            return SearchPage(posts=[_post(query, "post "+query, likes=10)], next_cursor=None)
+    agg, n, platforms = run_city_search(FakeProvider(), "Москва")
+    assert n > 0
+    assert "tiktok" in platforms and "instagram" not in platforms

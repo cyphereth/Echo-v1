@@ -29,3 +29,36 @@ def build_city_queries(city: str) -> list[tuple[str, str, str]]:
         ("tiktok", "keyword", f"что попробовать {c}"),
         ("instagram", "hashtag", hashtag),
     ]
+
+
+def aggregate_posts(posts: list, limit: int = 40) -> list[dict]:
+    """Dedupe by post_id, rank by engagement, cap, return compact dicts."""
+    seen, uniq = set(), []
+    for p in posts:
+        if p.post_id in seen:
+            continue
+        seen.add(p.post_id)
+        uniq.append(p)
+    uniq.sort(key=lambda p: (p.likes or 0) + (p.views or 0) // 100, reverse=True)
+    return [{
+        "text": (p.text or "")[:280],
+        "likes": p.likes or 0,
+        "views": p.views or 0,
+        "hashtags": p.hashtags or [],
+    } for p in uniq[:limit]]
+
+
+def run_city_search(provider, city: str) -> tuple[list[dict], int, list[str]]:
+    """Run every city query; skip platforms that error. Returns
+    (aggregated_posts, raw_post_count, platforms_with_results)."""
+    all_posts, platforms = [], set()
+    for platform, kind, query in build_city_queries(city):
+        try:
+            page = provider.search(query, kind, None, platform)
+        except Exception as e:
+            log.warning("city search failed (%s/%s %r): %s", platform, kind, query, e)
+            continue
+        if page.posts:
+            platforms.add(platform)
+            all_posts.extend(page.posts)
+    return aggregate_posts(all_posts), len(all_posts), sorted(platforms)

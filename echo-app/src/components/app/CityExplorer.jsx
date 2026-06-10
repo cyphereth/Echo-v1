@@ -33,7 +33,7 @@ export function CityExplorerScreen() {
           value={city} onChange={e => setCity(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && run()} />
         <button className={styles.btnPrimary} onClick={() => run()} disabled={loading}>
-          <Icon name="search" size={14} />{loading ? 'Собираю…' : 'Исследовать'}
+          <Icon name="sparkles" size={14} />{loading ? 'Собираю…' : 'Исследовать'}
         </button>
         {report && (
           <button className={styles.btnGhost} onClick={() => run(report.display_city, true)} disabled={loading}>

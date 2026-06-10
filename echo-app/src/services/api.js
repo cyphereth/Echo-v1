@@ -103,3 +103,8 @@ export const previewBrand = (keywords, platforms = ['tiktok', 'instagram']) =>
     method: 'POST',
     body: JSON.stringify({ keywords, platforms }),
   });
+
+export const exploreCity = (city, refresh = false) =>
+  request('/explore/city', { method: 'POST', body: JSON.stringify({ city, refresh }) });
+
+export const getCityReports = () => request('/explore/cities');

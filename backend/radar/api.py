@@ -812,6 +812,11 @@ def post_action(mention_id: int, body: ActionBody, user: User = Depends(current_
     else:
         raise HTTPException(400, f"Unknown action: {body.action}")
 
+    from .engagement import log_engagement
+    _action_map = {"approve": "approved", "reject": "rejected", "pr": "pr"}
+    log_engagement(session, brand_id=m.brand_id, mention_id=m.id, comment_id=None,
+                   action=_action_map.get(body.action, body.action),
+                   actor=getattr(user, "email", "") or "", text=m.draft)
     session.commit()
     return {"ok": True}
 
@@ -837,7 +842,7 @@ def regenerate_draft(mention_id: int, user: User = Depends(current_user), sessio
 # ── Comments ──────────────────────────────────────────────────────────────────
 
 MAX_COMMENT_DRAFTS = int(os.getenv("MAX_COMMENT_DRAFTS", "10"))
-_STATUS_OUT = {"sent": "approved", "skipped": "skipped", "pending": "pending"}
+_STATUS_OUT = {"sent": "approved", "posted": "posted", "skipped": "skipped", "pending": "pending"}
 
 
 def _minutes_ago(dt: datetime) -> int:
@@ -879,6 +884,10 @@ def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
 
     from .drafts import _is_opportunity_candidate, evaluate_opportunity
     from .spam import looks_like_ad_cheap, classify_ads_batch
+    from .engagement import thread_already_engaged, is_duplicate_reply
+    engaged = thread_already_engaged(session, mention.id)
+    sent_replies = [c.draft for c in mention.comment_rows
+                    if c.draft and c.status in ("sent", "posted")]
     is_comp_niche = mention.source in ("competitor", "niche")
 
     # New comments only; cheap spam rules first, then one batched Claude ad-check.
@@ -907,19 +916,22 @@ def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
 
         if is_spam:
             pass  # stored hidden, no draft
-        elif is_comp_niche:
-            # Opportunity interception: prefilter cheaply, then let Claude decide
-            # and write the intercept reply in one call.
+        elif is_comp_niche and not engaged:
+            # Honest engagement: one brand reply per thread, prefilter cheaply,
+            # then let Claude decide and write an openly-branded reply. Skip
+            # near-duplicate drafts so the brand never repeats a canned line.
             if _is_opportunity_candidate(fc.text, sentiment) and drafted < MAX_COMMENT_DRAFTS:
                 ev = evaluate_opportunity(
                     fc.text, mention.source, mention.competitor,
                     brand.name if brand else None,
                 )
-                if ev.get("is_opportunity") and ev.get("reply"):
-                    draft      = ev["reply"]
+                reply = ev.get("reply")
+                if ev.get("is_opportunity") and reply and not is_duplicate_reply(reply, sent_replies):
+                    draft      = reply
                     opp_reason = ev.get("reason") or None
                     is_opp     = True
                     drafted   += 1
+                    engaged    = True  # cap to one fresh draft per thread per fetch
         elif sentiment == "negative" and drafted < MAX_COMMENT_DRAFTS:
             # brand-lane: reply to negative comments as before
             dr = generate_draft(
@@ -958,7 +970,7 @@ def get_comments(mention_id: int, refresh: int = 0, include_hidden: int = 0, use
 
 @app.get("/opportunities")
 def opportunities(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
-    """All opportunity comments (competitor/niche intercepts) for a brand, grouped
+    """All opportunity comments (competitor/niche engagement opportunities) for a brand, grouped
     by their source mention — feeds the Queue's 'Возможности' view."""
     _owned_brand(session, brand_id, user)
     rows = (
@@ -985,7 +997,7 @@ def opportunities(brand_id: int, user: User = Depends(current_user), session: Se
 
 
 class CommentActionBody(BaseModel):
-    action: str                 # approve | skip
+    action: str                 # approve | posted | skip
     draft:  Optional[str] = None
 
 @app.post("/comments/{comment_id}/action")
@@ -993,18 +1005,31 @@ def comment_action(comment_id: int, body: CommentActionBody, user: User = Depend
     c = session.get(Comment, comment_id)
     if not c:
         raise HTTPException(404, "Comment not found")
-    _owned_mention(session, c.mention_id, user)
+    mention = _owned_mention(session, c.mention_id, user)
+    actor = getattr(user, "email", "") or ""
+    from .engagement import log_engagement
     if body.action == "approve":
         if body.draft and body.draft != c.draft:
-            mention = session.get(Mention, c.mention_id)
             session.add(DraftEdit(
                 mention_id=c.mention_id, brand_id=mention.brand_id if mention else None,
                 category="comment", original=c.draft or "", edited=body.draft,
             ))
         c.draft  = body.draft or c.draft
         c.status = "sent"
+        log_engagement(session, brand_id=mention.brand_id if mention else None,
+                       mention_id=c.mention_id, comment_id=c.id,
+                       action="approved", actor=actor, text=c.draft)
+    elif body.action == "posted":
+        c.draft  = body.draft or c.draft
+        c.status = "posted"
+        log_engagement(session, brand_id=mention.brand_id if mention else None,
+                       mention_id=c.mention_id, comment_id=c.id,
+                       action="posted", actor=actor, text=c.draft)
     elif body.action == "skip":
         c.status = "skipped"
+        log_engagement(session, brand_id=mention.brand_id if mention else None,
+                       mention_id=c.mention_id, comment_id=c.id,
+                       action="skipped", actor=actor, text=c.draft)
     else:
         raise HTTPException(400, f"Unknown action: {body.action}")
     session.commit()
@@ -1096,7 +1121,7 @@ def analytics(brand_id: int, user: User = Depends(current_user), session: Sessio
 
     sent_comments = (
         session.query(Comment).join(Mention)
-        .filter(Mention.brand_id == brand_id, Comment.status == "sent").count()
+        .filter(Mention.brand_id == brand_id, Comment.status.in_(("sent", "posted"))).count()
     )
     sent_total = sum(1 for m in mentions if m.status == "sent") + sent_comments
     hot = sum(1 for m in mentions if m.is_hot)

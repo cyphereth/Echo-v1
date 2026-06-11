@@ -366,7 +366,7 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting, onO
           <>
             <Section
               title="Конкуренты"
-              sub="Echo будет искать негативные упоминания этих брендов — отличная возможность перехватить недовольную аудиторию конкурентов.">
+              sub="Echo будет искать негативные упоминания этих брендов — повод ответить от бренда и помочь недовольной аудитории конкурентов.">
               <TagInput
                 tags={competitors}
                 onChange={setCompetitors}

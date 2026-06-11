@@ -128,7 +128,7 @@ class Comment(Base):
     is_opportunity: Mapped[bool]        = mapped_column(Boolean, default=False)
     opportunity:    Mapped[Optional[str]] = mapped_column(Text)   # short reason
     is_spam:    Mapped[bool]            = mapped_column(Boolean, default=False)
-    status:     Mapped[str]             = mapped_column(Text, default="pending")  # pending | sent | skipped
+    status:     Mapped[str]             = mapped_column(Text, default="pending")  # pending | sent (approved) | posted | skipped
     created_at: Mapped[datetime]        = mapped_column(nullable=False)
     fetched_at: Mapped[datetime]        = mapped_column(default=_now)
     mention:    Mapped[Mention]         = relationship(back_populates="comment_rows")
@@ -144,3 +144,16 @@ class DraftEdit(Base):
     edited:     Mapped[str]           = mapped_column(Text)
     created_at: Mapped[datetime]      = mapped_column(default=_now)
     mention:    Mapped[Mention]       = relationship(back_populates="draft_edits")
+
+
+class EngagementLog(Base):
+    """Audit trail: every operator decision on a brand reply (approve/post/skip)."""
+    __tablename__ = "engagement_log"
+    id:         Mapped[int]           = mapped_column(Integer, primary_key=True, autoincrement=True)
+    brand_id:   Mapped[Optional[int]] = mapped_column(ForeignKey("brands.id"))
+    mention_id: Mapped[int]           = mapped_column(ForeignKey("mentions.id"))
+    comment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("comments.id"))
+    action:     Mapped[str]           = mapped_column(Text)   # approved | posted | skipped | rejected
+    actor:      Mapped[str]           = mapped_column(Text, default="")  # user email
+    text:       Mapped[str]           = mapped_column(Text, default="")  # final reply text at decision time
+    created_at: Mapped[datetime]      = mapped_column(default=_now)

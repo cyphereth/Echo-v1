@@ -1216,15 +1216,42 @@ def _city_report_card(r) -> dict:
     }
 
 
+def _run_city_explore(city: str) -> None:
+    """Background task: search, summarize, store CityReport. Runs outside request context."""
+    from . import explore
+    from .models import CityReport
+    session = get_session()
+    try:
+        key, _ = explore.normalize_city(city)
+        agg, n, platforms = explore.run_city_search(_get_provider(), city)
+        if n == 0:
+            log.warning("city explore: no posts for %r", city)
+            return
+        summary = explore.summarize_city(city, agg)
+        if not summary:
+            log.warning("city explore: LLM summary failed for %r", city)
+            return
+        row = CityReport(city=key, display_city=city.strip(),
+                         summary=json.dumps(summary, ensure_ascii=False),
+                         post_count=n, platforms=",".join(platforms))
+        session.add(row); session.commit()
+        log.info("city explore: stored report for %r (%d posts)", city, n)
+    except Exception:
+        log.exception("city explore failed for %r", city)
+    finally:
+        session.close()
+
+
 @app.post("/explore/city")
-def explore_city(body: ExploreCityBody, user: User = Depends(current_user),
-                 session: Session = Depends(db)):
+def explore_city(body: ExploreCityBody, background_tasks: BackgroundTasks,
+                 user: User = Depends(current_user), session: Session = Depends(db)):
     from . import explore
     from .models import CityReport
     key, _ = explore.normalize_city(body.city)
     if not key:
         raise HTTPException(400, "City is required")
 
+    # Cache hit — return immediately (free, instant)
     if not body.refresh:
         latest = (session.query(CityReport).filter_by(city=key)
                   .order_by(CityReport.created_at.desc()).first())
@@ -1236,18 +1263,10 @@ def explore_city(body: ExploreCityBody, user: User = Depends(current_user),
             if age_days < CITY_REPORT_TTL_DAYS:
                 return {**_city_report_card(latest), "cached": True}
 
-    agg, n, platforms = explore.run_city_search(_get_provider(), body.city)
-    if n == 0:
-        raise HTTPException(502, "No posts found (provider unavailable or out of credits)")
-    summary = explore.summarize_city(body.city, agg)
-    if not summary:
-        raise HTTPException(503, "Summary unavailable — set LLM_API_KEY in backend/.env")
-
-    row = CityReport(city=key, display_city=body.city.strip(),
-                     summary=json.dumps(summary, ensure_ascii=False),
-                     post_count=n, platforms=",".join(platforms))
-    session.add(row); session.commit()
-    return {**_city_report_card(row), "cached": False}
+    # Miss or refresh — kick off background collection, return immediately
+    background_tasks.add_task(_run_city_explore, body.city)
+    return {"status": "collecting", "city": body.city.strip(),
+            "message": "Сбор запущен, обновите страницу через 30–60 секунд"}
 
 
 @app.get("/explore/cities")

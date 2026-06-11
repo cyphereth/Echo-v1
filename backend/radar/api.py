@@ -1194,3 +1194,74 @@ def analytics(brand_id: int, user: User = Depends(current_user), session: Sessio
         "competitors": competitors,
         "top_negative": top_negative,
     }
+
+
+# ── City Explorer ─────────────────────────────────────────────────────────────
+CITY_REPORT_TTL_DAYS = int(os.getenv("CITY_REPORT_TTL_DAYS", "7"))
+
+
+class ExploreCityBody(BaseModel):
+    city:    str
+    refresh: bool = False
+
+
+def _city_report_card(r) -> dict:
+    return {
+        "city":         r.city,
+        "display_city": r.display_city,
+        "summary":      json.loads(r.summary or "{}"),
+        "post_count":   r.post_count,
+        "platforms":    r.platforms.split(",") if r.platforms else [],
+        "created_at":   r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+@app.post("/explore/city")
+def explore_city(body: ExploreCityBody, user: User = Depends(current_user),
+                 session: Session = Depends(db)):
+    from . import explore
+    from .models import CityReport
+    key, _ = explore.normalize_city(body.city)
+    if not key:
+        raise HTTPException(400, "City is required")
+
+    if not body.refresh:
+        latest = (session.query(CityReport).filter_by(city=key)
+                  .order_by(CityReport.created_at.desc()).first())
+        if latest:
+            created = latest.created_at
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            age_days = (datetime.now(timezone.utc) - created).days
+            if age_days < CITY_REPORT_TTL_DAYS:
+                return {**_city_report_card(latest), "cached": True}
+
+    agg, n, platforms = explore.run_city_search(_get_provider(), body.city)
+    if n == 0:
+        raise HTTPException(502, "No posts found (provider unavailable or out of credits)")
+    summary = explore.summarize_city(body.city, agg)
+    if not summary:
+        raise HTTPException(503, "Summary unavailable — set LLM_API_KEY in backend/.env")
+
+    row = CityReport(city=key, display_city=body.city.strip(),
+                     summary=json.dumps(summary, ensure_ascii=False),
+                     post_count=n, platforms=",".join(platforms))
+    session.add(row); session.commit()
+    return {**_city_report_card(row), "cached": False}
+
+
+@app.get("/explore/cities")
+def explore_cities(user: User = Depends(current_user), session: Session = Depends(db)):
+    from .models import CityReport
+    rows = session.query(CityReport).order_by(CityReport.created_at.desc()).all()
+    seen, out = set(), []
+    for r in rows:
+        if r.city in seen:
+            continue
+        seen.add(r.city)
+        out.append({"city": r.city, "display_city": r.display_city,
+                    "post_count": r.post_count,
+                    "created_at": r.created_at.isoformat() if r.created_at else None})
+        if len(out) >= 30:
+            break
+    return out

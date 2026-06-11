@@ -35,6 +35,7 @@ export function Sidebar({ screen, setScreen, brand, onLogout }) {
         <NavItem icon="radio"    label="Лента"     active={screen === 'feed'}      badge={negCount} onClick={() => setScreen('feed')} />
         <NavItem icon="inbox"    label="Очередь"   active={screen === 'queue'}     onClick={() => setScreen('queue')} />
         <NavItem icon="pieChart" label="Аналитика" active={screen === 'analytics'} onClick={() => setScreen('analytics')} />
+        <NavItem icon="search"   label="Города"    active={screen === 'cities'}    onClick={() => setScreen('cities')} />
         <NavItem icon="settings" label="Настройки" active={screen === 'settings'}  onClick={() => setScreen('settings')} />
       </nav>
       <div className={styles.sidebarBottom}>

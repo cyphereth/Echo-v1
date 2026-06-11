@@ -157,3 +157,15 @@ class EngagementLog(Base):
     actor:      Mapped[str]           = mapped_column(Text, default="")  # user email
     text:       Mapped[str]           = mapped_column(Text, default="")  # final reply text at decision time
     created_at: Mapped[datetime]      = mapped_column(default=_now)
+
+
+class CityReport(Base):
+    """Cached City Explorer summary. Global (not per-user). Newest row per city wins."""
+    __tablename__ = "city_reports"
+    id:           Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
+    city:         Mapped[str]      = mapped_column(Text)                 # normalized key
+    display_city: Mapped[str]      = mapped_column(Text, default="")     # original input
+    summary:      Mapped[str]      = mapped_column(Text, default="{}")   # JSON string
+    post_count:   Mapped[int]      = mapped_column(Integer, default=0)
+    platforms:    Mapped[str]      = mapped_column(Text, default="")     # comma-joined
+    created_at:   Mapped[datetime] = mapped_column(default=_now)

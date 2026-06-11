@@ -6,6 +6,7 @@ import { DetailPanel, EmptyDetail } from '../components/app/Detail';
 import { QueueScreen } from '../components/app/Queue';
 import { AnalyticsScreen } from '../components/app/Analytics';
 import { SettingsScreen } from '../components/app/Settings';
+import { CityExplorerScreen } from '../components/app/CityExplorer';
 import { AIWizard } from '../components/app/AIWizard';
 import * as api from '../services/api';
 import styles from '../components/app/shell.module.css';
@@ -152,7 +153,8 @@ export default function AppPage() {
           title={
             screen === 'feed'      ? 'Лента' :
             screen === 'queue'     ? 'Очередь ответов' :
-            screen === 'analytics' ? 'Аналитика' : 'Настройки'
+            screen === 'analytics' ? 'Аналитика' :
+            screen === 'cities'    ? 'Города' : 'Настройки'
           }
           sub={screen === 'feed' ? 'Instagram · TikTok · Telegram · реальные данные' : undefined}
         >
@@ -184,6 +186,8 @@ export default function AppPage() {
           <div className={styles.workspace}><QueueScreen items={feedItems} brandId={brand?.id} /></div>
         ) : screen === 'analytics' ? (
           <div className={styles.workspace}><AnalyticsScreen brandId={brand?.id} /></div>
+        ) : screen === 'cities' ? (
+          <div className={styles.workspace}><CityExplorerScreen /></div>
         ) : (
           <div className={styles.workspace}>
             <SettingsScreen

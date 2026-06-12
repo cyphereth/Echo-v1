@@ -47,8 +47,9 @@ def adaptive_interval(probe: Probe, new_mentions: int) -> int:
     return interval + jitter
 
 class Scheduler:
-    def __init__(self, provider, tick_sec: int = 60):
+    def __init__(self, provider, tick_sec: int = 60, tg_provider=None):
         self._provider     = provider
+        self._tg_provider  = tg_provider   # routes platform="telegram" probes; None = skip them
         self._tick_sec     = tick_sec
         self._bucket       = TokenBucket()
         self._running      = False
@@ -95,10 +96,13 @@ class Scheduler:
             )
             touched: set[int] = set()
             for probe in due:
+                prov = self._tg_provider if probe.platform == "telegram" else self._provider
+                if prov is None:
+                    continue  # telegram probe but TG provider unavailable — skip
                 self._bucket.acquire()
                 try:
                     from .collector import collect_probe
-                    count    = collect_probe(session, probe, self._provider)
+                    count    = collect_probe(session, probe, prov)
                     interval = adaptive_interval(probe, count)
                     probe.next_run_at  = datetime.now(timezone.utc) + timedelta(seconds=interval)
                     probe.interval_sec = interval

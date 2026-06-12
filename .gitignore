@@ -19,6 +19,6 @@ node_modules/
 # Misc
 .DS_Store
 
-# Telegram session files
-backend/*.session
-backend/*.session-journal
+# Telegram session files (session resolves to backend/radar/tg_session.session)
+*.session
+*.session-journal

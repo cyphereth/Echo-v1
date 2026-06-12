@@ -418,6 +418,7 @@ class BrandConfigBody(BaseModel):
     audience_terms: Optional[list[str]] = None
     followers:      Optional[int]       = None
     local_mode:     Optional[bool]      = None
+    tg_channels:    Optional[list[str]] = None
 
 @app.post("/brands/{brand_id}/config")
 def update_brand_config(brand_id: int, body: BrandConfigBody, user: User = Depends(current_user), session: Session = Depends(db)):
@@ -435,6 +436,7 @@ def update_brand_config(brand_id: int, body: BrandConfigBody, user: User = Depen
     if body.audience_terms is not None: b.audience_terms = json.dumps(_clean_list(body.audience_terms))
     if body.followers      is not None: b.followers      = body.followers
     if body.local_mode     is not None: b.local_mode     = body.local_mode
+    if body.tg_channels    is not None: b.tg_channels    = json.dumps(_clean_list(body.tg_channels))
     if body.keywords       is not None: b.keywords       = json.dumps(_ensure_name_in_keywords(body.name or b.name, _clean_list(body.keywords)))
     # Rebuild probes (brand + competitor + niche) so collect picks up every source
     if any(v is not None for v in (body.keywords, body.competitors, body.niche_keywords, body.category_terms, body.geo, body.audience_terms, body.local_mode)):

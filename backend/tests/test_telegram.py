@@ -65,7 +65,7 @@ def test_search_keyword_calls_global(monkeypatch):
     assert page.posts == [] and page.next_cursor is None
 
 
-def test_search_channel_resolves_entity(monkeypatch):
+def test_search_channel_resolves_entity():
     from radar.providers.telegram import TelegramProvider
     class FakeEntity: participants_count = 100
     seen = {}
@@ -76,3 +76,27 @@ def test_search_channel_resolves_entity(monkeypatch):
     p.search("@yakitoriya", "channel", None, "telegram")
     assert seen["handle"] == "@yakitoriya"
     assert isinstance(seen["entity"], FakeEntity)
+
+
+def test_global_search_floodwait_raises_runtime():
+    import pytest
+    from telethon.errors import FloodWaitError
+    from radar.providers.telegram import TelegramProvider
+    class FakeClient:
+        def get_messages(self, entity, **kw):
+            raise FloodWaitError(request=None)
+    p = TelegramProvider(client=FakeClient())
+    with pytest.raises(RuntimeError, match="flood wait"):
+        p.search("тануки", "keyword", None, "telegram")
+
+
+def test_channel_read_private_returns_empty():
+    from telethon.errors import ChannelPrivateError
+    from radar.providers.telegram import TelegramProvider
+    class FakeClient:
+        def get_entity(self, h):
+            raise ChannelPrivateError(request=None)
+        def get_messages(self, entity, **kw): return []
+    p = TelegramProvider(client=FakeClient())
+    page = p.search("@private_channel", "channel", None, "telegram")
+    assert page.posts == [] and page.next_cursor is None

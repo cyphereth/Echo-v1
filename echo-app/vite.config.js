@@ -13,7 +13,10 @@ export default defineConfig({
       '/search':     'http://127.0.0.1:8000',
       '/analytics':  'http://127.0.0.1:8000',
       '/auth':       'http://127.0.0.1:8000',
-      '/health':     'http://127.0.0.1:8000',
+      '/health':       'http://127.0.0.1:8000',
+      '/explore':      'http://127.0.0.1:8000',
+      '/opportunities':'http://127.0.0.1:8000',
+      '/debug':        'http://127.0.0.1:8000',
     },
   },
 })

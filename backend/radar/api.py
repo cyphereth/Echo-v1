@@ -24,6 +24,24 @@ log = logging.getLogger(__name__)
 
 TIKHUB_TOKEN = os.getenv("TIKHUB_TOKEN", "")
 SOCIALCRAWL_TOKEN = os.getenv("SOCIALCRAWL_TOKEN", "")
+TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID", "")
+_tg_provider_singleton = None
+
+
+def _get_tg_provider():
+    """Singleton TelegramProvider, or None if not configured / session missing."""
+    global _tg_provider_singleton
+    if not TELEGRAM_API_ID:
+        return None
+    if _tg_provider_singleton is None:
+        try:
+            from .providers.telegram import TelegramProvider
+            _tg_provider_singleton = TelegramProvider()
+        except Exception:
+            log.exception("Telegram provider init failed (run `python -m radar.tg_auth`?)")
+            return None
+    return _tg_provider_singleton
+
 
 def _get_provider():
     if SOCIALCRAWL_TOKEN:
@@ -161,6 +179,8 @@ def _post_url(m: Mention) -> Optional[str]:
     if m.platform == "instagram":
         # post_id is the shortcode for IG mentions collected via TikHub.
         return f"https://www.instagram.com/p/{m.post_id}/"
+    if m.platform == "telegram":
+        return f"https://t.me/{(m.author or '').lstrip('@')}/{m.post_id}"
     return None
 
 import re as _re
@@ -332,7 +352,8 @@ def _brand_card(b: Brand) -> dict:
 # ── Probe building ────────────────────────────────────────────────────────────
 
 # Monitor each term on every supported platform — one probe per (term, platform).
-MONITORED_PLATFORMS = ("tiktok", "instagram")
+def _monitored_platforms() -> tuple:
+    return ("tiktok", "instagram", "telegram") if TELEGRAM_API_ID else ("tiktok", "instagram")
 
 
 def _rebuild_probes(session: Session, brand: Brand) -> None:
@@ -343,7 +364,7 @@ def _rebuild_probes(session: Session, brand: Brand) -> None:
     # brand & named-competitor mentions don't depend on the city.
     def geoq(term):
         return f"{term} {geo}" if geo else term
-    for pf in MONITORED_PLATFORMS:
+    for pf in _monitored_platforms():
         for kw in brand.keywords_list():
             session.add(Probe(brand_id=brand.id, platform=pf, kind="keyword", source="brand", query=kw))
         for comp in brand.competitors_list():
@@ -356,6 +377,10 @@ def _rebuild_probes(session: Session, brand: Brand) -> None:
         if getattr(brand, "local_mode", False) and geo:
             for term in brand.audience_terms_list():
                 session.add(Probe(brand_id=brand.id, platform=pf, kind="keyword", source="niche", label=term, query=f"{term} {geo}"))
+    if TELEGRAM_API_ID:
+        for handle in brand.tg_channels_list():
+            session.add(Probe(brand_id=brand.id, platform="telegram", kind="channel",
+                              source="competitor", label=handle, query=handle))
     session.flush()
 
 
@@ -716,11 +741,15 @@ def _run_collect(brand_id: int) -> dict:
             _rebuild_probes(session, brand)
             probes = session.query(Probe).filter_by(brand_id=brand_id).all()
 
+        tg_provider = _get_tg_provider()
         total = 0
         for probe in probes:
+            prov = tg_provider if probe.platform == "telegram" else provider
+            if prov is None:
+                continue  # telegram probe but provider unavailable — skip
             try:
-                log.info("Collecting probe '%s' via %s", probe.query, provider.__class__.__name__)
-                count = collect_probe(session, probe, provider)
+                log.info("Collecting probe '%s' via %s", probe.query, prov.__class__.__name__)
+                count = collect_probe(session, probe, prov)
                 log.info("Probe '%s' → %d new mentions", probe.query, count)
                 total += count
             except Exception as e:

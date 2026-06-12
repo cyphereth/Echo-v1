@@ -118,3 +118,36 @@ def test_brand_tg_channels_default_empty():
     from radar.models import Brand
     b = Brand(name="x")
     assert b.tg_channels_list() == []
+
+
+def test_get_tg_provider_none_without_credentials(monkeypatch):
+    from radar import api
+    monkeypatch.setattr(api, "TELEGRAM_API_ID", "")
+    api._tg_provider_singleton = None
+    assert api._get_tg_provider() is None
+
+def test_post_url_telegram():
+    from radar import api
+    from radar.models import Mention
+    m = Mention(platform="telegram", author="@yakitoriya", post_id="123",
+                brand_id=1, created_at=None)
+    assert api._post_url(m) == "https://t.me/yakitoriya/123"
+
+def test_rebuild_probes_adds_tg_channel_probes(monkeypatch):
+    import json
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as _S
+    from radar import api
+    from radar.models import Base, Brand, Probe
+    monkeypatch.setattr(api, "TELEGRAM_API_ID", "123")  # enable TG probes
+    eng = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(eng)
+    s = _S(eng)
+    b = Brand(name="Tanuki", keywords=json.dumps(["Тануки"]),
+              competitors="[]", niche_keywords="[]", category_terms="[]",
+              audience_terms="[]", tg_channels=json.dumps(["@yakitoriya"]))
+    s.add(b); s.flush()
+    api._rebuild_probes(s, b)
+    tg = s.query(Probe).filter_by(brand_id=b.id, platform="telegram").all()
+    assert any(p.kind == "channel" and p.query == "@yakitoriya" for p in tg)
+    assert any(p.kind == "keyword" and p.query == "Тануки" for p in tg)

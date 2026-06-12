@@ -100,3 +100,21 @@ def test_channel_read_private_returns_empty():
     p = TelegramProvider(client=FakeClient())
     page = p.search("@private_channel", "channel", None, "telegram")
     assert page.posts == [] and page.next_cursor is None
+
+
+def test_brand_tg_channels_list():
+    import json
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as _S
+    from radar.models import Base, Brand
+    eng = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(eng)
+    s = _S(eng)
+    b = Brand(name="Tanuki", tg_channels=json.dumps(["@yakitoriya", "@sushiwok"]))
+    s.add(b); s.commit()
+    assert b.tg_channels_list() == ["@yakitoriya", "@sushiwok"]
+
+def test_brand_tg_channels_default_empty():
+    from radar.models import Brand
+    b = Brand(name="x")
+    assert b.tg_channels_list() == []

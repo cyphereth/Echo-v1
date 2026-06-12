@@ -3,7 +3,7 @@
 Requires a session file created once via `python -m radar.tg_auth`. The parser
 (`_parse_tg_message`) is a pure function so it can be tested without a live client.
 """
-import logging, os, re
+import asyncio, logging, os, re, threading
 from typing import Optional
 
 from .base import SearchProvider, SearchPage, Post
@@ -48,16 +48,33 @@ def _parse_tg_message(msg, author_handle: str, followers: int) -> Post:
 
 
 class TelegramProvider(SearchProvider):
-    """Telethon-backed. Pass `client` for tests; otherwise a real client is built
-    and connected against the session file."""
+    """Telethon-backed. Pass `client` for tests; otherwise an async client is built
+    on a provider-owned event loop so it works from any worker thread (collect runs
+    in a FastAPI background thread / scheduler thread, not the loop that built it)."""
 
     def __init__(self, client=None):
         if client is not None:
+            # Test injection: methods return plain values, no loop/thread needed.
             self._client = client
+            self._loop = None
         else:
-            from telethon.sync import TelegramClient
-            self._client = TelegramClient(SESSION_FILE, int(API_ID), API_HASH)
-            self._client.connect()
+            from telethon import TelegramClient  # async client
+            # Run the Telethon client on a dedicated loop in its own thread, so calls
+            # work from any caller thread (FastAPI startup loop, background tasks,
+            # scheduler) via run_coroutine_threadsafe — avoids "loop already running"
+            # and cross-thread connection errors.
+            self._loop = asyncio.new_event_loop()
+            t = threading.Thread(target=self._loop.run_forever, daemon=True)
+            t.start()
+            self._client = TelegramClient(SESSION_FILE, int(API_ID), API_HASH, loop=self._loop)
+            self._await(self._client.connect())
+
+    def _await(self, result):
+        """Real client methods return coroutines — drive them on the dedicated loop
+        thread and block for the result. Injected test clients return plain values."""
+        if self._loop is not None:
+            return asyncio.run_coroutine_threadsafe(result, self._loop).result(timeout=60)
+        return result
 
     def search(self, query: str, kind: str, cursor: Optional[str], platform: str = "telegram") -> SearchPage:
         if kind == "channel":
@@ -68,7 +85,7 @@ class TelegramProvider(SearchProvider):
         from telethon.errors import FloodWaitError
         offset_id = int(cursor) if cursor else 0
         try:
-            msgs = self._client.get_messages(None, search=query, limit=20, offset_id=offset_id)
+            msgs = self._await(self._client.get_messages(None, search=query, limit=20, offset_id=offset_id))
         except FloodWaitError as e:
             log.warning("Telegram flood wait %ds", e.seconds)
             raise RuntimeError(f"Telegram flood wait {e.seconds}s")
@@ -86,17 +103,18 @@ class TelegramProvider(SearchProvider):
         return SearchPage(posts=posts, next_cursor=next_cursor)
 
     def _read_channel(self, username: str, cursor: Optional[str]) -> SearchPage:
-        from telethon.errors import FloodWaitError, ChannelPrivateError
+        from telethon.errors import FloodWaitError, ChannelPrivateError, UsernameNotOccupiedError
         offset_id = int(cursor) if cursor else 0
         handle = username if username.startswith("@") else f"@{username}"
         try:
-            entity = self._client.get_entity(handle)
-            msgs = self._client.get_messages(entity, limit=20, offset_id=offset_id)
+            entity = self._await(self._client.get_entity(handle))
+            msgs = self._await(self._client.get_messages(entity, limit=20, offset_id=offset_id))
         except FloodWaitError as e:
             log.warning("Telegram flood wait %ds", e.seconds)
             raise RuntimeError(f"Telegram flood wait {e.seconds}s")
-        except ChannelPrivateError:
-            log.warning("Telegram channel private/unavailable: %s", handle)
+        except (ChannelPrivateError, UsernameNotOccupiedError, ValueError) as e:
+            # Channel private, banned, or the @handle simply doesn't exist — skip cleanly.
+            log.warning("Telegram channel unavailable (%s): %s", handle, type(e).__name__)
             return SearchPage(posts=[], next_cursor=None)
         followers = getattr(entity, "participants_count", 0) or 0
         posts = [_parse_tg_message(m, handle, followers) for m in msgs if getattr(m, "id", None)]

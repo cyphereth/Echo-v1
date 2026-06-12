@@ -353,9 +353,10 @@ def _brand_card(b: Brand) -> dict:
 
 # ── Probe building ────────────────────────────────────────────────────────────
 
-# Monitor each term on every supported platform — one probe per (term, platform).
-def _monitored_platforms() -> tuple:
-    return ("tiktok", "instagram", "telegram") if TELEGRAM_API_ID else ("tiktok", "instagram")
+# Keyword search runs on TikTok + Instagram. Telegram has NO public global search
+# (the user API only searches chats the account already follows), so keyword probes
+# there return nothing — Telegram is monitored via explicit channel probes instead.
+MONITORED_PLATFORMS = ("tiktok", "instagram")
 
 
 def _rebuild_probes(session: Session, brand: Brand) -> None:
@@ -366,7 +367,7 @@ def _rebuild_probes(session: Session, brand: Brand) -> None:
     # brand & named-competitor mentions don't depend on the city.
     def geoq(term):
         return f"{term} {geo}" if geo else term
-    for pf in _monitored_platforms():
+    for pf in MONITORED_PLATFORMS:
         for kw in brand.keywords_list():
             session.add(Probe(brand_id=brand.id, platform=pf, kind="keyword", source="brand", query=kw))
         for comp in brand.competitors_list():

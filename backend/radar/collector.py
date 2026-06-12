@@ -47,6 +47,12 @@ def _matches(post: Post, brand: Brand, probe: Probe) -> bool:
     if not _passes_language(post, brand):
         return False
 
+    # Channel-monitoring probes (Telegram @channels the user explicitly chose to
+    # watch): the channel itself is the relevance signal, so keep every post —
+    # don't require a brand/competitor keyword in the text.
+    if getattr(probe, "kind", None) == "channel":
+        return True
+
     # Note: ad/spam/length/hashtag checks are NOT a hard drop anymore — matched
     # posts are stored with is_spam=True (store-but-hide) in collect_probe.
 

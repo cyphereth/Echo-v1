@@ -149,5 +149,25 @@ def test_rebuild_probes_adds_tg_channel_probes(monkeypatch):
     s.add(b); s.flush()
     api._rebuild_probes(s, b)
     tg = s.query(Probe).filter_by(brand_id=b.id, platform="telegram").all()
+    # Telegram gets ONLY channel probes — no keyword probes (no global search).
     assert any(p.kind == "channel" and p.query == "@yakitoriya" for p in tg)
-    assert any(p.kind == "keyword" and p.query == "Тануки" for p in tg)
+    assert all(p.kind == "channel" for p in tg)
+
+
+def test_channel_probe_bypasses_keyword_filter():
+    """Posts from a monitored channel are kept even without a brand keyword —
+    the channel itself is the relevance signal."""
+    import json
+    from datetime import datetime, timezone
+    from radar.collector import _matches
+    from radar.providers.base import Post
+    from radar.models import Brand
+    b = Brand(); b.exclusions = json.dumps([]); b.market = "ru"
+    class ChannelProbe: kind="channel"; source="niche"; label="@durov"; query="@durov"
+    class KeywordProbe: kind="keyword"; source="niche"; label="суши"; query="суши"
+    post = Post(post_id="1", platform="telegram", author="@durov", followers=9,
+                text="Совершенно нерелевантный текст без ключей", hashtags=[],
+                created_at=datetime.now(timezone.utc), likes=0, views=10**6,
+                comments=0, shares=0)
+    assert _matches(post, b, ChannelProbe()) is True      # channel → kept
+    assert _matches(post, b, KeywordProbe()) is False     # keyword → needs "суши"

@@ -135,9 +135,9 @@ Prompts for the code sent to the phone, optionally 2FA password. Saves `tg_sessi
 
 Credentials stored in `.env`:
 ```
-TELEGRAM_API_ID=34337081
-TELEGRAM_API_HASH=09df1994892ffc472bb2c664682d51c4
-TELEGRAM_PHONE=+65859565413597
+TELEGRAM_API_ID=<your_api_id>
+TELEGRAM_API_HASH=<your_api_hash>
+TELEGRAM_PHONE=<your_phone>
 ```
 
 ## Brand Model Changes
@@ -190,7 +190,7 @@ Add a "Telegram-каналы" text area in brand settings (same pattern as exist
 
 ## Setup Instructions (for user)
 
-1. Credentials already obtained (api_id=34337081, api_hash=09df…)
+1. Credentials already obtained (api_id=<your_api_id>, api_hash=09df…)
 2. After implementation: `cd backend && python -m radar.tg_auth`
 3. Enter the code Telegram sends to the phone
 4. Session saved → `uvicorn` restart → TG collection active

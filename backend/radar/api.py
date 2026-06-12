@@ -343,6 +343,7 @@ def _brand_card(b: Brand) -> dict:
         "geo":           getattr(b, "geo", "") or "",
         "category_terms": b.category_terms_list() if hasattr(b, "category_terms_list") else [],
         "audience_terms": b.audience_terms_list() if hasattr(b, "audience_terms_list") else [],
+        "tg_channels":    b.tg_channels_list() if hasattr(b, "tg_channels_list") else [],
         "followers":      getattr(b, "followers", 0) or 0,
         "local_mode":     bool(getattr(b, "local_mode", False)),
         "auto_collect":  bool(b.auto_collect),

@@ -25,9 +25,9 @@ telethon>=1.43,<2
 
 - [ ] **Step 2: Add Telegram credentials to `backend/.env`** (append):
 ```
-TELEGRAM_API_ID=34337081
-TELEGRAM_API_HASH=09df1994892ffc472bb2c664682d51c4
-TELEGRAM_PHONE=+65859565413597
+TELEGRAM_API_ID=<your_api_id>
+TELEGRAM_API_HASH=<your_api_hash>
+TELEGRAM_PHONE=<your_phone>
 ```
 
 - [ ] **Step 3: Ignore the session file** — append to `.gitignore` (repo root):
@@ -528,7 +528,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 After all tasks merge:
 ```bash
 cd backend && python3 -m radar.tg_auth
-# Enter the code Telegram sends to +65859565413597 (+ 2FA password if set)
+# Enter the code Telegram sends to <your_phone> (+ 2FA password if set)
 # → tg_session.session created
 ```
 Restart `uvicorn`. Telegram probes now collect on the next `/brands/{id}/collect` or scheduler tick. Add `@channels` in Settings for channel-monitoring; keyword probes work automatically.

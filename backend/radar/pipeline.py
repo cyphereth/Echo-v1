@@ -22,12 +22,17 @@ MAX_COMMENT_DRAFTS      = int(os.getenv("MAX_COMMENT_DRAFTS", "10"))
 MAX_COMMENT_FETCH_PER_COLLECT = int(os.getenv("MAX_COMMENT_FETCH_PER_COLLECT", "40"))
 
 
-_INTENT_CUES = ("куда", "где", "посовет", "подскажите", "что попробовать",
-                "что выбрать", "стоит ли", "который лучше")
+# Sphere-neutral recommendation-seeking cues — work for any vertical the client picks
+# (restaurants "куда сходить", a shop "что выбрать / какой лучше / где купить",
+# a service "к кому пойти / посоветуйте мастера"). The brand's niche terms supply the
+# domain; these cues only detect the *asking-for-a-recommendation* intent.
+_INTENT_CUES = ("посовет", "подскажите", "что выбрать", "какой лучше", "что лучше",
+                "стоит ли", "который лучше", "где купить", "где заказать",
+                "куда", "к кому", "что попробовать")
 
 def _looks_like_intent(text: str) -> bool:
-    """Recommendation-seeking / where-to-go post — sphere-agnostic. Needs a question
-    mark plus a recommendation cue."""
+    """Recommendation-seeking post — sphere-agnostic. Needs a question mark plus a
+    recommendation cue."""
     t = (text or "").lower()
     return "?" in t and any(c in t for c in _INTENT_CUES)
 
@@ -38,7 +43,7 @@ def opportunity_for(m: Mention) -> Optional[str]:
         return f"Аудитория обсуждает {who} — момент предложить ваш бренд как альтернативу."
     if m.source == "niche":
         if _looks_like_intent(m.text):
-            return "Человек ищет, куда пойти / что выбрать — отличный момент предложить бренд нативно."
+            return "Человек просит рекомендацию / выбирает — отличный момент предложить бренд нативно."
         return "Тематическая аудитория без упоминания бренда — хороший момент зайти нативно."
     return None
 
@@ -127,7 +132,12 @@ def classify_and_draft(session: Session, brand_id: int) -> dict:
     tone_examples = brand.tone_examples_list()
     edits         = recent_edits(session, brand_id)
     drafted = 0
-    for m in sorted(unclassified, key=lambda x: x.severity or 0, reverse=True)[:MAX_DRAFTS_PER_COLLECT]:
+    # Draft opportunity mentions first (niche/competitor intent), then by severity —
+    # intent questions in chats have low engagement metrics but are the highest-value
+    # moment to engage, so they must not be crowded out by viral posts.
+    def _draft_priority(x):
+        return (1 if x.opportunity else 0, x.severity or 0)
+    for m in sorted(unclassified, key=_draft_priority, reverse=True)[:MAX_DRAFTS_PER_COLLECT]:
         # generate_draft is a slow network call — done outside any open
         # transaction; we commit each draft individually right after.
         dr = generate_draft(

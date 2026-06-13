@@ -556,7 +556,7 @@ def test_opportunity_niche_intent_vs_plain():
     plain  = Mention(source="niche", text="люблю японскую кухню")
     o_intent = opportunity_for(intent)
     o_plain  = opportunity_for(plain)
-    assert "ищет" in o_intent          # stronger intent hint
+    assert "рекомендацию" in o_intent  # stronger intent hint (sphere-neutral copy)
     assert o_intent != o_plain
     assert o_plain is not None         # plain niche keeps the existing hint
 

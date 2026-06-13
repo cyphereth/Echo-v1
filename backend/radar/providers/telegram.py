@@ -216,6 +216,33 @@ class TelegramProvider(SearchProvider):
             })
         return out
 
+    def discover_channels(self, query: str, limit: int = 30) -> list[dict]:
+        """Find public channels/groups matching a query (sphere/niche term), biggest
+        first — used to bootstrap seed channels for a brand that hasn't curated any.
+        Sphere-agnostic: the caller passes the brand's own sphere/niche terms."""
+        from telethon.tl.functions.contacts import SearchRequest
+        from telethon.errors import FloodWaitError
+        try:
+            res = self._await(self._client(SearchRequest(q=query, limit=limit)))
+        except FloodWaitError as e:
+            log.warning("Telegram flood wait %ds", e.seconds)
+            raise RuntimeError(f"Telegram flood wait {e.seconds}s")
+        except Exception as e:
+            log.warning("Telegram channel discovery failed (%r): %s", query, type(e).__name__)
+            return []
+        out = []
+        for ch in getattr(res, "chats", []) or []:
+            u = getattr(ch, "username", None)
+            if not u:
+                continue
+            out.append({
+                "handle": f"@{u}",
+                "title": getattr(ch, "title", "") or "",
+                "participants": int(getattr(ch, "participants_count", 0) or 0),
+            })
+        out.sort(key=lambda c: -c["participants"])
+        return out[:limit]
+
     def channel_recommendations(self, handle: str, limit: int = 10) -> list[str]:
         """Telegram's "similar channels" for a channel — returns the @usernames of
         recommended channels. Used to grow a curated seed set into a wider, on-topic

@@ -392,3 +392,79 @@ def test_ensure_chats_discovered_grows_graph_from_seed_channels():
     chats = {p.query for p in s.query(Probe).filter_by(kind="chat").all()}
     assert chats == {"@kudaedatalks", "@mosrestchat"}   # seed's + recommendation's linked groups
     assert n == 2
+
+
+# ── Sphere-agnostic: works for any vertical the client picks, not just food ──
+
+def test_discover_channels_filters_username_and_sorts_by_size():
+    from radar.providers.telegram import TelegramProvider
+    class Ch:
+        def __init__(self, u, n): self.username = u; self.participants_count = n; self.title = "t"
+    class Found:
+        chats = [Ch("small", 200), Ch(None, 9999), Ch("big", 5000)]
+    class FakeClient:
+        def __call__(self, req): return Found()
+    p = TelegramProvider(client=FakeClient())
+    out = p.discover_channels("электроника", limit=10)
+    assert [c["handle"] for c in out] == ["@big", "@small"]  # username-less dropped, biggest first
+
+
+def test_ensure_chats_discovered_bootstraps_seeds_for_brand_without_channels():
+    import json
+    from radar.models import Brand, Probe
+    from radar.collector import ensure_chats_discovered
+
+    s = _mem_session_tg()
+    # An online electronics shop — NO curated tg_channels, only sphere/niche.
+    b = Brand(name="ТехноМаг", sphere="интернет-магазин электроники",
+              tg_channels="[]", niche_keywords=json.dumps(["смартфон"]),
+              category_terms="[]", audience_terms="[]", geo="")
+    s.add(b); s.flush(); s.commit()
+
+    class FakeProvider:
+        def discover_channels(self, q, limit=20):
+            return [{"handle": "@techchan", "title": "Гаджеты", "participants": 8000}]
+        def channel_recommendations(self, handle, limit=10):
+            return []
+        def linked_chat(self, handle):
+            return {"handle": "@techchat", "title": "Чат техно", "participants": 4000} \
+                if handle == "@techchan" else None
+
+    n = ensure_chats_discovered(s, b, FakeProvider())
+    chats = {p.query for p in s.query(Probe).filter_by(kind="chat").all()}
+    assert chats == {"@techchat"}   # discovered a seed channel by sphere, took its chat
+    assert n == 1
+
+
+def test_collect_chats_captures_non_food_shopping_intent():
+    import json
+    from datetime import datetime, timezone
+    from radar.models import Brand, Probe, Mention
+    from radar.collector import collect_chats
+    from radar.providers.base import Post
+
+    s = _mem_session_tg()
+    b = Brand(name="ТехноМаг", sphere="электроника гаджеты",
+              niche_keywords=json.dumps(["смартфон"]),
+              category_terms="[]", audience_terms="[]", geo="")
+    s.add(b); s.flush()
+    s.add(Probe(brand_id=b.id, platform="telegram", kind="chat", query="@techchat",
+                source="niche", label="Чат техно",
+                next_run_at=datetime.now(timezone.utc), interval_sec=3600))
+    s.commit()
+
+    def mk(pid, text):
+        return Post(post_id=pid, platform="telegram", author="@u", followers=0,
+                    text=text, hashtags=[], created_at=datetime.now(timezone.utc),
+                    likes=0, views=0, comments=0, shares=0)
+
+    class FakeProvider:
+        def search_chat(self, handle, term, limit=20):
+            return [mk("techchat/1", "посоветуйте какой смартфон выбрать до 30 тысяч?"),
+                    mk("techchat/2", "ага")]
+        def search(self, *a, **k): return None
+
+    collect_chats(s, b, FakeProvider())
+    kept = {m.post_id for m in s.query(Mention).filter_by(brand_id=b.id, is_spam=False).all()}
+    assert "techchat/1" in kept     # shopping recommendation intent captured (no food terms)
+    assert "techchat/2" not in kept

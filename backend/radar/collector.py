@@ -219,13 +219,15 @@ def collect_geo(session: Session, brand: Brand, provider: SearchProvider) -> int
     return count
 
 
-# Generic recommendation-intent phrases — good Telegram server-side search terms that
-# surface "where should I go / what to try" questions even without a niche keyword.
-INTENT_SEARCH_TERMS = ["куда сходить", "где поесть", "посоветуйте", "что попробовать"]
-MAX_CHATS_PER_RUN   = int(os.getenv("MAX_CHATS_PER_RUN", "15"))
+# Sphere-NEUTRAL recommendation-intent search phrases — surface "asking for a
+# recommendation" messages in ANY vertical (food, e-commerce, services, travel…).
+# The brand's own niche_keywords add the domain specificity at search time.
+UNIVERSAL_INTENT_TERMS = ["посоветуйте", "подскажите", "что выбрать", "какой лучше", "стоит ли"]
+MAX_CHATS_PER_RUN      = int(os.getenv("MAX_CHATS_PER_RUN", "15"))
 
 
 MAX_DISCOVERY_CHANNELS = int(os.getenv("MAX_DISCOVERY_CHANNELS", "60"))
+MIN_SEED_CHANNELS      = int(os.getenv("MIN_SEED_CHANNELS", "3"))
 
 
 def ensure_chats_discovered(session: Session, brand: Brand, provider,
@@ -242,9 +244,24 @@ def ensure_chats_discovered(session: Session, brand: Brand, provider,
     if len(existing) >= min_chats:
         return 0
 
-    seeds = brand.tg_channels_list()
+    seeds = list(brand.tg_channels_list())
+    # Bootstrap seed channels for brands that haven't curated any: search Telegram for
+    # channels in the brand's sphere/niche/geo. Sphere-agnostic — works for a restaurant,
+    # an online shop, a clinic, etc. (the queries come from the brand's own config).
+    if len(seeds) < MIN_SEED_CHANNELS and hasattr(provider, "discover_channels"):
+        geo     = (getattr(brand, "geo", "") or "").strip()
+        sphere  = (getattr(brand, "sphere", "") or "").strip()
+        queries = [f"{kw} {geo}".strip() for kw in brand.niche_keywords_list()[:3]]
+        if sphere:
+            queries.append(f"{sphere} {geo}".strip())
+        for q in dict.fromkeys(x for x in queries if x):
+            try:
+                seeds += [c["handle"] for c in provider.discover_channels(q, limit=20)]
+            except Exception:
+                log.warning("discover_channels failed for %r", q)
+        seeds = list(dict.fromkeys(seeds))
     if not seeds:
-        return 0  # no curated channels to grow from
+        return 0  # nothing to grow from (no channels, no sphere/niche to search)
 
     # 1 hop of "similar channels" off each seed → a wider on-topic channel set.
     channels = list(seeds)
@@ -297,8 +314,8 @@ def collect_chats(session: Session, brand: Brand, provider) -> int:
     from .pipeline import _looks_like_intent
     niche_terms  = [t.lower() for t in (brand.niche_keywords_list() + brand.category_terms_list())]
     sphere_words = [w.lower() for w in (getattr(brand, "sphere", "") or "").split() if len(w) > 3]
-    # Search the brand's top niche keywords plus the generic intent phrases.
-    search_terms = list(dict.fromkeys(brand.niche_keywords_list()[:3] + INTENT_SEARCH_TERMS))
+    # Search the brand's top niche keywords (domain) + sphere-neutral intent phrases.
+    search_terms = list(dict.fromkeys(brand.niche_keywords_list()[:3] + UNIVERSAL_INTENT_TERMS))
 
     def _topical(text: str) -> bool:
         t = text.lower()

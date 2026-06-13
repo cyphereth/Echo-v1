@@ -47,18 +47,18 @@ def _parse_tg_message(msg, author_handle: str, followers: int) -> Post:
     )
 
 
-def _parse_tg_chat_message(msg, chat_handle: str) -> Post:
+def _parse_tg_chat_message(msg, namespace: str, fallback_author: str) -> Post:
     """Map a message from inside a group chat to a Post. Unlike a channel post, the
-    author is the individual member who wrote it; post_id is namespaced by the chat
-    handle so message ids from different chats never collide (the unique key is
-    (platform, post_id))."""
+    author is the individual member who wrote it; post_id is namespaced (by the chat's
+    @username, or its numeric id for username-less groups) so message ids from different
+    chats never collide (the unique key is (platform, post_id))."""
     text   = getattr(msg, "message", None) or ""
     sender = getattr(msg, "sender", None)
     uname  = getattr(sender, "username", None) if sender else None
-    author = f"@{uname}" if uname else chat_handle
-    handle = chat_handle.lstrip("@")
+    author = f"@{uname}" if uname else fallback_author
+    ns     = str(namespace).lstrip("@")
     return Post(
-        post_id    = f"{handle}/{msg.id}",
+        post_id    = f"{ns}/{msg.id}",
         platform   = "telegram",
         author     = author,
         followers  = 0,
@@ -268,9 +268,10 @@ class TelegramProvider(SearchProvider):
 
     def linked_chat(self, handle: str) -> Optional[dict]:
         """The discussion group linked to a channel — where the channel's audience
-        actually talks ("куда сходить?"). Returns {handle, title, participants} for
-        groups with a public @username, or None if the channel has no linked group
-        (or the group isn't publicly addressable)."""
+        actually talks ("куда сходить?"). Returns {handle, id, via, title, participants}:
+        `handle` is the group's @username when public (clean to address/link), else None
+        and the group is reachable by `id` via its parent channel `via`. None if the
+        channel has no linked group at all."""
         from telethon.tl.functions.channels import GetFullChannelRequest
         from telethon.errors import FloodWaitError
         h = handle if handle.startswith("@") else f"@{handle}"
@@ -287,11 +288,13 @@ class TelegramProvider(SearchProvider):
         if not lid:
             return None
         linked = next((c for c in full.chats if getattr(c, "id", None) == lid), None)
-        uname  = getattr(linked, "username", None) if linked else None
-        if not uname:
-            return None  # linked group has no public username — can't address it reliably
+        if not linked:
+            return None
+        uname = getattr(linked, "username", None)
         return {
-            "handle": f"@{uname}",
+            "handle": f"@{uname}" if uname else None,
+            "id": lid,
+            "via": h,
             "title": getattr(linked, "title", "") or "",
             "participants": int(getattr(linked, "participants_count", 0) or 0),
         }
@@ -311,4 +314,29 @@ class TelegramProvider(SearchProvider):
         except (ChannelPrivateError, UsernameNotOccupiedError, ValueError) as e:
             log.warning("Telegram chat unavailable (%s): %s", h, type(e).__name__)
             return []
-        return [_parse_tg_chat_message(m, h) for m in msgs if getattr(m, "id", None)]
+        return [_parse_tg_chat_message(m, h, h) for m in msgs if getattr(m, "id", None)]
+
+    def search_linked_chat(self, parent_handle: str, term: str, limit: int = 20) -> list[Post]:
+        """Search the discussion group LINKED to a (public) channel, for groups that have
+        no public @username. The parent channel is always resolvable, so we reach the
+        group through it. Messages are namespaced by the group's internal id."""
+        from telethon.tl.functions.channels import GetFullChannelRequest
+        from telethon.errors import FloodWaitError
+        h = parent_handle if parent_handle.startswith("@") else f"@{parent_handle}"
+        try:
+            ent  = self._await(self._client.get_entity(h))
+            full = self._await(self._client(GetFullChannelRequest(ent)))
+            lid  = getattr(full.full_chat, "linked_chat_id", None)
+            if not lid:
+                return []
+            linked = next((c for c in full.chats if getattr(c, "id", None) == lid), None)
+            if not linked:
+                return []
+            msgs = self._await(self._client.get_messages(linked, search=term, limit=limit))
+        except FloodWaitError as e:
+            log.warning("Telegram flood wait %ds", e.seconds)
+            raise RuntimeError(f"Telegram flood wait {e.seconds}s")
+        except Exception as e:
+            log.warning("Telegram linked-chat search failed (%s): %s", h, type(e).__name__)
+            return []
+        return [_parse_tg_chat_message(m, lid, h) for m in msgs if getattr(m, "id", None)]

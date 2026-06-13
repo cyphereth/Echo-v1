@@ -181,10 +181,13 @@ def _post_url(m: Mention) -> Optional[str]:
         # post_id is the shortcode for IG mentions collected via TikHub.
         return f"https://www.instagram.com/p/{m.post_id}/"
     if m.platform == "telegram":
-        # Chat messages carry a composite post_id "chat/msgid" → already a full path.
-        if "/" in (m.post_id or ""):
-            return f"https://t.me/{m.post_id}"
-        return f"https://t.me/{(m.author or '').lstrip('@')}/{m.post_id}"
+        # Chat messages carry a composite post_id "<ns>/msgid". A numeric namespace is a
+        # username-less group → t.me/c/<id>/<msg>; a textual one is a public @handle.
+        pid = m.post_id or ""
+        if "/" in pid:
+            ns = pid.split("/", 1)[0]
+            return f"https://t.me/c/{pid}" if ns.isdigit() else f"https://t.me/{pid}"
+        return f"https://t.me/{(m.author or '').lstrip('@')}/{pid}"
     return None
 
 import re as _re

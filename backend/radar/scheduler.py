@@ -95,7 +95,7 @@ class Scheduler:
                 .filter(
                     Probe.next_run_at <= datetime.now(timezone.utc),
                     Brand.auto_collect.is_(True),
-                    Probe.kind != "chat",
+                    Probe.kind.notin_(("chat", "chat_linked")),
                 )
                 .all()
             )

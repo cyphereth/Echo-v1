@@ -282,12 +282,22 @@ def ensure_chats_discovered(session: Session, brand: Brand, provider,
         except Exception:
             log.warning("linked_chat failed for %s", ch)
             continue
-        if not linked or not linked.get("handle") or linked["handle"] in seen:
+        if not linked:
             continue
-        seen.add(linked["handle"])
+        # Public-username group → address it directly. Otherwise reach it through its
+        # parent channel (kind="chat_linked", query = parent handle).
+        if linked.get("handle"):
+            kind, key = "chat", linked["handle"]
+        elif linked.get("id") and linked.get("via"):
+            kind, key = "chat_linked", linked["via"]
+        else:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
         session.add(Probe(
-            brand_id=brand.id, platform="telegram", kind="chat",
-            query=linked["handle"], source="niche", label=(linked["title"] or "")[:120],
+            brand_id=brand.id, platform="telegram", kind=kind,
+            query=key, source="niche", label=(linked["title"] or "")[:120],
             next_run_at=_now(), interval_sec=3600,
         ))
         added += 1
@@ -304,7 +314,8 @@ def collect_chats(session: Session, brand: Brand, provider) -> int:
         return 0  # provider doesn't support chat search (TikHub/SocialCrawl)
     chats = (
         session.query(Probe)
-        .filter_by(brand_id=brand.id, platform="telegram", kind="chat")
+        .filter(Probe.brand_id == brand.id, Probe.platform == "telegram",
+                Probe.kind.in_(("chat", "chat_linked")))
         .limit(MAX_CHATS_PER_RUN)
         .all()
     )
@@ -324,10 +335,15 @@ def collect_chats(session: Session, brand: Brand, provider) -> int:
     count = 0
     for probe in chats:
         handle = probe.query
+        # username group → search_chat; username-less linked group → resolve via parent.
+        if probe.kind == "chat_linked":
+            _search = lambda t: provider.search_linked_chat(handle, t, limit=20)
+        else:
+            _search = lambda t: provider.search_chat(handle, t, limit=20)
         seen: set[str] = set()
         try:
             for term in search_terms:
-                for post in provider.search_chat(handle, term, limit=20):
+                for post in _search(term):
                     if post.post_id in seen:
                         continue
                     seen.add(post.post_id)

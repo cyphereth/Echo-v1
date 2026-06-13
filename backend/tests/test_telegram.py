@@ -468,3 +468,85 @@ def test_collect_chats_captures_non_food_shopping_intent():
     kept = {m.post_id for m in s.query(Mention).filter_by(brand_id=b.id, is_spam=False).all()}
     assert "techchat/1" in kept     # shopping recommendation intent captured (no food terms)
     assert "techchat/2" not in kept
+
+
+# ── Username-less linked discussion groups (addressed via the parent channel) ──
+
+def test_linked_chat_returns_id_when_group_has_no_username():
+    from radar.providers.telegram import TelegramProvider
+    class Linked:
+        id = 777; username = None; megagroup = True
+        title = "Кудаеда Talks"; participants_count = 9000
+    class FullChat: linked_chat_id = 777
+    class Full:
+        full_chat = FullChat(); chats = [Linked()]
+    class FakeClient:
+        def get_entity(self, h): return object()
+        def __call__(self, req): return Full()
+    p = TelegramProvider(client=FakeClient())
+    out = p.linked_chat("@kudaeda")
+    assert out["handle"] is None          # no public username
+    assert out["id"] == 777               # but addressable by id via the parent
+    assert out["via"] == "@kudaeda"
+
+
+def test_search_linked_chat_resolves_group_via_parent_channel():
+    from datetime import datetime, timezone
+    from radar.providers.telegram import TelegramProvider
+    class Sender: username = "vasya"
+    class Msg:
+        id = 9; message = "посоветуйте куда сходить?"; views = 0; forwards = 0
+        reactions = None; replies = None; date = datetime(2026, 6, 13, tzinfo=timezone.utc)
+        sender = Sender()
+    class Linked: id = 777
+    class FullChat: linked_chat_id = 777
+    class Full:
+        full_chat = FullChat(); chats = [Linked()]
+    seen = {}
+    class FakeClient:
+        def get_entity(self, h): return object()
+        def __call__(self, req): return Full()
+        def get_messages(self, entity, **kw):
+            seen["entity"] = entity; seen["kw"] = kw; return [Msg()]
+    p = TelegramProvider(client=FakeClient())
+    posts = p.search_linked_chat("@kudaeda", "посоветуйте", limit=10)
+    assert isinstance(seen["entity"], Linked)         # searched the linked group, not the channel
+    assert posts[0].post_id == "777/9"                # namespaced by the group's internal id
+    assert posts[0].author == "@vasya"
+
+
+def test_post_url_telegram_internal_id_chat():
+    from types import SimpleNamespace
+    from radar.api import _post_url
+    m = SimpleNamespace(platform="telegram", author="@vasya", post_id="777/9")
+    assert _post_url(m) == "https://t.me/c/777/9"     # numeric namespace -> private-group link
+
+
+def test_collect_chats_handles_linked_kind_probes():
+    import json
+    from datetime import datetime, timezone
+    from radar.models import Brand, Probe, Mention
+    from radar.collector import collect_chats
+    from radar.providers.base import Post
+
+    s = _mem_session_tg()
+    b = Brand(name="Тануки", sphere="рестораны", niche_keywords=json.dumps(["ресторан"]),
+              category_terms="[]", audience_terms="[]", geo="")
+    s.add(b); s.flush()
+    s.add(Probe(brand_id=b.id, platform="telegram", kind="chat_linked", query="@kudaeda",
+                source="niche", label="Talks",
+                next_run_at=datetime.now(timezone.utc), interval_sec=3600))
+    s.commit()
+
+    def mk(pid, text):
+        return Post(post_id=pid, platform="telegram", author="@u", followers=0, text=text,
+                    hashtags=[], created_at=datetime.now(timezone.utc),
+                    likes=0, views=0, comments=0, shares=0)
+
+    class FakeProvider:
+        def search_linked_chat(self, parent, term, limit=20):
+            return [mk("777/1", "посоветуйте хороший ресторан в центре?")]
+        def search_chat(self, *a, **k): return []
+    n = collect_chats(s, b, FakeProvider())
+    kept = {m.post_id for m in s.query(Mention).filter_by(brand_id=b.id, is_spam=False).all()}
+    assert "777/1" in kept and n == 1

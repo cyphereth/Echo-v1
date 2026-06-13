@@ -181,6 +181,9 @@ def _post_url(m: Mention) -> Optional[str]:
         # post_id is the shortcode for IG mentions collected via TikHub.
         return f"https://www.instagram.com/p/{m.post_id}/"
     if m.platform == "telegram":
+        # Chat messages carry a composite post_id "chat/msgid" → already a full path.
+        if "/" in (m.post_id or ""):
+            return f"https://t.me/{m.post_id}"
         return f"https://t.me/{(m.author or '').lstrip('@')}/{m.post_id}"
     return None
 
@@ -769,9 +772,21 @@ def _run_collect(brand_id: int) -> dict:
         except Exception as e:
             log.warning("collect_geo failed: %s", e)
 
+        # Telegram group-chat monitoring: discover public food/niche chats, then pull
+        # messages that match niche/intent terms (fail-open; no-op without TG provider).
+        try:
+            from .collector import ensure_chats_discovered, collect_chats
+            ensure_chats_discovered(session, brand, tg_provider)
+            total += collect_chats(session, brand, tg_provider)
+        except Exception as e:
+            log.warning("collect_chats failed: %s", e)
+
         # Classify + draft (shared with the scheduler)
         result = classify_and_draft(session, brand_id)
-        return {"collected": total, **result}
+        # Auto-fetch comments on fresh competitor/niche mentions → opportunity pipeline.
+        from .pipeline import fetch_new_comments
+        comments = fetch_new_comments(session, brand_id, provider, tg_provider)
+        return {"collected": total, "comments": comments, **result}
     finally:
         session.close()
 
@@ -911,95 +926,11 @@ def _comment_card(c: Comment) -> dict:
 
 
 def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
-    """Pull comments from the provider, classify sentiment, draft relevant replies, store."""
-    if mention.platform == "telegram":
-        # Telegram comments are discussion-group replies — fetched by the TG provider,
-        # which needs the channel handle (mention.author) plus the post id.
-        provider = _get_tg_provider()
-        fetched = provider.fetch_comments(mention.post_id, None, "telegram",
-                                          channel=mention.author) if provider else []
-    else:
-        provider = _get_provider()
-        fetched  = provider.fetch_comments(mention.post_id, None, mention.platform)
-    if not fetched:
-        return 0
-
-    brand         = session.get(Brand, mention.brand_id)
-    tone_examples = brand.tone_examples_list() if brand else []
-    edits         = recent_edits(session, mention.brand_id)
-    existing      = {c.comment_id for c in mention.comment_rows}
-
-    from .drafts import _is_opportunity_candidate, evaluate_opportunity
-    from .spam import looks_like_ad_cheap, classify_ads_batch
-    from .engagement import thread_already_engaged, is_duplicate_reply
-    engaged = thread_already_engaged(session, mention.id)
-    sent_replies = [c.draft for c in mention.comment_rows
-                    if c.draft and c.status in ("sent", "posted")]
-    is_comp_niche = mention.source in ("competitor", "niche")
-
-    # New comments only; cheap spam rules first, then one batched Claude ad-check.
-    from .collector import MIN_FOLLOWERS
-    local = bool(getattr(brand, "local_mode", False))
-    new = [fc for fc in fetched if fc.comment_id not in existing]
-    # Tiny-account floor for comments: 0 < followers < 100 → hide (off in local_mode).
-    # followers==0 (no data, common for comments) is not penalized.
-    cheap_spam = {
-        fc.comment_id: looks_like_ad_cheap(fc.text, fc.author, [])
-                       or (not local and 0 < (fc.followers or 0) < MIN_FOLLOWERS)
-        for fc in new
-    }
-    survivors = [fc for fc in new if not cheap_spam[fc.comment_id]]
-    ad_flags = classify_ads_batch([fc.text for fc in survivors],
-                                  sphere=getattr(brand, "sphere", "") or "")
-    ad_spam = {fc.comment_id: bool(flag) for fc, flag in zip(survivors, ad_flags)}
-
-    stored, drafted = 0, 0
-    fetched.sort(key=lambda fc: fc.likes, reverse=True)
-    for fc in new:
-        is_spam = cheap_spam.get(fc.comment_id) or ad_spam.get(fc.comment_id, False)
-        sentiment = classify(fc.text).tone
-        draft = draft_flag = opp_reason = None
-        is_opp = False
-
-        if is_spam:
-            pass  # stored hidden, no draft
-        elif is_comp_niche and not engaged:
-            # Honest engagement: one brand reply per thread, prefilter cheaply,
-            # then let Claude decide and write an openly-branded reply. Skip
-            # near-duplicate drafts so the brand never repeats a canned line.
-            if _is_opportunity_candidate(fc.text, sentiment) and drafted < MAX_COMMENT_DRAFTS:
-                ev = evaluate_opportunity(
-                    fc.text, mention.source, mention.competitor,
-                    brand.name if brand else None,
-                )
-                reply = ev.get("reply")
-                if ev.get("is_opportunity") and reply and not is_duplicate_reply(reply, sent_replies):
-                    draft      = reply
-                    opp_reason = ev.get("reason") or None
-                    is_opp     = True
-                    drafted   += 1
-                    engaged    = True  # cap to one fresh draft per thread per fetch
-        elif sentiment == "negative" and drafted < MAX_COMMENT_DRAFTS:
-            # brand-lane: reply to negative comments as before
-            dr = generate_draft(
-                fc.text, "comment", sentiment, 0.9, tone_examples, edits,
-                source=mention.source, competitor=mention.competitor,
-                brand_name=brand.name if brand else None,
-            )
-            if dr:
-                draft, draft_flag = dr.text, dr.flag
-                drafted += 1
-
-        session.add(Comment(
-            mention_id=mention.id, comment_id=fc.comment_id, author=fc.author,
-            followers=fc.followers, text=fc.text, likes=fc.likes,
-            sentiment=sentiment, draft=draft, draft_flag=draft_flag,
-            is_opportunity=is_opp, opportunity=opp_reason, is_spam=is_spam,
-            created_at=fc.created_at,
-        ))
-        stored += 1
-    session.commit()
-    return stored
+    """Pull comments for one mention, classify, draft, store. Thin wrapper over the
+    shared pipeline impl — supplies the live provider singletons. Kept so the
+    on-demand comments endpoint and the collection pipeline share one code path."""
+    from .pipeline import fetch_and_store_comments
+    return fetch_and_store_comments(session, mention, _get_provider(), _get_tg_provider())
 
 
 @app.get("/mentions/{mention_id}/comments")

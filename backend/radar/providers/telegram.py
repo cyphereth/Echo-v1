@@ -47,6 +47,32 @@ def _parse_tg_message(msg, author_handle: str, followers: int) -> Post:
     )
 
 
+def _parse_tg_chat_message(msg, chat_handle: str) -> Post:
+    """Map a message from inside a group chat to a Post. Unlike a channel post, the
+    author is the individual member who wrote it; post_id is namespaced by the chat
+    handle so message ids from different chats never collide (the unique key is
+    (platform, post_id))."""
+    text   = getattr(msg, "message", None) or ""
+    sender = getattr(msg, "sender", None)
+    uname  = getattr(sender, "username", None) if sender else None
+    author = f"@{uname}" if uname else chat_handle
+    handle = chat_handle.lstrip("@")
+    return Post(
+        post_id    = f"{handle}/{msg.id}",
+        platform   = "telegram",
+        author     = author,
+        followers  = 0,
+        text       = text,
+        hashtags   = _HASHTAG_RE.findall(text),
+        created_at = msg.date,
+        likes      = _sum_reactions(msg),
+        views      = int(getattr(msg, "views", 0) or 0),
+        comments   = 0,
+        shares     = int(getattr(msg, "forwards", 0) or 0),
+        sound_id   = None,
+    )
+
+
 def _parse_tg_comment(msg) -> Comment:
     """Map a Telethon discussion reply to a Comment. Author is the commenter's
     @username, or their display name / id when no public username."""
@@ -162,3 +188,100 @@ class TelegramProvider(SearchProvider):
             log.warning("Telegram comments unavailable (%s/%s): %s", handle, post_id, type(e).__name__)
             return []
         return [_parse_tg_comment(m) for m in msgs if getattr(m, "id", None)]
+
+    def discover_chats(self, query: str, limit: int = 50) -> list[dict]:
+        """Find public group chats matching a query via Telegram's global entity
+        search. Returns only megagroups (real discussion groups, where people ask
+        "куда сходить") that have a public @username — broadcast channels and
+        username-less chats are skipped (can't be resolved/linked later)."""
+        from telethon.tl.functions.contacts import SearchRequest
+        from telethon.errors import FloodWaitError
+        try:
+            res = self._await(self._client(SearchRequest(q=query, limit=limit)))
+        except FloodWaitError as e:
+            log.warning("Telegram flood wait %ds", e.seconds)
+            raise RuntimeError(f"Telegram flood wait {e.seconds}s")
+        except Exception as e:
+            log.warning("Telegram chat discovery failed (%r): %s", query, type(e).__name__)
+            return []
+        out = []
+        for ch in getattr(res, "chats", []) or []:
+            uname = getattr(ch, "username", None)
+            if not uname or not getattr(ch, "megagroup", False):
+                continue
+            out.append({
+                "handle": f"@{uname}",
+                "title": getattr(ch, "title", "") or "",
+                "participants": int(getattr(ch, "participants_count", 0) or 0),
+            })
+        return out
+
+    def channel_recommendations(self, handle: str, limit: int = 10) -> list[str]:
+        """Telegram's "similar channels" for a channel — returns the @usernames of
+        recommended channels. Used to grow a curated seed set into a wider, on-topic
+        graph of channels (whose linked chats we then monitor)."""
+        from telethon.tl.functions.channels import GetChannelRecommendationsRequest
+        from telethon.errors import FloodWaitError
+        h = handle if handle.startswith("@") else f"@{handle}"
+        try:
+            ent = self._await(self._client.get_entity(h))
+            rec = self._await(self._client(GetChannelRecommendationsRequest(channel=ent)))
+        except FloodWaitError as e:
+            log.warning("Telegram flood wait %ds", e.seconds)
+            raise RuntimeError(f"Telegram flood wait {e.seconds}s")
+        except Exception as e:
+            log.warning("Telegram recommendations failed (%s): %s", h, type(e).__name__)
+            return []
+        out = []
+        for ch in (getattr(rec, "chats", []) or [])[:limit]:
+            u = getattr(ch, "username", None)
+            if u:
+                out.append(f"@{u}")
+        return out
+
+    def linked_chat(self, handle: str) -> Optional[dict]:
+        """The discussion group linked to a channel — where the channel's audience
+        actually talks ("куда сходить?"). Returns {handle, title, participants} for
+        groups with a public @username, or None if the channel has no linked group
+        (or the group isn't publicly addressable)."""
+        from telethon.tl.functions.channels import GetFullChannelRequest
+        from telethon.errors import FloodWaitError
+        h = handle if handle.startswith("@") else f"@{handle}"
+        try:
+            ent  = self._await(self._client.get_entity(h))
+            full = self._await(self._client(GetFullChannelRequest(ent)))
+        except FloodWaitError as e:
+            log.warning("Telegram flood wait %ds", e.seconds)
+            raise RuntimeError(f"Telegram flood wait {e.seconds}s")
+        except Exception as e:
+            log.warning("Telegram linked-chat lookup failed (%s): %s", h, type(e).__name__)
+            return None
+        lid = getattr(full.full_chat, "linked_chat_id", None)
+        if not lid:
+            return None
+        linked = next((c for c in full.chats if getattr(c, "id", None) == lid), None)
+        uname  = getattr(linked, "username", None) if linked else None
+        if not uname:
+            return None  # linked group has no public username — can't address it reliably
+        return {
+            "handle": f"@{uname}",
+            "title": getattr(linked, "title", "") or "",
+            "participants": int(getattr(linked, "participants_count", 0) or 0),
+        }
+
+    def search_chat(self, handle: str, term: str, limit: int = 20) -> list[Post]:
+        """Server-side search inside one public group for `term`, newest first.
+        Each matching message becomes a Post. Returns [] if the chat is private,
+        gone, or has no matches."""
+        from telethon.errors import FloodWaitError, ChannelPrivateError, UsernameNotOccupiedError
+        h = handle if handle.startswith("@") else f"@{handle}"
+        try:
+            entity = self._await(self._client.get_entity(h))
+            msgs = self._await(self._client.get_messages(entity, search=term, limit=limit))
+        except FloodWaitError as e:
+            log.warning("Telegram flood wait %ds", e.seconds)
+            raise RuntimeError(f"Telegram flood wait {e.seconds}s")
+        except (ChannelPrivateError, UsernameNotOccupiedError, ValueError) as e:
+            log.warning("Telegram chat unavailable (%s): %s", h, type(e).__name__)
+            return []
+        return [_parse_tg_chat_message(m, h) for m in msgs if getattr(m, "id", None)]

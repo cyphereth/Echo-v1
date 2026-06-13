@@ -207,3 +207,188 @@ def test_tg_fetch_comments_reads_replies():
     out=p.fetch_comments("100", None, "telegram", channel="@kudaeda")
     assert seen["h"]=="@kudaeda" and seen["kw"].get("reply_to")==100
     assert len(out)==1 and out[0].author=="Аня"
+
+
+# ── Chat/group monitoring (discover public food chats, search their messages) ──
+
+def test_discover_chats_keeps_only_megagroups_with_username():
+    from radar.providers.telegram import TelegramProvider
+    class Chat:
+        def __init__(self, username, title, megagroup=True, participants=1000):
+            self.username = username; self.title = title
+            self.megagroup = megagroup; self.broadcast = not megagroup
+            self.participants_count = participants
+    class Found:
+        chats = [Chat("foodmsk", "Еда МСК"),
+                 Chat("bcast", "Канал", megagroup=False),   # broadcast → drop
+                 Chat(None, "Без юзернейма")]               # no handle → drop
+    class FakeClient:
+        def __call__(self, req): return Found()
+    p = TelegramProvider(client=FakeClient())
+    out = p.discover_chats("еда москва", limit=10)
+    assert [c["handle"] for c in out] == ["@foodmsk"]
+    assert out[0]["participants"] == 1000
+
+
+def test_search_chat_returns_posts_with_sender_and_composite_id():
+    from datetime import datetime, timezone
+    from radar.providers.telegram import TelegramProvider
+    class Sender: username = "ivan"
+    class Msg:
+        id = 42; message = "посоветуйте где поесть в москве?"
+        views = 0; forwards = 0; reactions = None; replies = None
+        date = datetime(2026, 6, 13, tzinfo=timezone.utc); sender = Sender()
+    class Ent: participants_count = 5000
+    class FakeClient:
+        def get_entity(self, h): return Ent()
+        def get_messages(self, entity, **kw): return [Msg()]
+    p = TelegramProvider(client=FakeClient())
+    posts = p.search_chat("@foodmsk", "поесть", limit=10)
+    assert len(posts) == 1
+    assert posts[0].post_id == "foodmsk/42"   # globally-unique composite id
+    assert posts[0].author == "@ivan"          # the message sender, not the chat
+    assert posts[0].platform == "telegram"
+
+
+def test_search_chat_unavailable_returns_empty():
+    from telethon.errors import ChannelPrivateError
+    from radar.providers.telegram import TelegramProvider
+    class FakeClient:
+        def get_entity(self, h): raise ChannelPrivateError(request=None)
+        def get_messages(self, *a, **k): return []
+    p = TelegramProvider(client=FakeClient())
+    assert p.search_chat("@x", "поесть") == []
+
+
+def test_post_url_telegram_chat_uses_composite_path():
+    from types import SimpleNamespace
+    from radar.api import _post_url
+    m = SimpleNamespace(platform="telegram", author="@ivan", post_id="foodmsk/42")
+    assert _post_url(m) == "https://t.me/foodmsk/42"
+
+
+def test_post_url_telegram_channel_unchanged():
+    from types import SimpleNamespace
+    from radar.api import _post_url
+    m = SimpleNamespace(platform="telegram", author="@sysoevfm", post_id="123")
+    assert _post_url(m) == "https://t.me/sysoevfm/123"
+
+
+def _mem_session_tg():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as _S
+    from radar.models import Base
+    eng = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(eng)
+    return _S(eng)
+
+
+def test_collect_chats_stores_topical_and_intent_messages_as_niche():
+    import json
+    from datetime import datetime, timezone
+    from radar.models import Brand, Probe, Mention
+    from radar.collector import collect_chats
+    from radar.providers.base import Post
+
+    s = _mem_session_tg()
+    b = Brand(name="Тануки", sphere="рестораны доставка еды",
+              niche_keywords=json.dumps(["ресторан", "суши"]),
+              category_terms="[]", audience_terms="[]", geo="Москва")
+    s.add(b); s.flush()
+    s.add(Probe(brand_id=b.id, platform="telegram", kind="chat",
+                query="@foodmsk", source="niche", label="Еда МСК",
+                next_run_at=datetime.now(timezone.utc), interval_sec=3600))
+    s.commit()
+
+    def mk(pid, text, author="@u"):
+        return Post(post_id=pid, platform="telegram", author=author, followers=0,
+                    text=text, hashtags=[], created_at=datetime.now(timezone.utc),
+                    likes=0, views=0, comments=0, shares=0)
+
+    class FakeProvider:
+        def search_chat(self, handle, term, limit=20):
+            # one intent question, one topical, one pure noise
+            return [mk("foodmsk/1", "посоветуйте где поесть в москве?"),
+                    mk("foodmsk/2", "лучший ресторан суши на районе это огонь"),
+                    mk("foodmsk/3", "ага")]
+        def search(self, *a, **k): return None
+
+    n = collect_chats(s, b, FakeProvider())
+    stored = s.query(Mention).filter_by(brand_id=b.id, is_spam=False).all()
+    texts = {m.post_id for m in stored}
+    assert "foodmsk/1" in texts          # intent question kept
+    assert "foodmsk/2" in texts          # topical (ресторан/суши) kept
+    assert "foodmsk/3" not in texts      # short noise dropped
+    assert all(m.source == "niche" for m in stored)
+    assert n >= 2
+
+
+# ── Graph-based discovery (recommendations + linked discussion groups) ──
+
+def test_channel_recommendations_returns_usernames():
+    from radar.providers.telegram import TelegramProvider
+    class Ch:
+        def __init__(self, u): self.username = u
+    class Rec:
+        chats = [Ch("restaurantmoscow"), Ch("foodandwine"), Ch(None)]  # None dropped
+    class FakeClient:
+        def get_entity(self, h): return object()
+        def __call__(self, req): return Rec()
+    p = TelegramProvider(client=FakeClient())
+    out = p.channel_recommendations("@kudaeda", limit=10)
+    assert out == ["@restaurantmoscow", "@foodandwine"]
+
+
+def test_linked_chat_returns_username_megagroup():
+    from radar.providers.telegram import TelegramProvider
+    class Linked:
+        id = 555; username = "restosnobonline"; megagroup = True
+        title = "Restosnob Chat"; participants_count = 4000
+    class FullChat:
+        linked_chat_id = 555
+    class Full:
+        full_chat = FullChat(); chats = [Linked()]
+    class FakeClient:
+        def get_entity(self, h): return object()
+        def __call__(self, req): return Full()
+    p = TelegramProvider(client=FakeClient())
+    out = p.linked_chat("@restosnob")
+    assert out["handle"] == "@restosnobonline"
+    assert out["participants"] == 4000
+
+
+def test_linked_chat_none_when_no_discussion_group():
+    from radar.providers.telegram import TelegramProvider
+    class FullChat: linked_chat_id = None
+    class Full:
+        full_chat = FullChat(); chats = []
+    class FakeClient:
+        def get_entity(self, h): return object()
+        def __call__(self, req): return Full()
+    p = TelegramProvider(client=FakeClient())
+    assert p.linked_chat("@sysoevfm") is None
+
+
+def test_ensure_chats_discovered_grows_graph_from_seed_channels():
+    import json
+    from radar.models import Brand, Probe
+    from radar.collector import ensure_chats_discovered
+
+    s = _mem_session_tg()
+    b = Brand(name="Тануки", sphere="рестораны",
+              tg_channels=json.dumps(["@kudaeda"]),
+              niche_keywords="[]", category_terms="[]", audience_terms="[]")
+    s.add(b); s.flush(); s.commit()
+
+    class FakeProvider:
+        def channel_recommendations(self, handle, limit=10):
+            return ["@restaurantmoscow"] if handle == "@kudaeda" else []
+        def linked_chat(self, handle):
+            table = {"@kudaeda": {"handle": "@kudaedatalks", "title": "Talks", "participants": 9000},
+                     "@restaurantmoscow": {"handle": "@mosrestchat", "title": "Chat", "participants": 3000}}
+            return table.get(handle)
+
+    n = ensure_chats_discovered(s, b, FakeProvider())
+    chats = {p.query for p in s.query(Probe).filter_by(kind="chat").all()}
+    assert chats == {"@kudaedatalks", "@mosrestchat"}   # seed's + recommendation's linked groups
+    assert n == 2

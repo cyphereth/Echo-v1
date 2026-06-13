@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, logging, re
+import json, logging, os, re
 from datetime import datetime, timezone
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -216,4 +216,124 @@ def collect_geo(session: Session, brand: Brand, provider: SearchProvider) -> int
     except Exception:
         session.rollback()
         log.warning("collect_geo failed for brand %s city %r", brand.id, city)
+    return count
+
+
+# Generic recommendation-intent phrases — good Telegram server-side search terms that
+# surface "where should I go / what to try" questions even without a niche keyword.
+INTENT_SEARCH_TERMS = ["куда сходить", "где поесть", "посоветуйте", "что попробовать"]
+MAX_CHATS_PER_RUN   = int(os.getenv("MAX_CHATS_PER_RUN", "15"))
+
+
+MAX_DISCOVERY_CHANNELS = int(os.getenv("MAX_DISCOVERY_CHANNELS", "60"))
+
+
+def ensure_chats_discovered(session: Session, brand: Brand, provider,
+                            min_chats: int = 8, max_add: int = 40) -> int:
+    """Auto-discover food/niche discussion chats by GROWING A GRAPH from the brand's
+    already-curated channels (brand.tg_channels): expand them with Telegram's
+    "similar channels" recommendations, then take each channel's linked discussion
+    group — that's where the audience actually asks "куда сходить?". Far higher
+    signal than blind keyword search. No-op once enough chats exist. Fail-open."""
+    if not (hasattr(provider, "linked_chat") and hasattr(provider, "channel_recommendations")):
+        return 0
+    existing = (session.query(Probe)
+                .filter_by(brand_id=brand.id, platform="telegram", kind="chat").all())
+    if len(existing) >= min_chats:
+        return 0
+
+    seeds = brand.tg_channels_list()
+    if not seeds:
+        return 0  # no curated channels to grow from
+
+    # 1 hop of "similar channels" off each seed → a wider on-topic channel set.
+    channels = list(seeds)
+    for s in seeds:
+        try:
+            channels += provider.channel_recommendations(s, limit=10)
+        except Exception:
+            log.warning("channel_recommendations failed for %s", s)
+    channels = list(dict.fromkeys(channels))[:MAX_DISCOVERY_CHANNELS]
+
+    seen  = {p.query for p in existing}
+    added = 0
+    for ch in channels:
+        if added >= max_add:
+            break
+        try:
+            linked = provider.linked_chat(ch)
+        except Exception:
+            log.warning("linked_chat failed for %s", ch)
+            continue
+        if not linked or not linked.get("handle") or linked["handle"] in seen:
+            continue
+        seen.add(linked["handle"])
+        session.add(Probe(
+            brand_id=brand.id, platform="telegram", kind="chat",
+            query=linked["handle"], source="niche", label=(linked["title"] or "")[:120],
+            next_run_at=_now(), interval_sec=3600,
+        ))
+        added += 1
+    session.commit()
+    return added
+
+
+def collect_chats(session: Session, brand: Brand, provider) -> int:
+    """Monitor public group chats as a niche source: search each discovered chat
+    (stored as kind="chat" probes) for the brand's niche terms + generic intent
+    phrases, and store matching messages as niche mentions. Intent questions get
+    flagged as opportunities downstream by the pipeline. Fail-open per chat."""
+    if not hasattr(provider, "search_chat"):
+        return 0  # provider doesn't support chat search (TikHub/SocialCrawl)
+    chats = (
+        session.query(Probe)
+        .filter_by(brand_id=brand.id, platform="telegram", kind="chat")
+        .limit(MAX_CHATS_PER_RUN)
+        .all()
+    )
+    if not chats:
+        return 0
+
+    from .pipeline import _looks_like_intent
+    niche_terms  = [t.lower() for t in (brand.niche_keywords_list() + brand.category_terms_list())]
+    sphere_words = [w.lower() for w in (getattr(brand, "sphere", "") or "").split() if len(w) > 3]
+    # Search the brand's top niche keywords plus the generic intent phrases.
+    search_terms = list(dict.fromkeys(brand.niche_keywords_list()[:3] + INTENT_SEARCH_TERMS))
+
+    def _topical(text: str) -> bool:
+        t = text.lower()
+        return any(term in t for term in niche_terms) or any(w in t for w in sphere_words)
+
+    count = 0
+    for probe in chats:
+        handle = probe.query
+        seen: set[str] = set()
+        try:
+            for term in search_terms:
+                for post in provider.search_chat(handle, term, limit=20):
+                    if post.post_id in seen:
+                        continue
+                    seen.add(post.post_id)
+                    clean = " ".join(w for w in post.text.split() if not w.startswith("#")).strip()
+                    spam = looks_like_ad_cheap(post.text, post.author, post.hashtags) \
+                        or len(clean) < MIN_TEXT_LEN
+                    # Keep only on-topic or recommendation-intent messages — a busy chat
+                    # is full of "ага"/"спасибо" noise we don't want as mentions.
+                    if not spam and not (_topical(post.text) or _looks_like_intent(post.text)):
+                        spam = True
+                    mention = _upsert_mention(session, post, brand.id)
+                    mention.source = "niche"
+                    mention.is_spam = spam
+                    if spam:
+                        continue
+                    session.add(MentionSnapshot(
+                        mention_id=mention.id, ts=_now(),
+                        likes=post.likes, views=post.views,
+                        comments=post.comments, shares=post.shares,
+                    ))
+                    count += 1
+            session.commit()
+        except Exception:
+            session.rollback()
+            log.warning("collect_chats failed for brand %s chat %s", brand.id, handle)
     return count

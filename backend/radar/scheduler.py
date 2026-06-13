@@ -8,6 +8,7 @@ log = logging.getLogger(__name__)
 INTERVAL_HOT    = 300
 INTERVAL_NORMAL = 3600
 INTERVAL_QUIET  = 7200
+INTERVAL_CHATS  = 1800   # group-chat monitoring cadence (discover + search)
 NIGHT_START_UTC = 21
 NIGHT_END_UTC   = 6
 NIGHT_MULTIPLIER = 2.0
@@ -55,6 +56,7 @@ class Scheduler:
         self._running      = False
         self._timer        = None
         self._last_hotwatch = 0.0
+        self._last_chats    = 0.0
 
     def start(self):
         self._running = True
@@ -86,11 +88,14 @@ class Scheduler:
         session = get_session()
         try:
             # Only probes of brands that opted into auto-collect are due.
+            # kind="chat" probes are collected via the brand-level collect_chats pass
+            # (term search), not the generic per-probe loop, so exclude them here.
             due = (
                 session.query(Probe).join(Brand)
                 .filter(
                     Probe.next_run_at <= datetime.now(timezone.utc),
                     Brand.auto_collect.is_(True),
+                    Probe.kind != "chat",
                 )
                 .all()
             )
@@ -111,18 +116,42 @@ class Scheduler:
                         touched.add(probe.brand_id)
                 except Exception:
                     log.exception("Probe %s failed", probe.id)
-            # Classify + draft for brands that got new mentions this tick.
+            # Classify + draft for brands that got new mentions this tick, then
+            # auto-fetch comments on fresh competitor/niche mentions (opportunity pipeline).
             for brand_id in touched:
                 try:
-                    from .pipeline import classify_and_draft
+                    from .pipeline import classify_and_draft, fetch_new_comments
                     classify_and_draft(session, brand_id)
+                    fetch_new_comments(session, brand_id, self._provider, self._tg_provider)
                 except Exception:
                     log.exception("Pipeline failed for brand %s", brand_id)
             # Re-poll hot mentions on their own (faster) cadence, scoped to
             # auto-collect brands so opted-out users cost no API calls.
             self._maybe_hotwatch(session)
+            # Group-chat monitoring on its own (slower) cadence.
+            self._maybe_collect_chats(session)
         finally:
             session.close()
+
+    def _maybe_collect_chats(self, session: Session):
+        if self._tg_provider is None:
+            return
+        if time.monotonic() - self._last_chats < INTERVAL_CHATS:
+            return
+        self._last_chats = time.monotonic()
+        try:
+            from .collector import ensure_chats_discovered, collect_chats
+            from .pipeline import classify_and_draft, fetch_new_comments
+            brands = session.query(Brand).filter(Brand.auto_collect.is_(True)).all()
+            for b in brands:
+                ensure_chats_discovered(session, b, self._tg_provider)
+                n = collect_chats(session, b, self._tg_provider)
+                if n:
+                    classify_and_draft(session, b.id)
+                    fetch_new_comments(session, b.id, self._provider, self._tg_provider)
+                    log.info("Chat monitor: %d new niche message(s) for brand %s", n, b.id)
+        except Exception:
+            log.exception("Chat monitor tick failed")
 
     def _maybe_hotwatch(self, session: Session):
         if time.monotonic() - self._last_hotwatch < INTERVAL_HOT:

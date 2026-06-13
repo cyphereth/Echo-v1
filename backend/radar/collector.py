@@ -28,14 +28,23 @@ def _below_follower_floor(post: Post, local_mode: bool = False) -> bool:
     f = post.followers or 0
     return 0 < f < MIN_FOLLOWERS and not _is_viral(post)
 
+# Letters unique to Ukrainian (і ї є ґ) or Kazakh (ә ғ қ ң ө ұ ү һ і) — never used
+# in Russian. Their presence means the post is NOT Russian-market, even though it's
+# Cyrillic. Geo is geo: a viral Ukrainian/Kazakh post is still the wrong country.
+_NON_RU_CYRILLIC = set("іїєґІЇЄҐәғқңөұүһəҒҚҢӨҰҮҺ")
+
 def _passes_language(post: Post, brand: Brand) -> bool:
-    """For RU/CIS brands keep only Cyrillic posts — unless the post is viral,
-    in which case a foreign-language post is worth showing."""
+    """For RU-market brands keep Russian Cyrillic posts only. Ukrainian/Kazakh
+    (also Cyrillic) are excluded by their distinctive letters; foreign-language
+    posts are kept only when viral."""
     if getattr(brand, "market", "global") != "ru":
         return True
+    text = post.text or ""
+    if any(ch in _NON_RU_CYRILLIC for ch in text):
+        return False                      # Ukrainian/Kazakh — wrong geo, drop always
     if _is_viral(post):
         return True
-    clean = " ".join(w for w in post.text.split() if not w.startswith("#"))
+    clean = " ".join(w for w in text.split() if not w.startswith("#"))
     return bool(re.search(r"[а-яёА-ЯЁ]", clean))
 
 def _matches(post: Post, brand: Brand, probe: Probe) -> bool:

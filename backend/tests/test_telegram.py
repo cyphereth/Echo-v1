@@ -171,3 +171,39 @@ def test_channel_probe_bypasses_keyword_filter():
                 comments=0, shares=0)
     assert _matches(post, b, ChannelProbe()) is True      # channel → kept
     assert _matches(post, b, KeywordProbe()) is False     # keyword → needs "суши"
+
+
+def test_parse_tg_comment_maps_fields():
+    from datetime import datetime, timezone
+    from radar.providers.telegram import _parse_tg_comment
+    from radar.providers.base import Comment as C
+    class S: username="vasya"; first_name="Вася"
+    class M:
+        id=55; message="а где заказать роллы?"; date=datetime(2026,6,1,tzinfo=timezone.utc)
+        sender=S(); sender_id=1; reactions=None
+    c=_parse_tg_comment(M())
+    assert isinstance(c,C) and c.comment_id=="55" and c.author=="@vasya"
+    assert c.text.startswith("а где")
+
+
+def test_tg_fetch_comments_no_channel_returns_empty():
+    from radar.providers.telegram import TelegramProvider
+    p=TelegramProvider(client=object())
+    assert p.fetch_comments("123", None, "telegram", channel=None) == []
+
+
+def test_tg_fetch_comments_reads_replies():
+    from datetime import datetime, timezone
+    from radar.providers.telegram import TelegramProvider
+    class S: username=None; first_name="Аня"
+    class M:
+        id=7; message="закажу в тануки"; date=datetime(2026,6,2,tzinfo=timezone.utc)
+        sender=S(); sender_id=9; reactions=None
+    seen={}
+    class FakeClient:
+        def get_entity(self,h): seen["h"]=h; return object()
+        def get_messages(self,e,**kw): seen["kw"]=kw; return [M()]
+    p=TelegramProvider(client=FakeClient())
+    out=p.fetch_comments("100", None, "telegram", channel="@kudaeda")
+    assert seen["h"]=="@kudaeda" and seen["kw"].get("reply_to")==100
+    assert len(out)==1 and out[0].author=="Аня"

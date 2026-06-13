@@ -381,9 +381,11 @@ def _rebuild_probes(session: Session, brand: Brand) -> None:
             for term in brand.audience_terms_list():
                 session.add(Probe(brand_id=brand.id, platform=pf, kind="keyword", source="niche", label=term, query=f"{term} {geo}"))
     if TELEGRAM_API_ID:
+        # Telegram channels are audience/discovery sources (food bloggers, review
+        # channels) — the niche lane, not competitors.
         for handle in brand.tg_channels_list():
             session.add(Probe(brand_id=brand.id, platform="telegram", kind="channel",
-                              source="competitor", label=handle, query=handle))
+                              source="niche", label=handle, query=handle))
     session.flush()
 
 
@@ -910,8 +912,15 @@ def _comment_card(c: Comment) -> dict:
 
 def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
     """Pull comments from the provider, classify sentiment, draft relevant replies, store."""
-    provider = _get_provider()
-    fetched  = provider.fetch_comments(mention.post_id, None, mention.platform)
+    if mention.platform == "telegram":
+        # Telegram comments are discussion-group replies — fetched by the TG provider,
+        # which needs the channel handle (mention.author) plus the post id.
+        provider = _get_tg_provider()
+        fetched = provider.fetch_comments(mention.post_id, None, "telegram",
+                                          channel=mention.author) if provider else []
+    else:
+        provider = _get_provider()
+        fetched  = provider.fetch_comments(mention.post_id, None, mention.platform)
     if not fetched:
         return 0
 

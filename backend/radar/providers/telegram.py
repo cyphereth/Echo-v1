@@ -6,7 +6,7 @@ Requires a session file created once via `python -m radar.tg_auth`. The parser
 import asyncio, logging, os, re, threading
 from typing import Optional
 
-from .base import SearchProvider, SearchPage, Post
+from .base import SearchProvider, SearchPage, Post, Comment
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +44,26 @@ def _parse_tg_message(msg, author_handle: str, followers: int) -> Post:
         comments   = int(getattr(replies, "replies", 0) or 0) if replies else 0,
         shares     = int(getattr(msg, "forwards", 0) or 0),
         sound_id   = None,
+    )
+
+
+def _parse_tg_comment(msg) -> Comment:
+    """Map a Telethon discussion reply to a Comment. Author is the commenter's
+    @username, or their display name / id when no public username."""
+    sender = getattr(msg, "sender", None)
+    uname = getattr(sender, "username", None)
+    if uname:
+        author = f"@{uname}"
+    else:
+        author = (getattr(sender, "first_name", None)
+                  or str(getattr(msg, "sender_id", "") or "user"))
+    return Comment(
+        comment_id = str(msg.id),
+        author     = author,
+        followers  = 0,
+        text       = getattr(msg, "message", None) or "",
+        likes      = _sum_reactions(msg),
+        created_at = msg.date,
     )
 
 
@@ -120,3 +140,25 @@ class TelegramProvider(SearchProvider):
         posts = [_parse_tg_message(m, handle, followers) for m in msgs if getattr(m, "id", None)]
         next_cursor = str(min(m.id for m in msgs)) if len(msgs) >= 20 else None
         return SearchPage(posts=posts, next_cursor=next_cursor)
+
+    def fetch_comments(self, post_id: str, cursor: Optional[str],
+                       platform: str = "telegram", channel: Optional[str] = None) -> list:
+        """Comments on a channel post are replies in the channel's linked discussion
+        group. Needs the channel handle + post id. Returns [] when comments are
+        disabled or the channel/post is unavailable."""
+        from telethon.errors import FloodWaitError
+        if not channel:
+            return []
+        handle = channel if channel.startswith("@") else f"@{channel}"
+        try:
+            entity = self._await(self._client.get_entity(handle))
+            msgs = self._await(self._client.get_messages(
+                entity, reply_to=int(post_id), limit=30))
+        except FloodWaitError as e:
+            log.warning("Telegram flood wait %ds", e.seconds)
+            raise RuntimeError(f"Telegram flood wait {e.seconds}s")
+        except Exception as e:
+            # No discussion group, comments closed, invalid msg id, etc. — skip.
+            log.warning("Telegram comments unavailable (%s/%s): %s", handle, post_id, type(e).__name__)
+            return []
+        return [_parse_tg_comment(m) for m in msgs if getattr(m, "id", None)]

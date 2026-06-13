@@ -209,26 +209,7 @@ def test_tg_fetch_comments_reads_replies():
     assert len(out)==1 and out[0].author=="Аня"
 
 
-# ── Chat/group monitoring (discover public food chats, search their messages) ──
-
-def test_discover_chats_keeps_only_megagroups_with_username():
-    from radar.providers.telegram import TelegramProvider
-    class Chat:
-        def __init__(self, username, title, megagroup=True, participants=1000):
-            self.username = username; self.title = title
-            self.megagroup = megagroup; self.broadcast = not megagroup
-            self.participants_count = participants
-    class Found:
-        chats = [Chat("foodmsk", "Еда МСК"),
-                 Chat("bcast", "Канал", megagroup=False),   # broadcast → drop
-                 Chat(None, "Без юзернейма")]               # no handle → drop
-    class FakeClient:
-        def __call__(self, req): return Found()
-    p = TelegramProvider(client=FakeClient())
-    out = p.discover_chats("еда москва", limit=10)
-    assert [c["handle"] for c in out] == ["@foodmsk"]
-    assert out[0]["participants"] == 1000
-
+# ── Chat/group monitoring (search messages inside discovered group chats) ──
 
 def test_search_chat_returns_posts_with_sender_and_composite_id():
     from datetime import datetime, timezone

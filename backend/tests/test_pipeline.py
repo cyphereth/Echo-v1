@@ -57,3 +57,33 @@ def test_fetch_new_comments_scoped_to_brand(monkeypatch):
                         lambda sess, m, prov, tg: called.append(m.id) or 0)
     P.fetch_new_comments(s, brand_id=1, provider=None, tg_provider=None)
     assert called == [m1.id]
+
+
+def test_looks_like_intent_fires_on_imperative_ask_without_question_mark():
+    from radar.pipeline import _looks_like_intent
+    assert _looks_like_intent("посоветуйте хороший ресторан в центре")   # no "?"
+    assert _looks_like_intent("помогите выбрать смартфон до 30к")
+    assert not _looks_like_intent("сегодня отличная погода")
+    assert _looks_like_intent("стоит ли брать этот ноутбук?")           # soft cue + "?"
+
+
+def test_fetch_new_comments_skips_chat_messages(monkeypatch):
+    import radar.pipeline as P
+    from radar.models import Mention
+    s = _mem_session()
+
+    def mk(pid):
+        m = Mention(brand_id=1, platform="telegram", post_id=pid, author="@u", text="t",
+                    source="niche", is_spam=False,
+                    created_at=datetime.now(timezone.utc))
+        s.add(m); s.flush(); return m
+
+    chat   = mk("foodmsk/1")   # chat message — no reply thread, must be skipped
+    normal = mk("abc123")      # channel/post mention — eligible
+    s.commit()
+
+    called = []
+    monkeypatch.setattr(P, "fetch_and_store_comments",
+                        lambda sess, m, prov, tg: called.append(m.post_id) or 0)
+    P.fetch_new_comments(s, brand_id=1, provider=None, tg_provider=None)
+    assert called == ["abc123"]

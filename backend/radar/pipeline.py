@@ -29,11 +29,17 @@ MAX_COMMENT_FETCH_PER_COLLECT = int(os.getenv("MAX_COMMENT_FETCH_PER_COLLECT", "
 _INTENT_CUES = ("посовет", "подскажите", "что выбрать", "какой лучше", "что лучше",
                 "стоит ли", "который лучше", "где купить", "где заказать",
                 "куда", "к кому", "что попробовать")
+# Imperative asks that signal a recommendation request on their own — no "?" needed
+# ("посоветуйте хороший ресторан", "помогите выбрать смартфон").
+_INTENT_STRONG = ("посоветуйте", "посоветуете", "подскажите", "помогите выбрать",
+                  "нужен совет", "ищу совет")
 
 def _looks_like_intent(text: str) -> bool:
-    """Recommendation-seeking post — sphere-agnostic. Needs a question mark plus a
-    recommendation cue."""
+    """Recommendation-seeking post — sphere-agnostic. Fires on an imperative ask, or on
+    a question mark plus a softer recommendation cue."""
     t = (text or "").lower()
+    if any(c in t for c in _INTENT_STRONG):
+        return True
     return "?" in t and any(c in t for c in _INTENT_CUES)
 
 
@@ -254,6 +260,9 @@ def fetch_new_comments(session: Session, brand_id: int, provider, tg_provider) -
         .filter(Mention.brand_id == brand_id,
                 Mention.is_spam.is_(False),
                 Mention.source.in_(("competitor", "niche")),
+                # Chat messages (composite post_id "ns/msgid") are standalone — they
+                # have no channel-style reply thread, so don't even select them.
+                ~Mention.post_id.like("%/%"),
                 ~Mention.comment_rows.any())
         .order_by(Mention.first_seen.desc())
         .limit(MAX_COMMENT_FETCH_PER_COLLECT)

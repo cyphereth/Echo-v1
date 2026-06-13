@@ -3,7 +3,7 @@
 Requires a session file created once via `python -m radar.tg_auth`. The parser
 (`_parse_tg_message`) is a pure function so it can be tested without a live client.
 """
-import asyncio, logging, os, re, threading
+import asyncio, logging, os, re, threading, time
 from typing import Optional
 
 from .base import SearchProvider, SearchPage, Post, Comment
@@ -98,7 +98,17 @@ class TelegramProvider(SearchProvider):
     on a provider-owned event loop so it works from any worker thread (collect runs
     in a FastAPI background thread / scheduler thread, not the loop that built it)."""
 
+    # Throttle ALL Telegram calls to avoid flood-waits (discovery/collect can fan out
+    # into hundreds of get_entity/GetFullChannel/get_messages calls). _await is the
+    # single chokepoint every API call passes through.
+    _MIN_CALL_INTERVAL = float(os.getenv("TG_MIN_CALL_INTERVAL", "0.35"))  # ~3 calls/sec
+    # Floods longer than this raise (we skip the item) instead of Telethon silently
+    # sleeping for minutes — that's what hung a run for 2h before.
+    _FLOOD_THRESHOLD = int(os.getenv("TG_FLOOD_THRESHOLD", "15"))
+
     def __init__(self, client=None):
+        self._call_lock = threading.Lock()
+        self._last_call = 0.0
         if client is not None:
             # Test injection: methods return plain values, no loop/thread needed.
             self._client = client
@@ -112,13 +122,24 @@ class TelegramProvider(SearchProvider):
             self._loop = asyncio.new_event_loop()
             t = threading.Thread(target=self._loop.run_forever, daemon=True)
             t.start()
-            self._client = TelegramClient(SESSION_FILE, int(API_ID), API_HASH, loop=self._loop)
+            self._client = TelegramClient(SESSION_FILE, int(API_ID), API_HASH, loop=self._loop,
+                                          flood_sleep_threshold=self._FLOOD_THRESHOLD)
             self._await(self._client.connect())
+
+    def _throttle(self):
+        """Block until at least _MIN_CALL_INTERVAL has passed since the previous call,
+        so the provider never bursts into a flood-wait."""
+        with self._call_lock:
+            wait = self._MIN_CALL_INTERVAL - (time.monotonic() - self._last_call)
+            if wait > 0:
+                time.sleep(wait)
+            self._last_call = time.monotonic()
 
     def _await(self, result):
         """Real client methods return coroutines — drive them on the dedicated loop
         thread and block for the result. Injected test clients return plain values."""
         if self._loop is not None:
+            self._throttle()
             return asyncio.run_coroutine_threadsafe(result, self._loop).result(timeout=60)
         return result
 
@@ -188,33 +209,6 @@ class TelegramProvider(SearchProvider):
             log.warning("Telegram comments unavailable (%s/%s): %s", handle, post_id, type(e).__name__)
             return []
         return [_parse_tg_comment(m) for m in msgs if getattr(m, "id", None)]
-
-    def discover_chats(self, query: str, limit: int = 50) -> list[dict]:
-        """Find public group chats matching a query via Telegram's global entity
-        search. Returns only megagroups (real discussion groups, where people ask
-        "куда сходить") that have a public @username — broadcast channels and
-        username-less chats are skipped (can't be resolved/linked later)."""
-        from telethon.tl.functions.contacts import SearchRequest
-        from telethon.errors import FloodWaitError
-        try:
-            res = self._await(self._client(SearchRequest(q=query, limit=limit)))
-        except FloodWaitError as e:
-            log.warning("Telegram flood wait %ds", e.seconds)
-            raise RuntimeError(f"Telegram flood wait {e.seconds}s")
-        except Exception as e:
-            log.warning("Telegram chat discovery failed (%r): %s", query, type(e).__name__)
-            return []
-        out = []
-        for ch in getattr(res, "chats", []) or []:
-            uname = getattr(ch, "username", None)
-            if not uname or not getattr(ch, "megagroup", False):
-                continue
-            out.append({
-                "handle": f"@{uname}",
-                "title": getattr(ch, "title", "") or "",
-                "participants": int(getattr(ch, "participants_count", 0) or 0),
-            })
-        return out
 
     def discover_channels(self, query: str, limit: int = 30) -> list[dict]:
         """Find public channels/groups matching a query (sphere/niche term), biggest

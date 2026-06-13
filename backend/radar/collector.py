@@ -1,6 +1,6 @@
 from __future__ import annotations
 import json, logging, os, re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from .models import Brand, Mention, MentionSnapshot, Probe
@@ -227,7 +227,6 @@ MAX_CHATS_PER_RUN      = int(os.getenv("MAX_CHATS_PER_RUN", "15"))
 
 
 MAX_DISCOVERY_CHANNELS = int(os.getenv("MAX_DISCOVERY_CHANNELS", "60"))
-MIN_SEED_CHANNELS      = int(os.getenv("MIN_SEED_CHANNELS", "3"))
 
 
 def ensure_chats_discovered(session: Session, brand: Brand, provider,
@@ -240,15 +239,17 @@ def ensure_chats_discovered(session: Session, brand: Brand, provider,
     if not (hasattr(provider, "linked_chat") and hasattr(provider, "channel_recommendations")):
         return 0
     existing = (session.query(Probe)
-                .filter_by(brand_id=brand.id, platform="telegram", kind="chat").all())
+                .filter(Probe.brand_id == brand.id, Probe.platform == "telegram",
+                        Probe.kind.in_(("chat", "chat_linked"))).all())
     if len(existing) >= min_chats:
         return 0
 
     seeds = list(brand.tg_channels_list())
-    # Bootstrap seed channels for brands that haven't curated any: search Telegram for
+    # Bootstrap seed channels ONLY for brands that have curated NONE: search Telegram for
     # channels in the brand's sphere/niche/geo. Sphere-agnostic — works for a restaurant,
-    # an online shop, a clinic, etc. (the queries come from the brand's own config).
-    if len(seeds) < MIN_SEED_CHANNELS and hasattr(provider, "discover_channels"):
+    # an online shop, a clinic, etc. (queries come from the brand's own config). Brands
+    # with even a few curated channels grow purely from their own graph (cleaner seeds).
+    if not seeds and hasattr(provider, "discover_channels"):
         geo     = (getattr(brand, "geo", "") or "").strip()
         sphere  = (getattr(brand, "sphere", "") or "").strip()
         queries = [f"{kw} {geo}".strip() for kw in brand.niche_keywords_list()[:3]]
@@ -312,10 +313,13 @@ def collect_chats(session: Session, brand: Brand, provider) -> int:
     flagged as opportunities downstream by the pipeline. Fail-open per chat."""
     if not hasattr(provider, "search_chat"):
         return 0  # provider doesn't support chat search (TikHub/SocialCrawl)
+    # Least-recently-run first so a brand with more chats than MAX_CHATS_PER_RUN
+    # rotates through all of them across successive runs instead of starving the tail.
     chats = (
         session.query(Probe)
         .filter(Probe.brand_id == brand.id, Probe.platform == "telegram",
                 Probe.kind.in_(("chat", "chat_linked")))
+        .order_by(Probe.next_run_at.asc())
         .limit(MAX_CHATS_PER_RUN)
         .all()
     )
@@ -369,4 +373,7 @@ def collect_chats(session: Session, brand: Brand, provider) -> int:
         except Exception:
             session.rollback()
             log.warning("collect_chats failed for brand %s chat %s", brand.id, handle)
+        # Move this chat to the back of the rotation regardless of outcome.
+        probe.next_run_at = _now() + timedelta(seconds=probe.interval_sec or 3600)
+        session.commit()
     return count

@@ -22,3 +22,11 @@ node_modules/
 # Telegram session files (session resolves to backend/radar/tg_session.session)
 *.session
 *.session-journal
+
+# SQLite WAL/shared-memory runtime files
+*.db-wal
+*.db-shm
+
+# Local tooling/agent dirs
+.claude/
+.understand-anything/

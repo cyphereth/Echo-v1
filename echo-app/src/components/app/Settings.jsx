@@ -141,6 +141,9 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting, onO
   // Competitors
   const [competitors, setCompetitors] = useState([]);
 
+  // Telegram channels
+  const [tgChannels, setTgChannels] = useState([]);
+
   // Niche search terms
   const [niche, setNiche] = useState([]);
 
@@ -178,6 +181,7 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting, onO
     if (brand.exclusions?.length)  setExclusions(brand.exclusions);
     if (brand.competitors?.length) setCompetitors(brand.competitors);
     if (brand.niche_keywords?.length) setNiche(brand.niche_keywords);
+    if (brand.tg_channels?.length) setTgChannels(brand.tg_channels);
     setAutoCollect(!!brand.auto_collect);
   }, [brand?.id]);
 
@@ -188,7 +192,7 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting, onO
       if (!brand) {
         result = await api.createBrand(brandName, keywords, hashtags);
       } else {
-        result = await api.updateBrandConfig(brand.id, { name: brandName, keywords, hashtags, exclusions, competitors, niche_keywords: niche });
+        result = await api.updateBrandConfig(brand.id, { name: brandName, keywords, hashtags, exclusions, competitors, niche_keywords: niche, tg_channels: tgChannels });
         result = { ...brand, ...result, name: brandName };
       }
       onBrandSaved?.(result);
@@ -379,6 +383,18 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting, onO
                 </div>
               )}
             </Section>
+
+            <Section
+              title="Telegram-каналы"
+              sub="Каналы, которые Echo будет мониторить в Telegram. Вводите @handle через Enter или запятую.">
+              <TagInput
+                tags={tgChannels}
+                onChange={setTgChannels}
+                placeholder="@yakitoriya, @sushiwok_official"
+                color="var(--brand-bright)"
+              />
+            </Section>
+
             {saveBar(false)}
           </>
         )}

@@ -31,6 +31,7 @@ class Brand(Base):
     geo:                   Mapped[str]      = mapped_column(Text, default="")  # city/region, "" = national
     category_terms:        Mapped[str]      = mapped_column(Text, default="[]")  # service-category competitors
     audience_terms:        Mapped[str]      = mapped_column(Text, default="[]")  # broad audience themes (local mode)
+    tg_channels:           Mapped[str]      = mapped_column(Text, default="[]")  # ["@channel", ...]
     followers:             Mapped[int]      = mapped_column(Integer, default=0)
     local_mode:            Mapped[bool]     = mapped_column(Boolean, default=False)
     market:                Mapped[str]      = mapped_column(Text, default="global")  # ru | global
@@ -47,6 +48,7 @@ class Brand(Base):
     def niche_keywords_list(self): return json.loads(self.niche_keywords or "[]")
     def category_terms_list(self): return json.loads(self.category_terms or "[]")
     def audience_terms_list(self): return json.loads(self.audience_terms or "[]")
+    def tg_channels_list(self):    return json.loads(self.tg_channels or "[]")
     def tone_examples_list(self):  return json.loads(self.tone_examples or "[]")
 
 class Probe(Base):

@@ -404,7 +404,7 @@ def test_ensure_chats_discovered_bootstraps_seeds_for_brand_without_channels():
 
     class FakeProvider:
         def discover_channels(self, q, limit=20):
-            return [{"handle": "@techchan", "title": "Гаджеты", "participants": 8000}]
+            return [{"handle": "@techchan", "title": "Всё про смартфон и гаджеты", "participants": 8000}]
         def channel_recommendations(self, handle, limit=10):
             return []
         def linked_chat(self, handle):
@@ -531,3 +531,34 @@ def test_collect_chats_handles_linked_kind_probes():
     n = collect_chats(s, b, FakeProvider())
     kept = {m.post_id for m in s.query(Mention).filter_by(brand_id=b.id, is_spam=False).all()}
     assert "777/1" in kept and n == 1
+
+
+# ── Relevance: word-boundary matching (no "кафе" inside "кафедральный") ──
+
+def test_term_hit_word_boundary_rejects_substring_false_positive():
+    from radar.collector import _term_hit
+    assert _term_hit("Вьетнамское кафе", ["кафе"])              # real word
+    assert not _term_hit("Брянский кафедральный собор", ["кафе"])  # substring → reject
+    assert _term_hit("лучший ресторан города", ["ресторан"])
+
+
+def test_ensure_chats_discovered_bootstrap_filters_offtopic_by_title():
+    import json
+    from radar.models import Brand, Probe
+    from radar.collector import ensure_chats_discovered
+    s = _mem_session_tg()
+    b = Brand(name="Дача", sphere="ресторан кафе гриль", tg_channels="[]",
+              niche_keywords=json.dumps(["ресторан", "кафе"]),
+              category_terms="[]", audience_terms="[]", geo="Брянск")
+    s.add(b); s.flush(); s.commit()
+
+    class FakeProvider:
+        def discover_channels(self, q, limit=20):
+            return [{"handle": "@cafe_br", "title": "Вьетнамское кафе Брянск", "participants": 800},
+                    {"handle": "@sobor",   "title": "Кафедральный собор Брянск", "participants": 5000}]
+        def channel_recommendations(self, handle, limit=10): return []
+        def linked_chat(self, handle):
+            return {"handle": f"{handle}_chat", "id": 1, "via": handle, "title": "Chat", "participants": 200}
+    ensure_chats_discovered(s, b, FakeProvider())
+    chats = {p.query for p in s.query(Probe).filter_by(kind="chat").all()}
+    assert chats == {"@cafe_br_chat"}    # cathedral filtered out by title relevance

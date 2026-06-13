@@ -226,6 +226,22 @@ UNIVERSAL_INTENT_TERMS = ["посоветуйте", "подскажите", "ч�
 MAX_CHATS_PER_RUN      = int(os.getenv("MAX_CHATS_PER_RUN", "15"))
 
 
+def _term_hit(text: str, terms: list[str]) -> bool:
+    """Whole-word match — so "кафе" hits "Вьетнамское кафе" but NOT "кафедральный".
+    Plain substring matching let a cathedral chat through the restaurant filter."""
+    t = (text or "").lower()
+    return any(re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", t)
+               for term in terms if term)
+
+
+def _brand_terms(brand: Brand) -> list[str]:
+    """The brand's domain vocabulary (niche + category keywords + meaningful sphere
+    words) used to judge sphere-relevance — sphere-agnostic, from the brand's config."""
+    terms = [t.lower() for t in (brand.niche_keywords_list() + brand.category_terms_list())]
+    terms += [w.lower() for w in (getattr(brand, "sphere", "") or "").split() if len(w) > 3]
+    return [t for t in dict.fromkeys(terms) if t]
+
+
 MAX_DISCOVERY_CHANNELS = int(os.getenv("MAX_DISCOVERY_CHANNELS", "60"))
 
 
@@ -255,9 +271,14 @@ def ensure_chats_discovered(session: Session, brand: Brand, provider,
         queries = [f"{kw} {geo}".strip() for kw in brand.niche_keywords_list()[:3]]
         if sphere:
             queries.append(f"{sphere} {geo}".strip())
+        # contacts.Search is fuzzy (e.g. "ресторан Брянск" can return a cathedral) —
+        # keep only channels whose TITLE actually mentions the brand's domain.
+        terms = _brand_terms(brand)
         for q in dict.fromkeys(x for x in queries if x):
             try:
-                seeds += [c["handle"] for c in provider.discover_channels(q, limit=20)]
+                for c in provider.discover_channels(q, limit=20):
+                    if _term_hit(c.get("title", ""), terms):
+                        seeds.append(c["handle"])
             except Exception:
                 log.warning("discover_channels failed for %r", q)
         seeds = list(dict.fromkeys(seeds))
@@ -327,14 +348,12 @@ def collect_chats(session: Session, brand: Brand, provider) -> int:
         return 0
 
     from .pipeline import _looks_like_intent
-    niche_terms  = [t.lower() for t in (brand.niche_keywords_list() + brand.category_terms_list())]
-    sphere_words = [w.lower() for w in (getattr(brand, "sphere", "") or "").split() if len(w) > 3]
+    terms = _brand_terms(brand)
     # Search the brand's top niche keywords (domain) + sphere-neutral intent phrases.
     search_terms = list(dict.fromkeys(brand.niche_keywords_list()[:3] + UNIVERSAL_INTENT_TERMS))
 
     def _topical(text: str) -> bool:
-        t = text.lower()
-        return any(term in t for term in niche_terms) or any(w in t for w in sphere_words)
+        return _term_hit(text, terms)
 
     count = 0
     for probe in chats:

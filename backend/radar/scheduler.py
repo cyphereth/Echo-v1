@@ -57,6 +57,7 @@ class Scheduler:
         self._timer        = None
         self._last_hotwatch = 0.0
         self._last_chats    = 0.0
+        self._chats_thread  = None   # background worker for the chat-monitoring pass
 
     def start(self):
         self._running = True
@@ -134,11 +135,21 @@ class Scheduler:
             session.close()
 
     def _maybe_collect_chats(self, session: Session):
+        # Chat discovery + search is slow (throttled Telegram calls + LLM), so run it on
+        # its own worker thread — blocking the tick thread would starve hotwatch and
+        # normal probe collection. One worker at a time; it owns its own DB session.
         if self._tg_provider is None:
             return
         if time.monotonic() - self._last_chats < INTERVAL_CHATS:
             return
+        if self._chats_thread is not None and self._chats_thread.is_alive():
+            return  # previous chat pass still running — don't pile up
         self._last_chats = time.monotonic()
+        self._chats_thread = threading.Thread(target=self._collect_chats_worker, daemon=True)
+        self._chats_thread.start()
+
+    def _collect_chats_worker(self):
+        session = get_session()
         try:
             from .collector import ensure_chats_discovered, collect_chats
             from .pipeline import classify_and_draft, fetch_new_comments
@@ -151,7 +162,9 @@ class Scheduler:
                     fetch_new_comments(session, b.id, self._provider, self._tg_provider)
                     log.info("Chat monitor: %d new niche message(s) for brand %s", n, b.id)
         except Exception:
-            log.exception("Chat monitor tick failed")
+            log.exception("Chat monitor worker failed")
+        finally:
+            session.close()
 
     def _maybe_hotwatch(self, session: Session):
         if time.monotonic() - self._last_hotwatch < INTERVAL_HOT:

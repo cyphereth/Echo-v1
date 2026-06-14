@@ -293,15 +293,16 @@ class TelegramProvider(SearchProvider):
             "participants": int(getattr(linked, "participants_count", 0) or 0),
         }
 
-    def search_chat(self, handle: str, term: str, limit: int = 20) -> list[Post]:
+    def search_chat(self, handle: str, term: str, limit: int = 20, min_id: int = 0) -> list[Post]:
         """Server-side search inside one public group for `term`, newest first.
-        Each matching message becomes a Post. Returns [] if the chat is private,
-        gone, or has no matches."""
+        `min_id` returns only messages newer than that id (the chat's watermark), so
+        already-seen messages aren't re-fetched. Returns [] if the chat is private,
+        gone, or has no new matches."""
         from telethon.errors import FloodWaitError, ChannelPrivateError, UsernameNotOccupiedError
         h = handle if handle.startswith("@") else f"@{handle}"
         try:
             entity = self._await(self._client.get_entity(h))
-            msgs = self._await(self._client.get_messages(entity, search=term, limit=limit))
+            msgs = self._await(self._client.get_messages(entity, search=term, limit=limit, min_id=min_id))
         except FloodWaitError as e:
             log.warning("Telegram flood wait %ds", e.seconds)
             raise RuntimeError(f"Telegram flood wait {e.seconds}s")
@@ -310,10 +311,11 @@ class TelegramProvider(SearchProvider):
             return []
         return [_parse_tg_chat_message(m, h, h) for m in msgs if getattr(m, "id", None)]
 
-    def search_linked_chat(self, parent_handle: str, term: str, limit: int = 20) -> list[Post]:
+    def search_linked_chat(self, parent_handle: str, term: str, limit: int = 20, min_id: int = 0) -> list[Post]:
         """Search the discussion group LINKED to a (public) channel, for groups that have
         no public @username. The parent channel is always resolvable, so we reach the
-        group through it. Messages are namespaced by the group's internal id."""
+        group through it. `min_id` skips already-seen messages. Messages are namespaced
+        by the group's internal id."""
         from telethon.tl.functions.channels import GetFullChannelRequest
         from telethon.errors import FloodWaitError
         h = parent_handle if parent_handle.startswith("@") else f"@{parent_handle}"
@@ -326,7 +328,7 @@ class TelegramProvider(SearchProvider):
             linked = next((c for c in full.chats if getattr(c, "id", None) == lid), None)
             if not linked:
                 return []
-            msgs = self._await(self._client.get_messages(linked, search=term, limit=limit))
+            msgs = self._await(self._client.get_messages(linked, search=term, limit=limit, min_id=min_id))
         except FloodWaitError as e:
             log.warning("Telegram flood wait %ds", e.seconds)
             raise RuntimeError(f"Telegram flood wait {e.seconds}s")

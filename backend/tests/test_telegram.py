@@ -287,7 +287,7 @@ def test_collect_chats_stores_topical_and_intent_messages_as_niche():
                     likes=0, views=0, comments=0, shares=0)
 
     class FakeProvider:
-        def search_chat(self, handle, term, limit=20):
+        def search_chat(self, handle, term, limit=20, min_id=0):
             # one intent question, one topical, one pure noise
             return [mk("foodmsk/1", "посоветуйте где поесть в москве?"),
                     mk("foodmsk/2", "лучший ресторан суши на районе это огонь"),
@@ -440,7 +440,7 @@ def test_collect_chats_captures_non_food_shopping_intent():
                     likes=0, views=0, comments=0, shares=0)
 
     class FakeProvider:
-        def search_chat(self, handle, term, limit=20):
+        def search_chat(self, handle, term, limit=20, min_id=0):
             return [mk("techchat/1", "посоветуйте какой смартфон выбрать до 30 тысяч?"),
                     mk("techchat/2", "ага")]
         def search(self, *a, **k): return None
@@ -525,7 +525,7 @@ def test_collect_chats_handles_linked_kind_probes():
                     likes=0, views=0, comments=0, shares=0)
 
     class FakeProvider:
-        def search_linked_chat(self, parent, term, limit=20):
+        def search_linked_chat(self, parent, term, limit=20, min_id=0):
             return [mk("777/1", "посоветуйте хороший ресторан в центре?")]
         def search_chat(self, *a, **k): return []
     n = collect_chats(s, b, FakeProvider())
@@ -591,3 +591,36 @@ def test_rebuild_probes_preserves_discovered_chat_probes(monkeypatch):
     assert ("chat", "@foodchat") in surviving          # discovered chat preserved
     assert ("chat_linked", "@kudaeda") in surviving    # username-less chat preserved
     assert any(k == "keyword" for k, _ in surviving)   # config probes still rebuilt
+
+
+def test_collect_chats_uses_and_advances_watermark():
+    import json
+    from datetime import datetime, timezone
+    from radar.models import Brand, Probe, Mention
+    from radar.collector import collect_chats
+    from radar.providers.base import Post
+
+    s = _mem_session_tg()
+    b = Brand(name="Тануки", sphere="рестораны", niche_keywords=json.dumps(["ресторан"]),
+              category_terms="[]", audience_terms="[]", geo="")
+    s.add(b); s.flush()
+    s.add(Probe(brand_id=b.id, platform="telegram", kind="chat", query="@foodchat",
+                source="niche", watermark="100",
+                next_run_at=datetime.now(timezone.utc), interval_sec=3600))
+    s.commit()
+
+    seen_min_ids = []
+    def mk(pid, text):
+        return Post(post_id=pid, platform="telegram", author="@u", followers=0, text=text,
+                    hashtags=[], created_at=datetime.now(timezone.utc),
+                    likes=0, views=0, comments=0, shares=0)
+    class FakeProvider:
+        def search_chat(self, handle, term, limit=20, min_id=0):
+            seen_min_ids.append(min_id)
+            return [mk("foodchat/150", "лучший ресторан города, рекомендую")]
+        def search_linked_chat(self, *a, **k): return []
+
+    collect_chats(s, b, FakeProvider())
+    assert all(mid == 100 for mid in seen_min_ids)   # passed the stored watermark
+    probe = s.query(Probe).filter_by(brand_id=b.id, kind="chat").one()
+    assert probe.watermark == "150"                  # advanced to newest seen

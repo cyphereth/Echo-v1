@@ -364,10 +364,18 @@ def collect_chats(session: Session, brand: Brand, provider) -> int:
         if search is None:
             log.warning("collect_chats: provider has no %s — skipping %s", method, handle)
             continue
+        # Watermark: only fetch messages newer than the last one we saw, so a busy chat
+        # isn't re-scanned from scratch every run. Stored as the max message id seen.
+        wm = int(probe.watermark) if (probe.watermark or "").isdigit() else 0
+        newest = wm
         seen: set[str] = set()
         try:
             for term in search_terms:
-                for post in search(handle, term, limit=20):
+                for post in search(handle, term, limit=20, min_id=wm):
+                    try:
+                        newest = max(newest, int(post.post_id.rsplit("/", 1)[-1]))
+                    except ValueError:
+                        pass
                     if post.post_id in seen:
                         continue
                     seen.add(post.post_id)
@@ -393,7 +401,10 @@ def collect_chats(session: Session, brand: Brand, provider) -> int:
         except Exception:
             session.rollback()
             log.warning("collect_chats failed for brand %s chat %s", brand.id, handle)
-        # Move this chat to the back of the rotation regardless of outcome.
+        # Advance the watermark past everything seen, and move this chat to the back of
+        # the rotation — regardless of outcome.
+        if newest > wm:
+            probe.watermark = str(newest)
         probe.next_run_at = _now() + timedelta(seconds=probe.interval_sec or 3600)
         session.commit()
     return count

@@ -16,6 +16,14 @@ MIN_FOLLOWERS = 100     # accounts below this are hidden unless the post went vi
 
 def _now(): return datetime.now(timezone.utc)
 
+def _word_in(text: str, term: str) -> bool:
+    """Whole-word (boundary) match of `term` within `text` (both already lowercased).
+    Word boundaries avoid substring collisions — "кафе" in "кафедральный", "вб" in
+    "обувь". Empty term never matches."""
+    if not term:
+        return False
+    return bool(re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", text))
+
 def _is_viral(post: Post) -> bool:
     return (post.likes or 0) >= VIRAL_LIKES or (post.views or 0) >= VIRAL_VIEWS
 
@@ -86,7 +94,7 @@ def _matches(post: Post, brand: Brand, probe: Probe) -> bool:
         term = term.lower().lstrip("#")
         if not term:
             return False
-        if re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", text_lower):
+        if _word_in(text_lower, term):
             return True
         return any(term == h or term in h for h in post_hashtags)
 
@@ -122,6 +130,23 @@ def _upsert_mention(session: Session, post: Post, brand_id: int) -> Mention:
     session.execute(stmt)
     session.flush()
     return session.query(Mention).filter_by(platform=post.platform, post_id=post.post_id).one()
+
+
+def _store_niche_post(session: Session, brand_id: int, post: Post, spam: bool) -> bool:
+    """Upsert a niche-source mention (store-but-hide when spam). Adds a snapshot and
+    returns True only when the post counts toward pipeline volume (i.e. not spam).
+    Shared by collect_geo and collect_chats so the persist contract lives in one place."""
+    mention = _upsert_mention(session, post, brand_id)
+    mention.source = "niche"
+    mention.is_spam = spam
+    if spam:
+        return False
+    session.add(MentionSnapshot(
+        mention_id=mention.id, ts=_now(),
+        likes=post.likes, views=post.views,
+        comments=post.comments, shares=post.shares,
+    ))
+    return True
 
 def collect_probe(session: Session, probe: Probe, provider: SearchProvider) -> int:
     brand = session.get(Brand, probe.brand_id)
@@ -201,17 +226,8 @@ def collect_geo(session: Session, brand: Brand, provider: SearchProvider) -> int
             # client's lifestyle post won't contain a literal niche word).
             if not spam and not local and not _on_topic(post.text):
                 spam = True
-            mention = _upsert_mention(session, post, brand.id)
-            mention.source = "niche"
-            mention.is_spam = spam
-            if spam:
-                continue
-            session.add(MentionSnapshot(
-                mention_id=mention.id, ts=_now(),
-                likes=post.likes, views=post.views,
-                comments=post.comments, shares=post.shares,
-            ))
-            count += 1
+            if _store_niche_post(session, brand.id, post, spam):
+                count += 1
         session.commit()
     except Exception:
         session.rollback()
@@ -227,11 +243,11 @@ MAX_CHATS_PER_RUN      = int(os.getenv("MAX_CHATS_PER_RUN", "15"))
 
 
 def _term_hit(text: str, terms: list[str]) -> bool:
-    """Whole-word match — so "кафе" hits "Вьетнамское кафе" but NOT "кафедральный".
-    Plain substring matching let a cathedral chat through the restaurant filter."""
+    """True if any of `terms` appears as a whole word in `text` — so "кафе" hits
+    "Вьетнамское кафе" but NOT "кафедральный". (Plain substring matching let a
+    cathedral chat through the restaurant filter.)"""
     t = (text or "").lower()
-    return any(re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", t)
-               for term in terms if term)
+    return any(_word_in(t, term.lower()) for term in terms if term)
 
 
 def _brand_terms(brand: Brand) -> list[str]:
@@ -386,17 +402,8 @@ def collect_chats(session: Session, brand: Brand, provider) -> int:
                     # is full of "ага"/"спасибо" noise we don't want as mentions.
                     if not spam and not (_topical(post.text) or _looks_like_intent(post.text)):
                         spam = True
-                    mention = _upsert_mention(session, post, brand.id)
-                    mention.source = "niche"
-                    mention.is_spam = spam
-                    if spam:
-                        continue
-                    session.add(MentionSnapshot(
-                        mention_id=mention.id, ts=_now(),
-                        likes=post.likes, views=post.views,
-                        comments=post.comments, shares=post.shares,
-                    ))
-                    count += 1
+                    if _store_niche_post(session, brand.id, post, spam):
+                        count += 1
             session.commit()
         except Exception:
             session.rollback()

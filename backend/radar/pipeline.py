@@ -171,10 +171,16 @@ def fetch_and_store_comments(session: Session, mention: Mention,
             return 0
         # Telegram comments are discussion-group replies — fetched by the TG provider,
         # which needs the channel handle (mention.author) plus the post id.
+        if tg_provider is None:
+            log.warning("Telegram provider unavailable — cannot fetch comments for mention %s", mention.id)
+            return 0
         fetched = tg_provider.fetch_comments(mention.post_id, None, "telegram",
-                                             channel=mention.author) if tg_provider else []
+                                             channel=mention.author)
     else:
-        fetched = provider.fetch_comments(mention.post_id, None, mention.platform) if provider else []
+        if provider is None:
+            log.warning("Provider unavailable — cannot fetch comments for mention %s", mention.id)
+            return 0
+        fetched = provider.fetch_comments(mention.post_id, None, mention.platform)
     if not fetched:
         return 0
 
@@ -206,8 +212,10 @@ def fetch_and_store_comments(session: Session, mention: Mention,
     ad_spam = {fc.comment_id: bool(flag) for fc, flag in zip(survivors, ad_flags)}
 
     stored, drafted = 0, 0
-    fetched.sort(key=lambda fc: fc.likes, reverse=True)
-    for fc in new:
+    # Spend the limited draft budget (MAX_COMMENT_DRAFTS) on the highest-engagement
+    # comments first — iterate `new` sorted by likes (sorting `fetched` was a no-op
+    # since the loop runs over the separately-built `new` list).
+    for fc in sorted(new, key=lambda fc: fc.likes, reverse=True):
         is_spam = cheap_spam.get(fc.comment_id) or ad_spam.get(fc.comment_id, False)
         sentiment = classify(fc.text).tone
         draft = draft_flag = opp_reason = None

@@ -359,14 +359,15 @@ def collect_chats(session: Session, brand: Brand, provider) -> int:
     for probe in chats:
         handle = probe.query
         # username group → search_chat; username-less linked group → resolve via parent.
-        if probe.kind == "chat_linked":
-            _search = lambda t: provider.search_linked_chat(handle, t, limit=20)
-        else:
-            _search = lambda t: provider.search_chat(handle, t, limit=20)
+        method = "search_linked_chat" if probe.kind == "chat_linked" else "search_chat"
+        search = getattr(provider, method, None)
+        if search is None:
+            log.warning("collect_chats: provider has no %s — skipping %s", method, handle)
+            continue
         seen: set[str] = set()
         try:
             for term in search_terms:
-                for post in _search(term):
+                for post in search(handle, term, limit=20):
                     if post.post_id in seen:
                         continue
                     seen.add(post.post_id)

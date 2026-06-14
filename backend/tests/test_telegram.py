@@ -562,3 +562,32 @@ def test_ensure_chats_discovered_bootstrap_filters_offtopic_by_title():
     ensure_chats_discovered(s, b, FakeProvider())
     chats = {p.query for p in s.query(Probe).filter_by(kind="chat").all()}
     assert chats == {"@cafe_br_chat"}    # cathedral filtered out by title relevance
+
+
+def test_rebuild_probes_preserves_discovered_chat_probes(monkeypatch):
+    """Auto-discovered chat probes must survive a config-driven probe rebuild —
+    they come from the (expensive) Telegram graph crawl, not brand config."""
+    import json
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as _S
+    from radar import api
+    from radar.models import Base, Brand, Probe
+    monkeypatch.setattr(api, "TELEGRAM_API_ID", "123")
+    eng = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(eng)
+    s = _S(eng)
+    b = Brand(name="Tanuki", keywords=json.dumps(["Тануки"]), competitors="[]",
+              niche_keywords="[]", category_terms="[]", audience_terms="[]",
+              tg_channels=json.dumps(["@yakitoriya"]))
+    s.add(b); s.flush()
+    # Pretend discovery already ran and created chat probes.
+    s.add(Probe(brand_id=b.id, platform="telegram", kind="chat", query="@foodchat", source="niche"))
+    s.add(Probe(brand_id=b.id, platform="telegram", kind="chat_linked", query="@kudaeda", source="niche"))
+    s.commit()
+
+    api._rebuild_probes(s, b)   # config rebuild
+
+    surviving = {(p.kind, p.query) for p in s.query(Probe).filter_by(brand_id=b.id).all()}
+    assert ("chat", "@foodchat") in surviving          # discovered chat preserved
+    assert ("chat_linked", "@kudaeda") in surviving    # username-less chat preserved
+    assert any(k == "keyword" for k, _ in surviving)   # config probes still rebuilt

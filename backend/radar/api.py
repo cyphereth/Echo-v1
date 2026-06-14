@@ -366,8 +366,13 @@ MONITORED_PLATFORMS = ("tiktok", "instagram")
 
 
 def _rebuild_probes(session: Session, brand: Brand) -> None:
-    """Replace a brand's probes from its current keywords / competitors / niche."""
-    session.query(Probe).filter_by(brand_id=brand.id).delete()
+    """Replace a brand's probes from its current keywords / competitors / niche.
+    Preserves auto-discovered chat probes (kind chat/chat_linked) — those come from the
+    Telegram graph crawl, not brand config, so a config edit must NOT wipe them (re-crawl
+    is expensive and throttled)."""
+    (session.query(Probe)
+     .filter(Probe.brand_id == brand.id, Probe.kind.notin_(("chat", "chat_linked")))
+     .delete(synchronize_session=False))
     geo = (getattr(brand, "geo", "") or "").strip()
     # City is appended only to audience-discovery probes (category + niche) —
     # brand & named-competitor mentions don't depend on the city.

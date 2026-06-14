@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json, logging, os, re
+from functools import lru_cache
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -8,6 +9,33 @@ from .providers.base import Post, SearchProvider
 from .spam import looks_like_ad_cheap
 
 log = logging.getLogger(__name__)
+
+# Russian morphology — lets domain terms match inflected forms ("ресторане",
+# "ресторанов" → "ресторан"). pymorphy3 is the Py3.11+ fork (pymorphy2 needs the
+# removed pkg_resources); fall back to exact matching if neither is importable.
+def _load_morph():
+    for mod in ("pymorphy2", "pymorphy3"):
+        try:
+            return __import__(mod).MorphAnalyzer()
+        except Exception:
+            continue
+    log.info("pymorphy not available — term matching falls back to exact word match")
+    return None
+
+_MORPH    = _load_morph()
+_WORD_RE  = re.compile(r"\w+", re.UNICODE)
+
+@lru_cache(maxsize=50_000)
+def _lemma(word: str) -> str:
+    if _MORPH is None:
+        return word
+    try:
+        return _MORPH.parse(word)[0].normal_form
+    except Exception:
+        return word
+
+def _lemmas(text: str) -> set[str]:
+    return {_lemma(w) for w in _WORD_RE.findall(text.lower())}
 
 VIRAL_VIEWS  = 500_000  # views above this = viral (post passes filters regardless)
 VIRAL_LIKES  = 1_500    # smaller RU market: 1.5k likes already means a post took off
@@ -243,11 +271,26 @@ MAX_CHATS_PER_RUN      = int(os.getenv("MAX_CHATS_PER_RUN", "15"))
 
 
 def _term_hit(text: str, terms: list[str]) -> bool:
-    """True if any of `terms` appears as a whole word in `text` — so "кафе" hits
-    "Вьетнамское кафе" but NOT "кафедральный". (Plain substring matching let a
-    cathedral chat through the restaurant filter.)"""
-    t = (text or "").lower()
-    return any(_word_in(t, term.lower()) for term in terms if term)
+    """True if any of `terms` appears in `text` as a whole word OR an inflected form
+    of it ("ресторане"/"ресторанов" → "ресторан"). Tokenize+lemmatize keeps word
+    boundaries, so "кафе" still does NOT match "кафедральный" (distinct lemmas).
+    Falls back to exact whole-word match when morphology is unavailable."""
+    tlow = (text or "").lower()
+    tl: set[str] | None = None  # text lemmas, computed once on demand
+    for term in terms:
+        if not term:
+            continue
+        tt = term.lower()
+        if _word_in(tlow, tt):                 # exact whole-word/phrase (keeps adjacency)
+            return True
+        words = _WORD_RE.findall(tt)
+        if not words:
+            continue
+        if tl is None:
+            tl = _lemmas(tlow)
+        if all(_lemma(w) in tl for w in words):  # inflected match (all term words present)
+            return True
+    return False
 
 
 def _brand_terms(brand: Brand) -> list[str]:

@@ -624,3 +624,15 @@ def test_collect_chats_uses_and_advances_watermark():
     assert all(mid == 100 for mid in seen_min_ids)   # passed the stored watermark
     probe = s.query(Probe).filter_by(brand_id=b.id, kind="chat").one()
     assert probe.watermark == "150"                  # advanced to newest seen
+
+
+def test_term_hit_matches_inflected_forms_via_morphology():
+    import pytest
+    from radar.collector import _MORPH, _term_hit
+    # FP guard holds with or without morphology (distinct lemmas / boundaries):
+    assert not _term_hit("Брянский кафедральный собор", ["кафе"])
+    if _MORPH is None:
+        pytest.skip("pymorphy not installed — exact-match fallback only")
+    assert _term_hit("в нашем ресторане сегодня аншлаг", ["ресторан"])    # locative case
+    assert _term_hit("много хороших ресторанов в городе", ["ресторан"])   # genitive plural
+    assert _term_hit("заказали стейки на двоих", ["стейк"])               # accusative plural

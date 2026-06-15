@@ -34,3 +34,25 @@ def test_store_and_knn_roundtrip():
     hits = vec.knn(conn, "incident_vec", a, k=2)
     assert hits[0][0] == 1            # nearest id is the identical vector
     assert hits[0][1] == pytest.approx(0.0, abs=1e-4)  # cosine distance ~0
+
+
+def test_models_create_and_relate():
+    from radar.models import Story, Incident, StoryPoint, Mention
+    s = _session()
+    st = Story(brand_id=1, title="t",
+               first_seen_at=datetime.now(timezone.utc),
+               last_seen_at=datetime.now(timezone.utc))
+    s.add(st); s.flush()
+    inc = Incident(brand_id=1, story_id=st.id, title="i",
+                   first_seen_at=datetime.now(timezone.utc),
+                   last_seen_at=datetime.now(timezone.utc))
+    s.add(inc); s.flush()
+    m = Mention(brand_id=1, platform="telegram", post_id="p", author="@a",
+                text="x", source="niche", incident_id=inc.id,
+                created_at=datetime.now(timezone.utc))
+    s.add(m); s.flush()
+    pt = StoryPoint(story_id=st.id, bucket_start=datetime.now(timezone.utc),
+                    mention_count=3, avg_sentiment=0.5, source_count=2)
+    s.add(pt); s.commit()
+    assert st.id and inc.story_id == st.id and m.incident_id == inc.id
+    assert st.is_anomaly is False and st.status == "active"

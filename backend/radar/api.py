@@ -8,10 +8,11 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .db import init_db, get_session
-from .models import Brand, Probe, Mention, DraftEdit, Comment, User
+from .models import Brand, Probe, Mention, DraftEdit, Comment, User, Story, Incident, StoryPoint
 from .auth import hash_password, verify_password, create_token, decode_token
 from .classify import classify
 from .drafts import generate_draft
@@ -132,6 +133,35 @@ def _owned_mention(session: Session, mention_id: int, user: User) -> Mention:
 class AuthBody(BaseModel):
     email:    str
     password: str
+
+
+# ── Story schemas ─────────────────────────────────────────────────────────────
+
+class StoryOut(BaseModel):
+    id: int
+    title: str
+    status: str
+    is_anomaly: bool
+    post_count: int
+    last_seen_at: datetime
+    avg_sentiment: float | None = None
+
+class StoryPointOut(BaseModel):
+    bucket_start: datetime
+    mention_count: int
+    avg_sentiment: float | None
+    source_count: int
+
+class IncidentOut(BaseModel):
+    id: int
+    title: str
+    sentiment: float
+    post_count: int
+    last_seen_at: datetime
+
+class StoryDetailOut(StoryOut):
+    points: list[StoryPointOut]
+    incidents: list[IncidentOut]
 
 def _user_card(u: User) -> dict:
     return {"id": u.id, "email": u.email}
@@ -1266,3 +1296,54 @@ def explore_cities(user: User = Depends(current_user), session: Session = Depend
         if len(out) >= 30:
             break
     return out
+
+
+# ── Stories ───────────────────────────────────────────────────────────────────
+
+@app.get("/stories", response_model=list[StoryOut])
+def list_stories(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    _owned_brand(session, brand_id, user)
+    rows = (session.query(Story)
+            .filter(Story.brand_id == brand_id, Story.status == "active")
+            .order_by(Story.last_seen_at.desc()).all())
+    out = []
+    for st in rows:
+        avg = (session.query(func.avg(StoryPoint.avg_sentiment))
+               .filter(StoryPoint.story_id == st.id).scalar())
+        out.append(StoryOut(
+            id=st.id, title=st.title, status=st.status,
+            is_anomaly=st.is_anomaly, post_count=st.post_count,
+            last_seen_at=st.last_seen_at, avg_sentiment=avg))
+    return out
+
+
+@app.get("/stories/{story_id}", response_model=StoryDetailOut)
+def get_story(story_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    st = session.get(Story, story_id)
+    if st is None:
+        raise HTTPException(404, "Story not found")
+    _owned_brand(session, st.brand_id, user)   # enforce ownership
+    points = (session.query(StoryPoint)
+              .filter(StoryPoint.story_id == story_id)
+              .order_by(StoryPoint.bucket_start).all())
+    incidents = (session.query(Incident)
+                 .filter(Incident.story_id == story_id)
+                 .order_by(Incident.last_seen_at.desc()).all())
+    avg = (session.query(func.avg(StoryPoint.avg_sentiment))
+           .filter(StoryPoint.story_id == story_id).scalar())
+    return StoryDetailOut(
+        id=st.id, title=st.title, status=st.status, is_anomaly=st.is_anomaly,
+        post_count=st.post_count, last_seen_at=st.last_seen_at, avg_sentiment=avg,
+        points=[StoryPointOut(bucket_start=p.bucket_start, mention_count=p.mention_count,
+                              avg_sentiment=p.avg_sentiment, source_count=p.source_count)
+                for p in points],
+        incidents=[IncidentOut(id=i.id, title=i.title, sentiment=i.sentiment,
+                               post_count=i.post_count, last_seen_at=i.last_seen_at)
+                   for i in incidents])
+
+
+@app.post("/stories/recompute")
+def recompute_stories(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    _owned_brand(session, brand_id, user)
+    from .stories import update_stories
+    return update_stories(session, brand_id)

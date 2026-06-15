@@ -23,6 +23,27 @@ def _session():
     return _S(_engine_with_vec())
 
 
+def _mk(s, **kw):
+    from radar.models import Mention
+    d = dict(brand_id=1, platform="telegram", post_id="p", author="@a",
+             text="t", source="niche", is_spam=False,
+             created_at=datetime.now(timezone.utc))
+    d.update(kw)
+    m = Mention(**d); s.add(m); s.flush(); return m
+
+
+def _fake_embed(mapping):
+    """Return an embed() stub mapping text -> 384-vec (first dims set)."""
+    import numpy as np
+    def _e(texts):
+        out = np.zeros((len(texts), 384), dtype=np.float32)
+        for i, t in enumerate(texts):
+            for j, val in enumerate(mapping[t]):
+                out[i, j] = val
+        return out
+    return _e
+
+
 def test_store_and_knn_roundtrip():
     from radar import vec
     s = _session()
@@ -70,3 +91,24 @@ def test_init_db_loads_vec_and_migrates(tmp_path, monkeypatch):
         # incident_id column added to mentions
         cols = {r[1] for r in c.exec_driver_sql("PRAGMA table_info(mentions)")}
         assert "incident_id" in cols
+
+
+def test_dedup_collapses_near_duplicates(monkeypatch):
+    import radar.stories as S
+    s = _session()
+    now = datetime.now(timezone.utc)
+    m1 = _mk(s, post_id="a", text="пожар на заводе", created_at=now)
+    m2 = _mk(s, post_id="b", text="пожар завод дубль", created_at=now + timedelta(minutes=5))
+    m3 = _mk(s, post_id="c", text="концерт в парке", created_at=now + timedelta(minutes=6))
+    s.commit()
+    monkeypatch.setattr(S.embeddings, "embed", _fake_embed({
+        "пожар на заводе":   [1.0, 0.0, 0.0],
+        "пожар завод дубль": [0.99, 0.01, 0.0],   # near-duplicate of m1
+        "концерт в парке":   [0.0, 1.0, 0.0],     # different
+    }))
+    S.update_stories(s, brand_id=1)
+    s.refresh(m1); s.refresh(m2); s.refresh(m3)
+    assert m1.incident_id == m2.incident_id          # collapsed
+    assert m3.incident_id != m1.incident_id          # separate incident
+    from radar.models import Incident
+    assert s.query(Incident).count() == 2

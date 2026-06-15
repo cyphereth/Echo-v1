@@ -73,6 +73,45 @@ def _attach_to_incident(session, conn, brand_id, m, v) -> Incident:
     return inc
 
 
+def _attach_to_story(session, conn, brand_id, inc, centroid) -> Story:
+    if inc.story_id is not None:
+        st = session.get(Story, inc.story_id)
+        _bump_story(conn, st, inc, centroid)
+        return st
+    for st_id, dist in vec.knn(conn, "story_vec", centroid, k=5):
+        if (1.0 - dist) < STORY_SIM:
+            break
+        st = session.get(Story, st_id)
+        if st is None or st.brand_id != brand_id:
+            continue
+        if abs(_aware(st.last_seen_at) - _aware(inc.last_seen_at)) > STORY_WINDOW:
+            continue
+        _bump_story(conn, st, inc, centroid)
+        return st
+    st = Story(brand_id=brand_id, title=inc.title,
+               first_seen_at=inc.first_seen_at, last_seen_at=inc.last_seen_at,
+               post_count=0)
+    session.add(st); session.flush()
+    vec.store(conn, "story_vec", st.id, centroid)
+    _bump_story(conn, st, inc, centroid)
+    return st
+
+
+def _bump_story(conn, st, inc, centroid) -> None:
+    # story centroid = running mean of member-incident centroids (approx by post_count)
+    old = _centroid(conn, "story_vec", st.id)
+    w = max(st.post_count, 1)
+    merged = _normalize((old * w + centroid) / (w + 1))
+    vec.store(conn, "story_vec", st.id, merged)
+    st.first_seen_at = min(_aware(st.first_seen_at), _aware(inc.first_seen_at))
+    st.last_seen_at = max(_aware(st.last_seen_at), _aware(inc.last_seen_at))
+    st.post_count = (st.post_count or 0) + 1
+
+
+def _recompute_points(session: Session, story_id: int) -> None:
+    pass
+
+
 def update_stories(session: Session, brand_id: int) -> dict:
     conn = _raw(session)
     new = (session.query(Mention)
@@ -81,14 +120,23 @@ def update_stories(session: Session, brand_id: int) -> dict:
                    Mention.is_spam.is_(False))
            .order_by(Mention.created_at).all())
     if not new:
-        return {"mentions": 0, "incidents": 0}
+        return {"mentions": 0, "incidents": 0, "stories": 0}
     vecs = embeddings.embed([m.text or "" for m in new])
     incidents_touched = set()
+    stories_touched = set()
     for m, v in zip(new, vecs):
         v = _normalize(v)
         vec.store(conn, "mention_vec", m.id, v)
         inc = _attach_to_incident(session, conn, brand_id, m, v)
         m.incident_id = inc.id
+        cen = _centroid(conn, "incident_vec", inc.id)
+        st = _attach_to_story(session, conn, brand_id, inc, cen)
+        inc.story_id = st.id
         incidents_touched.add(inc.id)
+        stories_touched.add(st.id)
+    session.flush()
+    for sid in stories_touched:
+        _recompute_points(session, sid)
     session.commit()
-    return {"mentions": len(new), "incidents": len(incidents_touched)}
+    return {"mentions": len(new), "incidents": len(incidents_touched),
+            "stories": len(stories_touched)}

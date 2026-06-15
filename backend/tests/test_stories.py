@@ -112,3 +112,23 @@ def test_dedup_collapses_near_duplicates(monkeypatch):
     assert m3.incident_id != m1.incident_id          # separate incident
     from radar.models import Incident
     assert s.query(Incident).count() == 2
+
+
+def test_incidents_link_into_one_story(monkeypatch):
+    import radar.stories as S
+    from radar.models import Story
+    s = _session()
+    now = datetime.now(timezone.utc)
+    # two NON-duplicate but topically-close incidents (sim ~0.8, below INCIDENT_SIM,
+    # above STORY_SIM) → same story.
+    _mk(s, post_id="a", text="скандал день1", created_at=now)
+    _mk(s, post_id="b", text="скандал день2", created_at=now + timedelta(days=1))
+    s.commit()
+    monkeypatch.setattr(S.embeddings, "embed", _fake_embed({
+        "скандал день1": [1.0, 0.0, 0.0],
+        "скандал день2": [0.82, 0.57, 0.0],   # cos≈0.82: new incident, same story
+    }))
+    S.update_stories(s, brand_id=1)
+    stories = s.query(Story).all()
+    assert len(stories) == 1
+    assert stories[0].post_count == 2

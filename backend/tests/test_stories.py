@@ -157,3 +157,16 @@ def test_recompute_points_buckets_by_hour(monkeypatch):
     assert pts[0].source_count == 2         # @u1, @u2
     assert pts[1].mention_count == 1
     assert pts[1].source_count == 1
+
+
+def test_scheduler_calls_update_stories(monkeypatch):
+    import radar.scheduler as SCH
+    calls = []
+    monkeypatch.setattr("radar.stories.update_stories",
+                        lambda sess, bid: calls.append(bid) or {})
+    monkeypatch.setattr("radar.pipeline.classify_and_draft", lambda sess, bid: {})
+    monkeypatch.setattr("radar.pipeline.fetch_new_comments",
+                        lambda sess, bid, p, t: 0)
+    # exercise the per-brand post-collect block in isolation
+    SCH._run_brand_pipeline(session=object(), brand_id=7, provider=None, tg_provider=None)
+    assert calls == [7]

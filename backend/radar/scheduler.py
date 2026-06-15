@@ -37,6 +37,14 @@ class TokenBucket:
                     return
             time.sleep(1)
 
+def _run_brand_pipeline(session, brand_id, provider, tg_provider):
+    import radar.pipeline as _pipeline
+    import radar.stories as _stories
+    _pipeline.classify_and_draft(session, brand_id)
+    _pipeline.fetch_new_comments(session, brand_id, provider, tg_provider)
+    _stories.update_stories(session, brand_id)
+
+
 def adaptive_interval(probe: Probe, new_mentions: int) -> int:
     if new_mentions > 5:   interval = INTERVAL_HOT
     elif new_mentions > 0: interval = INTERVAL_NORMAL
@@ -121,9 +129,7 @@ class Scheduler:
             # auto-fetch comments on fresh competitor/niche mentions (opportunity pipeline).
             for brand_id in touched:
                 try:
-                    from .pipeline import classify_and_draft, fetch_new_comments
-                    classify_and_draft(session, brand_id)
-                    fetch_new_comments(session, brand_id, self._provider, self._tg_provider)
+                    _run_brand_pipeline(session, brand_id, self._provider, self._tg_provider)
                 except Exception:
                     log.exception("Pipeline failed for brand %s", brand_id)
             # Re-poll hot mentions on their own (faster) cadence, scoped to
@@ -152,14 +158,12 @@ class Scheduler:
         session = get_session()
         try:
             from .collector import ensure_chats_discovered, collect_chats
-            from .pipeline import classify_and_draft, fetch_new_comments
             brands = session.query(Brand).filter(Brand.auto_collect.is_(True)).all()
             for b in brands:
                 ensure_chats_discovered(session, b, self._tg_provider)
                 n = collect_chats(session, b, self._tg_provider)
                 if n:
-                    classify_and_draft(session, b.id)
-                    fetch_new_comments(session, b.id, self._provider, self._tg_provider)
+                    _run_brand_pipeline(session, b.id, self._provider, self._tg_provider)
                     log.info("Chat monitor: %d new niche message(s) for brand %s", n, b.id)
         except Exception:
             log.exception("Chat monitor worker failed")

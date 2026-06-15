@@ -108,3 +108,6 @@ export const exploreCity = (city, refresh = false) =>
   request('/explore/city', { method: 'POST', body: JSON.stringify({ city, refresh }) });
 
 export const getCityReports = () => request('/explore/cities');
+
+export const getStories = (brandId) => request(`/stories?brand_id=${brandId}`);
+export const getStory   = (id)      => request(`/stories/${id}`);

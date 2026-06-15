@@ -42,7 +42,13 @@ def _run_brand_pipeline(session, brand_id, provider, tg_provider):
     import radar.stories as _stories
     _pipeline.classify_and_draft(session, brand_id)
     _pipeline.fetch_new_comments(session, brand_id, provider, tg_provider)
-    _stories.update_stories(session, brand_id)
+    # Story clustering is additive and best-effort: it triggers the heavy
+    # embedding-model load on first use, so a failure (no network/disk/OOM) must
+    # NOT poison the core classify/draft pipeline. Degrade to "no stories this tick".
+    try:
+        _stories.update_stories(session, brand_id)
+    except Exception:
+        log.exception("update_stories failed for brand %s (story layer skipped)", brand_id)
 
 
 def adaptive_interval(probe: Probe, new_mentions: int) -> int:

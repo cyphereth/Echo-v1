@@ -108,8 +108,33 @@ def _bump_story(conn, st, inc, centroid) -> None:
     st.post_count = (st.post_count or 0) + 1
 
 
+def _bucket(dt: datetime) -> datetime:
+    dt = _aware(dt)
+    return dt.replace(minute=0, second=0, microsecond=0)
+
+
 def _recompute_points(session: Session, story_id: int) -> None:
-    pass
+    # All mentions whose incident belongs to this story.
+    rows = (session.query(Mention)
+            .join(Incident, Mention.incident_id == Incident.id)
+            .filter(Incident.story_id == story_id).all())
+    buckets: dict[datetime, dict] = {}
+    for m in rows:
+        b = _bucket(m.created_at)
+        agg = buckets.setdefault(b, {"n": 0, "sent": 0.0, "src": set()})
+        agg["n"] += 1
+        agg["sent"] += _tone_score(m.tone)
+        agg["src"].add(m.author or "")
+    # Wipe + rewrite this story's points (idempotent on every recompute).
+    session.query(StoryPoint).filter(StoryPoint.story_id == story_id).delete()
+    for b, agg in buckets.items():
+        session.add(StoryPoint(
+            story_id=story_id, bucket_start=b,
+            mention_count=agg["n"],
+            avg_sentiment=(agg["sent"] / agg["n"]) if agg["n"] else None,
+            source_count=len(agg["src"]),
+        ))
+    session.flush()
 
 
 def update_stories(session: Session, brand_id: int) -> dict:

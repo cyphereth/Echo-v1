@@ -132,3 +132,28 @@ def test_incidents_link_into_one_story(monkeypatch):
     stories = s.query(Story).all()
     assert len(stories) == 1
     assert stories[0].post_count == 2
+
+
+def test_recompute_points_buckets_by_hour(monkeypatch):
+    import radar.stories as S
+    from radar.models import StoryPoint
+    s = _session()
+    base = datetime(2026, 6, 15, 10, 0, tzinfo=timezone.utc)
+    # 2 mentions same hour (one + / one -), 1 next hour; all same topic → 1 story
+    _mk(s, post_id="a", text="тема x", author="@u1", tone="positive", created_at=base + timedelta(minutes=2))
+    _mk(s, post_id="b", text="тема x две", author="@u2", tone="negative", created_at=base + timedelta(minutes=40))
+    _mk(s, post_id="c", text="тема x три", author="@u1", tone="neutral", created_at=base + timedelta(hours=1, minutes=5))
+    s.commit()
+    monkeypatch.setattr(S.embeddings, "embed", _fake_embed({
+        "тема x":     [1.0, 0.0, 0.0],
+        "тема x две": [0.999, 0.01, 0.0],
+        "тема x три": [0.999, 0.0, 0.01],
+    }))
+    S.update_stories(s, brand_id=1)
+    pts = s.query(StoryPoint).order_by(StoryPoint.bucket_start).all()
+    assert len(pts) == 2
+    assert pts[0].mention_count == 2
+    assert pts[0].avg_sentiment == 0.0      # (+1 + -1)/2
+    assert pts[0].source_count == 2         # @u1, @u2
+    assert pts[1].mention_count == 1
+    assert pts[1].source_count == 1

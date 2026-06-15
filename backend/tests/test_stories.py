@@ -56,3 +56,17 @@ def test_models_create_and_relate():
     s.add(pt); s.commit()
     assert st.id and inc.story_id == st.id and m.incident_id == inc.id
     assert st.is_anomaly is False and st.status == "active"
+
+
+def test_init_db_loads_vec_and_migrates(tmp_path, monkeypatch):
+    db_file = tmp_path / "t.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_file}")
+    import importlib, radar.db as db
+    importlib.reload(db)            # pick up env + re-register listeners
+    db.init_db()
+    with db.engine.connect() as c:
+        # vec table usable
+        c.exec_driver_sql("SELECT count(*) FROM mention_vec")
+        # incident_id column added to mentions
+        cols = {r[1] for r in c.exec_driver_sql("PRAGMA table_info(mentions)")}
+        assert "incident_id" in cols

@@ -6,7 +6,7 @@
 
 **Architecture:** A new backend module clusters brand mentions into deduplicated incidents and links incidents into ongoing stories using local embeddings + sqlite-vec nearest-neighbour search. Per-story hourly timeline points are recomputed on each scheduler tick. New REST endpoints feed a new echo-app screen with a recharts dynamics graph. No new infra — runs inside the existing synchronous scheduler tick on SQLite.
 
-**Tech Stack:** Python 3.11, FastAPI, SQLAlchemy, SQLite + `sqlite-vec`, `sentence-transformers` (`intfloat/multilingual-e5-small`, 384-dim), React (echo-app) + `recharts`.
+**Tech Stack:** Python 3.x, FastAPI, SQLAlchemy, SQLite (embeddings as BLOB, cosine in numpy — host Python has sqlite extension loading disabled), `sentence-transformers` (`intfloat/multilingual-e5-small`, 384-dim), React (echo-app) + `recharts`.
 
 Spec: `docs/superpowers/specs/2026-06-15-story-timeline-design.md`
 
@@ -17,7 +17,7 @@ Spec: `docs/superpowers/specs/2026-06-15-story-timeline-design.md`
 **Backend (create):**
 - `backend/radar/embeddings.py` — local embedding model wrapper (`embed()`).
 - `backend/radar/stories.py` — clustering pipeline (`update_stories()`) + helpers.
-- `backend/radar/vec.py` — sqlite-vec helpers (serialize, store, KNN, table DDL).
+- `backend/radar/vec.py` — vector helpers (BLOB serialize, store, numpy KNN, table DDL).
 - `backend/tests/test_embeddings.py`
 - `backend/tests/test_stories.py`
 - `backend/tests/test_stories_api.py`
@@ -154,20 +154,12 @@ import pytest
 
 
 def _engine_with_vec():
-    """In-memory engine with sqlite-vec loaded and all tables created."""
-    import sqlite_vec
-    from sqlalchemy import create_engine, event
+    """In-memory engine with all tables created (vec tables are plain SQLite)."""
+    from sqlalchemy import create_engine
     from radar.models import Base
     from radar import vec
 
     eng = create_engine("sqlite:///:memory:")
-
-    @event.listens_for(eng, "connect")
-    def _load(dbapi_conn, _rec):
-        dbapi_conn.enable_load_extension(True)
-        sqlite_vec.load(dbapi_conn)
-        dbapi_conn.enable_load_extension(False)
-
     Base.metadata.create_all(eng)
     with eng.begin() as conn:
         vec.create_vec_tables(conn)
@@ -203,27 +195,36 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'radar.vec'`
 # backend/radar/vec.py
 from __future__ import annotations
 import numpy as np
-import sqlite_vec
 
 from .embeddings import EMBED_DIM
 
-# vec0 virtual tables. Cosine distance so distance = 1 - cosine_similarity.
+# Plain SQLite tables holding embeddings as float32 BLOBs. Cosine similarity is
+# computed in numpy (no sqlite extension) — the host Python has extension loading
+# disabled. distance = 1 - cosine_similarity.
 _TABLES = ("mention_vec", "incident_vec", "story_vec")
 
 
 def create_vec_tables(conn) -> None:
-    """Create vec0 tables. `conn` is a SQLAlchemy Connection or raw DBAPI conn."""
+    """Create vector tables. `conn` is a SQLAlchemy Connection or raw DBAPI conn."""
     exec_ = conn.exec_driver_sql if hasattr(conn, "exec_driver_sql") else conn.execute
     for t in _TABLES:
         exec_(
-            f"CREATE VIRTUAL TABLE IF NOT EXISTS {t} USING vec0("
-            f"id INTEGER PRIMARY KEY, "
-            f"embedding float[{EMBED_DIM}] distance_metric=cosine)"
+            f"CREATE TABLE IF NOT EXISTS {t} "
+            f"(id INTEGER PRIMARY KEY, embedding BLOB NOT NULL)"
         )
 
 
 def _ser(v: np.ndarray) -> bytes:
-    return sqlite_vec.serialize_float32(np.asarray(v, dtype=np.float32).tolist())
+    return np.asarray(v, dtype=np.float32).tobytes()
+
+
+def _deser(b: bytes) -> np.ndarray:
+    return np.frombuffer(b, dtype=np.float32)
+
+
+def _unit(v: np.ndarray) -> np.ndarray:
+    n = np.linalg.norm(v)
+    return v if n == 0 else v / n
 
 
 def store(conn, table: str, row_id: int, v: np.ndarray) -> None:
@@ -235,13 +236,20 @@ def store(conn, table: str, row_id: int, v: np.ndarray) -> None:
 
 
 def knn(conn, table: str, q: np.ndarray, k: int = 5) -> list[tuple[int, float]]:
-    """Return [(id, cosine_distance), ...] nearest to q, closest first."""
-    rows = conn.execute(
-        f"SELECT id, distance FROM {table} "
-        f"WHERE embedding MATCH ? AND k = ? ORDER BY distance",
-        (_ser(q), k),
-    ).fetchall()
-    return [(int(r[0]), float(r[1])) for r in rows]
+    """Return [(id, cosine_distance), ...] nearest to q, closest first.
+
+    Scans the whole table; callers only ever knn over centroid tables
+    (incident_vec / story_vec), which stay small. Vectors are L2-normalized
+    defensively so this is correct even if a stored vector wasn't unit length.
+    """
+    rows = conn.execute(f"SELECT id, embedding FROM {table}").fetchall()
+    if not rows:
+        return []
+    qn = _unit(np.asarray(q, dtype=np.float32))
+    out = [(int(rid), 1.0 - float(np.dot(qn, _unit(_deser(blob)))))
+           for rid, blob in rows]
+    out.sort(key=lambda x: x[1])
+    return out[:k]
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -389,19 +397,8 @@ Expected: FAIL — `no such table: mention_vec` (vec not loaded / tables not cre
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `backend/radar/db.py`, extend the connect listener to also load sqlite-vec:
-
-```python
-def _enable_wal(connection, _record):
-    if _DATABASE_URL.startswith("sqlite"):
-        # sqlite-vec must be loaded per-connection before any vec0 query.
-        import sqlite_vec
-        connection.enable_load_extension(True)
-        sqlite_vec.load(connection)
-        connection.enable_load_extension(False)
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA busy_timeout=30000")
-```
+The connect listener (`_enable_wal`) stays as-is — vector tables are plain SQLite
+now, so no extension loading is needed. Only two changes to `db.py`:
 
 Add `incident_id` to the `mentions` migration block:
 

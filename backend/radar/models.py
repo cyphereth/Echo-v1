@@ -210,3 +210,13 @@ class StoryPoint(Base):
     mention_count: Mapped[int]              = mapped_column(Integer, default=0)
     avg_sentiment: Mapped[Optional[float]]  = mapped_column(Float)
     source_count:  Mapped[int]              = mapped_column(Integer, default=0)
+
+
+class Report(Base):
+    __tablename__ = "reports"
+    id:         Mapped[int]           = mapped_column(Integer, primary_key=True, autoincrement=True)
+    brand_id:   Mapped[int]           = mapped_column(ForeignKey("brands.id"))
+    story_id:   Mapped[Optional[int]] = mapped_column(ForeignKey("stories.id"))
+    kind:       Mapped[str]           = mapped_column(Text, default="digest")  # digest | story | alert
+    body:       Mapped[str]           = mapped_column(Text, default="")
+    created_at: Mapped[datetime]      = mapped_column(default=_now)

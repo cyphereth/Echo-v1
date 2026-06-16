@@ -26,3 +26,15 @@ def test_topic_and_topic_id_columns():
     assert s.query(Mention).filter_by(topic_id=t.id).count() == 1
     assert s.query(Story).filter_by(topic_id=t.id).count() == 1
     assert t.keywords_list() == ["инфляция", "рубль"]
+
+
+def test_scope_owner_kwargs_and_keywords():
+    from radar.models import Brand, Topic
+    from radar.scope import scope_for_brand, scope_for_topic
+    s = _mem()
+    b = Brand(id=1, name="B", keywords='["k1"]', niche_keywords='["n1"]'); s.add(b)
+    t = Topic(id=1, name="T", keywords='["k2"]', niche_keywords='["n2"]', kind="default"); s.add(t)
+    s.flush()
+    sb = scope_for_brand(b); st = scope_for_topic(t)
+    assert sb.kind == "brand" and sb.owner_kwargs() == {"brand_id": 1} and "k1" in sb.keywords
+    assert st.kind == "topic" and st.owner_kwargs() == {"topic_id": 1} and "n2" in st.niche_keywords

@@ -43,3 +43,31 @@ def test_list_and_detail(monkeypatch, tmp_path):
     assert len(body["incidents"]) == 1
 
     api.app.dependency_overrides.clear()
+
+
+def test_list_sorts_anomalous_first(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path/'b.db'}")
+    import importlib
+    import radar.db as db; importlib.reload(db); db.init_db()
+    import radar.api as api; importlib.reload(api)
+    from fastapi.testclient import TestClient
+    from radar.models import Story, Brand, User
+    from datetime import datetime, timezone, timedelta
+
+    s = db.get_session()
+    u = User(email="t2@t.t", password_hash="x"); s.add(u); s.flush()
+    b = Brand(id=1, user_id=u.id, name="b"); s.add(b); s.flush()
+    now = datetime.now(timezone.utc)
+    # "calm" is newer (would sort first by recency) but not anomalous;
+    # "attack" is older but anomalous -> must come first.
+    s.add(Story(brand_id=1, title="calm", is_anomaly=False,
+                first_seen_at=now, last_seen_at=now))
+    s.add(Story(brand_id=1, title="attack", is_anomaly=True,
+                first_seen_at=now - timedelta(days=1), last_seen_at=now - timedelta(days=1)))
+    s.commit()
+
+    api.app.dependency_overrides[api.current_user] = lambda: u
+    client = TestClient(api.app)
+    titles = [row["title"] for row in client.get("/stories?brand_id=1").json()]
+    api.app.dependency_overrides.clear()
+    assert titles == ["attack", "calm"]

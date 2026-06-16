@@ -1305,7 +1305,7 @@ def list_stories(brand_id: int, user: User = Depends(current_user), session: Ses
     _owned_brand(session, brand_id, user)
     rows = (session.query(Story)
             .filter(Story.brand_id == brand_id, Story.status == "active")
-            .order_by(Story.last_seen_at.desc()).all())
+            .order_by(Story.is_anomaly.desc(), Story.last_seen_at.desc()).all())
     out = []
     for st in rows:
         avg = (session.query(func.avg(StoryPoint.avg_sentiment))

@@ -7,3 +7,5 @@ python-dotenv
 pytest>=8.0
 telethon>=1.43,<2
 pymorphy3>=2.0
+sentence-transformers>=3.0
+numpy>=1.26

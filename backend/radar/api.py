@@ -8,10 +8,11 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .db import init_db, get_session
-from .models import Brand, Probe, Mention, DraftEdit, Comment, User
+from .models import Brand, Probe, Mention, DraftEdit, Comment, User, Story, Incident, StoryPoint, Report
 from .auth import hash_password, verify_password, create_token, decode_token
 from .classify import classify
 from .drafts import generate_draft
@@ -81,8 +82,12 @@ def on_startup():
     global _scheduler
     if os.getenv("ENABLE_SCHEDULER", "1") == "1" and _scheduler is None:
         from .scheduler import Scheduler
+        web_provider = None
+        if os.getenv("WEB_SEARCH_API_KEY"):
+            from .providers.web import WebSearchProvider
+            web_provider = WebSearchProvider()
         _scheduler = Scheduler(_get_provider(), tick_sec=int(os.getenv("SCHEDULER_TICK_SEC", "60")),
-                               tg_provider=_get_tg_provider())
+                               tg_provider=_get_tg_provider(), web_provider=web_provider)
         _scheduler.start()
         log.info("Auto-collect scheduler started (tick=%ss)", _scheduler._tick_sec)
 
@@ -132,6 +137,42 @@ def _owned_mention(session: Session, mention_id: int, user: User) -> Mention:
 class AuthBody(BaseModel):
     email:    str
     password: str
+
+
+# ── Story schemas ─────────────────────────────────────────────────────────────
+
+class StoryOut(BaseModel):
+    id: int
+    title: str
+    status: str
+    is_anomaly: bool
+    post_count: int
+    last_seen_at: datetime
+    avg_sentiment: float | None = None
+
+class StoryPointOut(BaseModel):
+    bucket_start: datetime
+    mention_count: int
+    avg_sentiment: float | None
+    source_count: int
+
+class IncidentOut(BaseModel):
+    id: int
+    title: str
+    sentiment: float
+    post_count: int
+    last_seen_at: datetime
+
+class StoryDetailOut(StoryOut):
+    points: list[StoryPointOut]
+    incidents: list[IncidentOut]
+
+class ReportOut(BaseModel):
+    id: int
+    kind: str
+    body: str
+    created_at: datetime
+    story_id: int | None = None
 
 def _user_card(u: User) -> dict:
     return {"id": u.id, "email": u.email}
@@ -1266,3 +1307,82 @@ def explore_cities(user: User = Depends(current_user), session: Session = Depend
         if len(out) >= 30:
             break
     return out
+
+
+# ── Digests ───────────────────────────────────────────────────────────────────
+
+@app.post("/brands/{brand_id}/digest", response_model=ReportOut)
+def create_digest(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    _owned_brand(session, brand_id, user)
+    from .digests import build_daily_digest
+    from .llm import LLMNotConfigured
+    try:
+        report = build_daily_digest(session, brand_id)
+    except LLMNotConfigured:
+        raise HTTPException(503, "Digest generation unavailable — set LLM_API_KEY in backend/.env")
+    if report is None:
+        raise HTTPException(404, "No active stories to summarize")
+    session.commit()
+    return ReportOut(id=report.id, kind=report.kind, body=report.body,
+                     created_at=report.created_at, story_id=report.story_id)
+
+
+@app.get("/brands/{brand_id}/digests", response_model=list[ReportOut])
+def list_digests(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    _owned_brand(session, brand_id, user)
+    rows = (session.query(Report)
+            .filter(Report.brand_id == brand_id, Report.kind == "digest")
+            .order_by(Report.created_at.desc()).limit(50).all())
+    return [ReportOut(id=r.id, kind=r.kind, body=r.body,
+                      created_at=r.created_at, story_id=r.story_id) for r in rows]
+
+
+# ── Stories ───────────────────────────────────────────────────────────────────
+
+@app.get("/stories", response_model=list[StoryOut])
+def list_stories(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    _owned_brand(session, brand_id, user)
+    rows = (session.query(Story)
+            .filter(Story.brand_id == brand_id, Story.status == "active")
+            .order_by(Story.is_anomaly.desc(), Story.last_seen_at.desc()).all())
+    out = []
+    for st in rows:
+        avg = (session.query(func.avg(StoryPoint.avg_sentiment))
+               .filter(StoryPoint.story_id == st.id).scalar())
+        out.append(StoryOut(
+            id=st.id, title=st.title, status=st.status,
+            is_anomaly=st.is_anomaly, post_count=st.post_count,
+            last_seen_at=st.last_seen_at, avg_sentiment=avg))
+    return out
+
+
+@app.get("/stories/{story_id}", response_model=StoryDetailOut)
+def get_story(story_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    st = session.get(Story, story_id)
+    if st is None:
+        raise HTTPException(404, "Story not found")
+    _owned_brand(session, st.brand_id, user)   # enforce ownership
+    points = (session.query(StoryPoint)
+              .filter(StoryPoint.story_id == story_id)
+              .order_by(StoryPoint.bucket_start).all())
+    incidents = (session.query(Incident)
+                 .filter(Incident.story_id == story_id)
+                 .order_by(Incident.last_seen_at.desc()).all())
+    avg = (session.query(func.avg(StoryPoint.avg_sentiment))
+           .filter(StoryPoint.story_id == story_id).scalar())
+    return StoryDetailOut(
+        id=st.id, title=st.title, status=st.status, is_anomaly=st.is_anomaly,
+        post_count=st.post_count, last_seen_at=st.last_seen_at, avg_sentiment=avg,
+        points=[StoryPointOut(bucket_start=p.bucket_start, mention_count=p.mention_count,
+                              avg_sentiment=p.avg_sentiment, source_count=p.source_count)
+                for p in points],
+        incidents=[IncidentOut(id=i.id, title=i.title, sentiment=i.sentiment,
+                               post_count=i.post_count, last_seen_at=i.last_seen_at)
+                   for i in incidents])
+
+
+@app.post("/stories/recompute")
+def recompute_stories(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    _owned_brand(session, brand_id, user)
+    from .stories import update_stories
+    return update_stories(session, brand_id)

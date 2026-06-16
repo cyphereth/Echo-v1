@@ -1,0 +1,17 @@
+.wrap { display: flex; gap: 16px; height: 100%; }
+.list { width: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.item, .activeItem { text-align: left; padding: 10px 12px; border: 1px solid #e5e7eb;
+  border-radius: 8px; background: #fff; cursor: pointer; }
+.activeItem { border-color: #6366f1; background: #eef2ff; }
+.title { font-weight: 600; font-size: 14px; }
+.sub { color: #6b7280; font-size: 12px; margin-top: 2px; }
+.pane { flex: 1; overflow-y: auto; }
+.detail h2 { margin: 0 0 4px; }
+.meta { color: #6b7280; font-size: 13px; margin-bottom: 16px; }
+.anomaly { color: #ef4444; font-weight: 600; }
+.incidents { list-style: none; padding: 0; }
+.incidents li { padding: 6px 0; border-bottom: 1px solid #f3f4f6; font-size: 14px; }
+.incidents li span { color: #9ca3af; }
+.empty { color: #9ca3af; padding: 24px; }
+
+.warn { color: #ef4444; font-weight: 700; }

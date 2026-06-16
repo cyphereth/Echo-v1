@@ -1,4 +1,4 @@
-import logging, random, time, threading
+import logging, os, random, time, threading
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from .db import get_session
@@ -9,6 +9,9 @@ INTERVAL_HOT    = 300
 INTERVAL_NORMAL = 3600
 INTERVAL_QUIET  = 7200
 INTERVAL_CHATS  = 1800   # group-chat monitoring cadence (discover + search)
+ENABLE_DIGESTS      = os.getenv("ENABLE_DIGESTS", "0") == "1"   # opt-in; default OFF (no surprise paid LLM calls)
+INTERVAL_DIGEST     = int(os.getenv("DIGEST_INTERVAL_SEC", "86400"))  # once per ~24h
+INTERVAL_WEB    = int(os.getenv("INTERVAL_WEB", "3600"))   # web-source cadence
 NIGHT_START_UTC = 21
 NIGHT_END_UTC   = 6
 NIGHT_MULTIPLIER = 2.0
@@ -37,6 +40,57 @@ class TokenBucket:
                     return
             time.sleep(1)
 
+def _run_brand_pipeline(session, brand_id, provider, tg_provider):
+    import radar.pipeline as _pipeline
+    import radar.stories as _stories
+    _pipeline.classify_and_draft(session, brand_id)
+    _pipeline.fetch_new_comments(session, brand_id, provider, tg_provider)
+    # Story clustering is additive and best-effort: it triggers the heavy
+    # embedding-model load on first use, so a failure (no network/disk/OOM) must
+    # NOT poison the core classify/draft pipeline. Degrade to "no stories this tick".
+    try:
+        _stories.update_stories(session, brand_id)
+    except Exception:
+        log.exception("update_stories failed for brand %s (story layer skipped)", brand_id)
+
+
+def _run_web_pass(session, web_provider):
+    """Search the web per auto-collect brand and feed results into the pipeline."""
+    import radar.collector as _collector
+    import radar.pipeline as _pipeline
+    import radar.stories as _stories
+    from .models import Brand
+    for b in session.query(Brand).filter(Brand.auto_collect.is_(True)).all():
+        try:
+            n = _collector.collect_web(session, b, web_provider)
+        except Exception:
+            log.exception("collect_web failed for brand %s", b.id)
+            continue
+        if n:
+            try:
+                _pipeline.classify_and_draft(session, b.id)
+                _stories.update_stories(session, b.id)
+            except Exception:
+                log.exception("web pipeline failed for brand %s", b.id)
+
+
+def _run_digest_pass(session):
+    """Generate a daily digest for each auto-collect brand. Best-effort."""
+    import radar.digests as _digests
+    from .llm import LLMNotConfigured
+    from .models import Brand
+    brands = session.query(Brand).filter(Brand.auto_collect.is_(True)).all()
+    for b in brands:
+        try:
+            if _digests.build_daily_digest(session, b.id):
+                session.commit()
+                log.info("Daily digest generated for brand %s", b.id)
+        except LLMNotConfigured:
+            return  # no key configured — stop this pass
+        except Exception:
+            log.exception("Digest pass failed for brand %s", b.id)
+
+
 def adaptive_interval(probe: Probe, new_mentions: int) -> int:
     if new_mentions > 5:   interval = INTERVAL_HOT
     elif new_mentions > 0: interval = INTERVAL_NORMAL
@@ -48,15 +102,18 @@ def adaptive_interval(probe: Probe, new_mentions: int) -> int:
     return interval + jitter
 
 class Scheduler:
-    def __init__(self, provider, tick_sec: int = 60, tg_provider=None):
+    def __init__(self, provider, tick_sec: int = 60, tg_provider=None, web_provider=None):
         self._provider     = provider
         self._tg_provider  = tg_provider   # routes platform="telegram" probes; None = skip them
+        self._web_provider = web_provider
         self._tick_sec     = tick_sec
         self._bucket       = TokenBucket()
         self._running      = False
         self._timer        = None
         self._last_hotwatch = 0.0
         self._last_chats    = 0.0
+        self._last_digest   = 0.0
+        self._last_web      = 0.0
         self._chats_thread  = None   # background worker for the chat-monitoring pass
 
     def start(self):
@@ -121,9 +178,7 @@ class Scheduler:
             # auto-fetch comments on fresh competitor/niche mentions (opportunity pipeline).
             for brand_id in touched:
                 try:
-                    from .pipeline import classify_and_draft, fetch_new_comments
-                    classify_and_draft(session, brand_id)
-                    fetch_new_comments(session, brand_id, self._provider, self._tg_provider)
+                    _run_brand_pipeline(session, brand_id, self._provider, self._tg_provider)
                 except Exception:
                     log.exception("Pipeline failed for brand %s", brand_id)
             # Re-poll hot mentions on their own (faster) cadence, scoped to
@@ -131,6 +186,8 @@ class Scheduler:
             self._maybe_hotwatch(session)
             # Group-chat monitoring on its own (slower) cadence.
             self._maybe_collect_chats(session)
+            self._maybe_daily_digest(session)
+            self._maybe_collect_web(session)
         finally:
             session.close()
 
@@ -148,18 +205,32 @@ class Scheduler:
         self._chats_thread = threading.Thread(target=self._collect_chats_worker, daemon=True)
         self._chats_thread.start()
 
+    def _maybe_daily_digest(self, session):
+        if not ENABLE_DIGESTS:
+            return
+        if time.monotonic() - self._last_digest < INTERVAL_DIGEST:
+            return
+        self._last_digest = time.monotonic()
+        _run_digest_pass(session)
+
+    def _maybe_collect_web(self, session):
+        if self._web_provider is None:
+            return
+        if time.monotonic() - self._last_web < INTERVAL_WEB:
+            return
+        self._last_web = time.monotonic()
+        _run_web_pass(session, self._web_provider)
+
     def _collect_chats_worker(self):
         session = get_session()
         try:
             from .collector import ensure_chats_discovered, collect_chats
-            from .pipeline import classify_and_draft, fetch_new_comments
             brands = session.query(Brand).filter(Brand.auto_collect.is_(True)).all()
             for b in brands:
                 ensure_chats_discovered(session, b, self._tg_provider)
                 n = collect_chats(session, b, self._tg_provider)
                 if n:
-                    classify_and_draft(session, b.id)
-                    fetch_new_comments(session, b.id, self._provider, self._tg_provider)
+                    _run_brand_pipeline(session, b.id, self._provider, self._tg_provider)
                     log.info("Chat monitor: %d new niche message(s) for brand %s", n, b.id)
         except Exception:
             log.exception("Chat monitor worker failed")

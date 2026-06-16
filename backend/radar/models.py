@@ -89,6 +89,7 @@ class Mention(Base):
     is_spam:      Mapped[bool]          = mapped_column(Boolean, default=False)
     category:     Mapped[Optional[str]] = mapped_column(Text)
     lane:         Mapped[Optional[str]] = mapped_column(Text)
+    incident_id:  Mapped[Optional[int]] = mapped_column(ForeignKey("incidents.id"))
     source:       Mapped[str]           = mapped_column(Text, default="brand")  # brand | competitor | niche
     competitor:   Mapped[Optional[str]] = mapped_column(Text)                    # which competitor (source=competitor)
     opportunity:  Mapped[Optional[str]] = mapped_column(Text)                    # engagement hint for competitor/niche
@@ -171,3 +172,51 @@ class CityReport(Base):
     post_count:   Mapped[int]      = mapped_column(Integer, default=0)
     platforms:    Mapped[str]      = mapped_column(Text, default="")     # comma-joined
     created_at:   Mapped[datetime] = mapped_column(default=_now)
+
+
+class Incident(Base):
+    __tablename__ = "incidents"
+    id:            Mapped[int]           = mapped_column(Integer, primary_key=True, autoincrement=True)
+    brand_id:      Mapped[int]           = mapped_column(ForeignKey("brands.id"))
+    story_id:      Mapped[Optional[int]] = mapped_column(ForeignKey("stories.id"))
+    title:         Mapped[str]           = mapped_column(Text, default="")
+    summary:       Mapped[Optional[str]] = mapped_column(Text)   # filled by LLM later
+    sentiment:     Mapped[float]         = mapped_column(Float, default=0.0)  # -1..1
+    post_count:    Mapped[int]           = mapped_column(Integer, default=1)
+    first_seen_at: Mapped[datetime]      = mapped_column(nullable=False)
+    last_seen_at:  Mapped[datetime]      = mapped_column(nullable=False)
+    created_at:    Mapped[datetime]      = mapped_column(default=_now)
+
+
+class Story(Base):
+    __tablename__ = "stories"
+    id:            Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
+    brand_id:      Mapped[int]      = mapped_column(ForeignKey("brands.id"))
+    title:         Mapped[str]      = mapped_column(Text, default="")
+    status:        Mapped[str]      = mapped_column(Text, default="active")   # active | dormant
+    is_anomaly:    Mapped[bool]     = mapped_column(Boolean, default=False)   # set by detector later
+    post_count:    Mapped[int]      = mapped_column(Integer, default=0)
+    first_seen_at: Mapped[datetime] = mapped_column(nullable=False)
+    last_seen_at:  Mapped[datetime] = mapped_column(nullable=False)
+    created_at:    Mapped[datetime] = mapped_column(default=_now)
+
+
+class StoryPoint(Base):
+    __tablename__ = "story_points"
+    __table_args__ = (UniqueConstraint("story_id", "bucket_start"),)
+    id:            Mapped[int]              = mapped_column(Integer, primary_key=True, autoincrement=True)
+    story_id:      Mapped[int]              = mapped_column(ForeignKey("stories.id"))
+    bucket_start:  Mapped[datetime]         = mapped_column(nullable=False)
+    mention_count: Mapped[int]              = mapped_column(Integer, default=0)
+    avg_sentiment: Mapped[Optional[float]]  = mapped_column(Float)
+    source_count:  Mapped[int]              = mapped_column(Integer, default=0)
+
+
+class Report(Base):
+    __tablename__ = "reports"
+    id:         Mapped[int]           = mapped_column(Integer, primary_key=True, autoincrement=True)
+    brand_id:   Mapped[int]           = mapped_column(ForeignKey("brands.id"))
+    story_id:   Mapped[Optional[int]] = mapped_column(ForeignKey("stories.id"))
+    kind:       Mapped[str]           = mapped_column(Text, default="digest")  # digest | story | alert
+    body:       Mapped[str]           = mapped_column(Text, default="")
+    created_at: Mapped[datetime]      = mapped_column(default=_now)

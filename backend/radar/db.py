@@ -52,6 +52,7 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "competitor":  "TEXT",
         "opportunity": "TEXT",
         "is_spam":     "BOOLEAN DEFAULT 0",
+        "incident_id": "INTEGER",
     },
     "comments": {
         "is_opportunity": "BOOLEAN DEFAULT 0",
@@ -77,6 +78,9 @@ def _migrate() -> None:
 def init_db() -> None:
     Base.metadata.create_all(engine)
     _migrate()
+    from .vec import create_vec_tables
+    with engine.begin() as conn:
+        create_vec_tables(conn)
 
 
 def get_session() -> Session:

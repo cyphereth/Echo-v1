@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Icon } from '../shared/icons';
 import styles from './shell.module.css';
 
@@ -25,32 +24,55 @@ function EchoLogo() {
   );
 }
 
-export function Sidebar({ screen, setScreen, brand, onLogout }) {
-  const negCount = 3;
+export function Sidebar({ screen, setScreen, sector, setSector, brand, onLogout }) {
+  const negCount = sector === 'brand' ? 3 : 0;
+
+  function selectSector(next) {
+    setSector(next);
+    setScreen(next === 'news' ? 'news' : 'feed');
+  }
 
   return (
     <aside className={styles.sidebar}>
       <EchoLogo />
+      <div className={styles.sectorSwitch}>
+        <button data-active={sector === 'news' ? '1' : '0'} onClick={() => selectSector('news')}>
+          Новости
+        </button>
+        <button data-active={sector === 'brand' ? '1' : '0'} onClick={() => selectSector('brand')}>
+          Бренд
+        </button>
+      </div>
       <nav className={styles.nav}>
-        <NavItem icon="radio"    label="Лента"     active={screen === 'feed'}      badge={negCount} onClick={() => setScreen('feed')} />
-        <NavItem icon="inbox"    label="Очередь"   active={screen === 'queue'}     onClick={() => setScreen('queue')} />
-        <NavItem icon="pieChart" label="Аналитика" active={screen === 'analytics'} onClick={() => setScreen('analytics')} />
-        <NavItem icon="activity" label="Сюжеты"    active={screen === 'stories'}  onClick={() => setScreen('stories')} />
-        <NavItem icon="zap"      label="Дайджесты" active={screen === 'digests'}   onClick={() => setScreen('digests')} />
-        <NavItem icon="search"   label="Города"    active={screen === 'cities'}    onClick={() => setScreen('cities')} />
-        <NavItem icon="settings" label="Настройки" active={screen === 'settings'}  onClick={() => setScreen('settings')} />
+        {sector === 'news' ? (
+          <>
+            <NavItem icon="radio" label="Сводка" active={screen === 'news'} onClick={() => setScreen('news')} />
+            <NavItem icon="activity" label="Сюжеты" active={screen === 'news-stories'} onClick={() => setScreen('news-stories')} />
+            <NavItem icon="search" label="Источники" active={screen === 'news-sources'} onClick={() => setScreen('news-sources')} />
+          </>
+        ) : (
+          <>
+            <NavItem icon="radio"    label="Лента"     active={screen === 'feed'}      badge={negCount} onClick={() => setScreen('feed')} />
+            <NavItem icon="inbox"    label="Очередь"   active={screen === 'queue'}     onClick={() => setScreen('queue')} />
+            <NavItem icon="pieChart" label="Аналитика" active={screen === 'analytics'} onClick={() => setScreen('analytics')} />
+            <NavItem icon="activity" label="Сюжеты"    active={screen === 'stories'}   onClick={() => setScreen('stories')} />
+            <NavItem icon="zap"      label="Дайджесты" active={screen === 'digests'}   onClick={() => setScreen('digests')} />
+            <NavItem icon="search"   label="Города"    active={screen === 'cities'}    onClick={() => setScreen('cities')} />
+            <NavItem icon="settings" label="Настройки" active={screen === 'settings'}  onClick={() => setScreen('settings')} />
+          </>
+        )}
       </nav>
       <div className={styles.sidebarBottom}>
         <div className={styles.brandChip} style={{ cursor: 'default' }}>
           <div className={styles.brandMonogram}>
-            {brand?.name?.slice(0, 2).toUpperCase() ?? '—'}
+            {sector === 'news' ? 'N' : brand?.name?.slice(0, 2).toUpperCase() ?? '—'}
           </div>
           <div style={{ lineHeight: 1.25, flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {brand?.name ?? '—'}
+              {sector === 'news' ? 'News intelligence' : brand?.name ?? 'Бренд не выбран'}
             </div>
             <div style={{ fontSize: 11, color: 'var(--fg-3)', fontFamily: 'var(--font-mono)' }}>
-              {brand?.niche ?? ''}
+              {sector === 'news' ? 'topic mode' : brand?.niche ?? 'brand mode'}
             </div>
           </div>
           <button

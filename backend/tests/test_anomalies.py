@@ -63,3 +63,41 @@ def test_clears_when_normal():
     st.is_anomaly = True; s.flush()         # pretend a prior run flagged it
     assert detect_anomaly(s, st.id) is False
     assert s.get(Story, st.id).is_anomaly is False
+
+
+def test_none_sentiment_does_not_satisfy_shift():
+    # last bucket has no sentiment + a spike but no source influx -> no fire
+    from radar.anomalies import detect_anomaly
+    s = _mem()
+    st = _story(s, [(2, 0.5, 2), (2, 0.5, 2), (2, 0.5, 2), (10, None, 2)])
+    assert detect_anomaly(s, st.id) is False
+
+
+def test_fires_with_zero_baseline_volume_via_floor():
+    # base_vol == 0: spike falls back to the absolute MIN_VOLUME floor (+ neg shift)
+    from radar.anomalies import detect_anomaly
+    s = _mem()
+    st = _story(s, [(0, 0.0, 0), (0, 0.0, 0), (0, 0.0, 0), (5, -0.9, 0)])
+    assert detect_anomaly(s, st.id) is True
+
+
+def test_zero_baseline_sources_blocks_influx():
+    # base_src == 0 -> source influx never satisfied; spike alone must not fire
+    from radar.anomalies import detect_anomaly
+    s = _mem()
+    st = _story(s, [(2, 0.0, 0), (2, 0.0, 0), (2, 0.0, 0), (10, 0.0, 5)])
+    assert detect_anomaly(s, st.id) is False
+
+
+def test_missing_story_returns_false():
+    from radar.anomalies import detect_anomaly
+    s = _mem()
+    assert detect_anomaly(s, 9999) is False
+
+
+def test_exact_min_buckets_does_not_fire():
+    # exactly MIN_BUCKETS(3) total -> baseline < MIN_BUCKETS -> no baseline yet
+    from radar.anomalies import detect_anomaly
+    s = _mem()
+    st = _story(s, [(2, 0.5, 2), (2, 0.5, 2), (10, -0.9, 9)])
+    assert detect_anomaly(s, st.id) is False

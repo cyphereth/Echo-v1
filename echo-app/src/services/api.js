@@ -15,7 +15,7 @@ async function request(path, opts = {}) {
   });
   if (res.status === 401 && !path.startsWith('/auth')) {
     clearToken();
-    if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+    if (token && typeof window !== 'undefined' && window.location.pathname !== '/login') {
       window.location.assign('/login');
     }
     throw new Error('401: unauthorized');

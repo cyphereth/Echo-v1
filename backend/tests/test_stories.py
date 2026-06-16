@@ -170,3 +170,24 @@ def test_scheduler_calls_update_stories(monkeypatch):
     # exercise the per-brand post-collect block in isolation
     SCH._run_brand_pipeline(session=object(), brand_id=7, provider=None, tg_provider=None)
     assert calls == [7]
+
+
+def test_update_stories_flags_anomaly(monkeypatch):
+    import radar.stories as S
+    from radar.models import Story
+    s = _session()
+    base = datetime(2026, 6, 16, 0, 0, tzinfo=timezone.utc)
+    # 3 baseline hours: one positive mention each (low volume, positive tone)
+    for h in range(3):
+        _mk(s, post_id=f"b{h}", text="тема", author=f"@u{h}", tone="positive",
+            created_at=base + timedelta(hours=h, minutes=1))
+    # spike hour: 6 negative mentions (volume spike + sentiment drop)
+    for j in range(6):
+        _mk(s, post_id=f"s{j}", text="тема", author=f"@x{j}", tone="negative",
+            created_at=base + timedelta(hours=3, minutes=j))
+    s.commit()
+    # identical text -> identical vector -> one incident -> one story
+    monkeypatch.setattr(S.embeddings, "embed", _fake_embed({"тема": [1.0, 0.0, 0.0]}))
+    S.update_stories(s, brand_id=1)
+    st = s.query(Story).one()
+    assert st.is_anomaly is True

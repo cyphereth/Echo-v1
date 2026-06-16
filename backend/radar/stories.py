@@ -160,8 +160,10 @@ def update_stories(session: Session, brand_id: int) -> dict:
         incidents_touched.add(inc.id)
         stories_touched.add(st.id)
     session.flush()
+    from . import anomalies
     for sid in stories_touched:
         _recompute_points(session, sid)
+        anomalies.detect_anomaly(session, sid)
     session.commit()
     return {"mentions": len(new), "incidents": len(incidents_touched),
             "stories": len(stories_touched)}

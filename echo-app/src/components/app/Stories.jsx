@@ -68,7 +68,10 @@ export function StoriesScreen({ brand }) {
             className={s.id === selected ? styles.activeItem : styles.item}
             onClick={() => setSelected(s.id)}
           >
-            <div className={styles.title}>{s.title}</div>
+            <div className={styles.title}>
+              {s.is_anomaly && <span className={styles.warn} title="Аномалия">⚠ </span>}
+              {s.title}
+            </div>
             <div className={styles.sub}>{s.post_count} · {(s.avg_sentiment ?? 0).toFixed(2)}</div>
           </button>
         ))}

@@ -13,3 +13,5 @@
 .incidents li { padding: 6px 0; border-bottom: 1px solid #f3f4f6; font-size: 14px; }
 .incidents li span { color: #9ca3af; }
 .empty { color: #9ca3af; padding: 24px; }
+
+.warn { color: #ef4444; font-weight: 700; }

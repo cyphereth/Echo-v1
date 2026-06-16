@@ -11,6 +11,10 @@ from .spam import looks_like_ad_cheap
 
 log = logging.getLogger(__name__)
 
+# Niche = fresh engagement opportunities. Posts older than this are neither stored
+# (here) nor shown in the feed (api.inbox). Env-tunable; default 24h.
+NICHE_FRESH_HOURS = int(os.getenv("NICHE_FRESH_HOURS", "24"))
+
 # Russian morphology — lets domain terms match inflected forms ("ресторане",
 # "ресторанов" → "ресторан"). pymorphy3 is the Py3.11+ fork (pymorphy2 needs the
 # removed pkg_resources); fall back to exact matching if neither is importable.
@@ -164,7 +168,15 @@ def _upsert_mention(session: Session, post: Post, brand_id: int) -> Mention:
 def _store_niche_post(session: Session, brand_id: int, post: Post, spam: bool) -> bool:
     """Upsert a niche-source mention (store-but-hide when spam). Adds a snapshot and
     returns True only when the post counts toward pipeline volume (i.e. not spam).
-    Shared by collect_geo and collect_chats so the persist contract lives in one place."""
+    Shared by collect_geo, collect_chats and collect_web so the persist contract lives
+    in one place.
+
+    Niche posts are fresh-engagement opportunities, so anything older than
+    NICHE_FRESH_HOURS is skipped — the same freshness discipline collect_probe applies
+    (it drops posts >7 days), but tighter for the niche lane."""
+    created = post.created_at.replace(tzinfo=None) if post.created_at.tzinfo else post.created_at
+    if (_now().replace(tzinfo=None) - created) > timedelta(hours=NICHE_FRESH_HOURS):
+        return False  # stale niche post — useless for engagement, don't store
     mention = _upsert_mention(session, post, brand_id)
     mention.source = "niche"
     mention.is_spam = spam

@@ -1,0 +1,67 @@
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from datetime import datetime, timezone, timedelta
+
+
+def _mem():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as _S
+    from radar.models import Base
+    eng = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(eng)
+    return _S(eng)
+
+
+def _post(post_id, created_at, text="нишевый пост"):
+    from radar.providers.base import Post
+    return Post(post_id=post_id, platform="telegram", author="@ch", followers=0,
+                text=text, hashtags=[], created_at=created_at,
+                likes=0, views=0, comments=0, shares=0)
+
+
+def test_store_niche_post_skips_stale():
+    """Niche posts older than the freshness window must not be stored."""
+    import radar.collector as C
+    from radar.models import Brand, Mention
+    s = _mem()
+    s.add(Brand(id=1, name="b")); s.commit()
+    now = datetime.now(timezone.utc)
+    assert C._store_niche_post(s, 1, _post("fresh", now), spam=False) is True
+    assert C._store_niche_post(s, 1, _post("stale", now - timedelta(hours=48)), spam=False) is False
+    s.commit()
+    assert s.query(Mention).filter_by(post_id="fresh").count() == 1
+    assert s.query(Mention).filter_by(post_id="stale").count() == 0
+
+
+def test_inbox_hides_stale_niche_but_keeps_brand(monkeypatch, tmp_path):
+    """The feed must drop stale niche posts but keep brand mentions regardless of age."""
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path/'n.db'}")
+    import importlib
+    import radar.db as db; importlib.reload(db); db.init_db()
+    import radar.api as api; importlib.reload(api)
+    from fastapi.testclient import TestClient
+    from radar.models import Brand, User, Mention
+
+    s = db.get_session()
+    u = User(email="n@n.n", password_hash="x"); s.add(u); s.flush()
+    s.add(Brand(id=1, user_id=u.id, name="b")); s.flush()
+    now = datetime.now(timezone.utc)
+
+    def mk(pid, source, age_h, text):
+        s.add(Mention(brand_id=1, platform="telegram", post_id=pid, author="@a",
+                      text=text, source=source, lane="none", is_spam=False,
+                      created_at=now - timedelta(hours=age_h)))
+    mk("nf", "niche", 2,  "свежая ниша")
+    mk("ns", "niche", 48, "старая ниша")     # stale niche → must be hidden
+    mk("bo", "brand", 240, "старый бренд")    # old brand mention → must stay
+    s.commit()
+
+    api.app.dependency_overrides[api.current_user] = lambda: u
+    client = TestClient(api.app)
+    body = client.get("/inbox?brand_id=1").json()
+    texts = {c["text"] for c in body["pr"] + body["smm"]}
+    api.app.dependency_overrides.clear()
+
+    assert "свежая ниша" in texts
+    assert "старый бренд" in texts        # brand kept regardless of age
+    assert "старая ниша" not in texts     # stale niche hidden

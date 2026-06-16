@@ -873,6 +873,18 @@ def inbox(brand_id: int, include_hidden: int = 0, user: User = Depends(current_u
     if not include_hidden:
         q = q.filter(Mention.is_spam.is_(False))
     mentions = q.order_by(Mention.severity.desc()).all()
+    # Niche posts are fresh-engagement opportunities: hide stale ones so the niche
+    # feed stays current (brand/competitor mentions are kept regardless of age).
+    from .collector import NICHE_FRESH_HOURS
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=NICHE_FRESH_HOURS)
+
+    def _fresh_enough(m: Mention) -> bool:
+        if m.source != "niche":
+            return True
+        created = m.created_at if m.created_at.tzinfo else m.created_at.replace(tzinfo=timezone.utc)
+        return created >= cutoff
+
+    mentions = [m for m in mentions if _fresh_enough(m)]
     pr  = [_mention_card(m) for m in mentions if m.lane == "pr"]
     smm = [_mention_card(m) for m in mentions if m.lane in ("smm", "none")]
     return {"pr": pr, "smm": smm}

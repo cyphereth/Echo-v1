@@ -70,7 +70,7 @@ def test_collect_web_stores_relevant_dedup(monkeypatch):
     b = Brand(id=1, name="Бренд", keywords='["пожар"]', niche_keywords='["пожар"]')
     s.add(b); s.commit()
     prov = _FakeWeb([
-        {"title": "Пожар на заводе", "url": "https://news.ru/a", "content": "сильный пожар", "published": "2026-06-15"},
+        {"title": "Пожар на заводе", "url": "https://news.ru/a", "content": "сильный пожар", "published": None},  # no date → treated as fresh
         {"title": "Погода", "url": "https://news.ru/b", "content": "солнечно и тепло", "published": None},  # irrelevant → filtered
     ])
     n = C.collect_web(s, b, prov)

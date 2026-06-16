@@ -11,6 +11,7 @@ INTERVAL_QUIET  = 7200
 INTERVAL_CHATS  = 1800   # group-chat monitoring cadence (discover + search)
 ENABLE_DIGESTS      = os.getenv("ENABLE_DIGESTS", "0") == "1"   # opt-in; default OFF (no surprise paid LLM calls)
 INTERVAL_DIGEST     = int(os.getenv("DIGEST_INTERVAL_SEC", "86400"))  # once per ~24h
+INTERVAL_WEB    = int(os.getenv("INTERVAL_WEB", "3600"))   # web-source cadence
 NIGHT_START_UTC = 21
 NIGHT_END_UTC   = 6
 NIGHT_MULTIPLIER = 2.0
@@ -53,6 +54,26 @@ def _run_brand_pipeline(session, brand_id, provider, tg_provider):
         log.exception("update_stories failed for brand %s (story layer skipped)", brand_id)
 
 
+def _run_web_pass(session, web_provider):
+    """Search the web per auto-collect brand and feed results into the pipeline."""
+    import radar.collector as _collector
+    import radar.pipeline as _pipeline
+    import radar.stories as _stories
+    from .models import Brand
+    for b in session.query(Brand).filter(Brand.auto_collect.is_(True)).all():
+        try:
+            n = _collector.collect_web(session, b, web_provider)
+        except Exception:
+            log.exception("collect_web failed for brand %s", b.id)
+            continue
+        if n:
+            try:
+                _pipeline.classify_and_draft(session, b.id)
+                _stories.update_stories(session, b.id)
+            except Exception:
+                log.exception("web pipeline failed for brand %s", b.id)
+
+
 def _run_digest_pass(session):
     """Generate a daily digest for each auto-collect brand. Best-effort."""
     import radar.digests as _digests
@@ -81,9 +102,10 @@ def adaptive_interval(probe: Probe, new_mentions: int) -> int:
     return interval + jitter
 
 class Scheduler:
-    def __init__(self, provider, tick_sec: int = 60, tg_provider=None):
+    def __init__(self, provider, tick_sec: int = 60, tg_provider=None, web_provider=None):
         self._provider     = provider
         self._tg_provider  = tg_provider   # routes platform="telegram" probes; None = skip them
+        self._web_provider = web_provider
         self._tick_sec     = tick_sec
         self._bucket       = TokenBucket()
         self._running      = False
@@ -91,6 +113,7 @@ class Scheduler:
         self._last_hotwatch = 0.0
         self._last_chats    = 0.0
         self._last_digest   = 0.0
+        self._last_web      = 0.0
         self._chats_thread  = None   # background worker for the chat-monitoring pass
 
     def start(self):
@@ -164,6 +187,7 @@ class Scheduler:
             # Group-chat monitoring on its own (slower) cadence.
             self._maybe_collect_chats(session)
             self._maybe_daily_digest(session)
+            self._maybe_collect_web(session)
         finally:
             session.close()
 
@@ -188,6 +212,14 @@ class Scheduler:
             return
         self._last_digest = time.monotonic()
         _run_digest_pass(session)
+
+    def _maybe_collect_web(self, session):
+        if self._web_provider is None:
+            return
+        if time.monotonic() - self._last_web < INTERVAL_WEB:
+            return
+        self._last_web = time.monotonic()
+        _run_web_pass(session, self._web_provider)
 
     def _collect_chats_worker(self):
         session = get_session()

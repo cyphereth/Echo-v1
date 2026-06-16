@@ -82,8 +82,12 @@ def on_startup():
     global _scheduler
     if os.getenv("ENABLE_SCHEDULER", "1") == "1" and _scheduler is None:
         from .scheduler import Scheduler
+        web_provider = None
+        if os.getenv("WEB_SEARCH_API_KEY"):
+            from .providers.web import WebSearchProvider
+            web_provider = WebSearchProvider()
         _scheduler = Scheduler(_get_provider(), tick_sec=int(os.getenv("SCHEDULER_TICK_SEC", "60")),
-                               tg_provider=_get_tg_provider())
+                               tg_provider=_get_tg_provider(), web_provider=web_provider)
         _scheduler.start()
         log.info("Auto-collect scheduler started (tick=%ss)", _scheduler._tick_sec)
 

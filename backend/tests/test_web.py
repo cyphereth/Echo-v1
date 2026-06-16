@@ -82,3 +82,17 @@ def test_collect_web_stores_relevant_dedup(monkeypatch):
     # second run = dedup (same URL) → no new rows
     C.collect_web(s, b, prov)
     assert s.query(Mention).filter_by(platform="web").count() == 1
+
+
+def test_run_web_pass_collects_for_autocollect_brands(monkeypatch):
+    import radar.scheduler as SCH
+    from radar.models import Brand
+    s = _mem()
+    s.add(Brand(id=1, name="a", auto_collect=True))
+    s.add(Brand(id=2, name="b", auto_collect=False))   # excluded
+    s.commit()
+    calls = []
+    monkeypatch.setattr("radar.collector.collect_web",
+                        lambda sess, brand, prov: calls.append(brand.id) or 0)
+    SCH._run_web_pass(s, web_provider=object())
+    assert calls == [1]

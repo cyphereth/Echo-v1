@@ -1,7 +1,8 @@
 from __future__ import annotations
-import json, logging, os, re
+import hashlib, json, logging, os, re
 from functools import lru_cache
 from datetime import datetime, timezone, timedelta
+from urllib.parse import urlparse
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from .models import Brand, Mention, MentionSnapshot, Probe
@@ -175,6 +176,56 @@ def _store_niche_post(session: Session, brand_id: int, post: Post, spam: bool) -
         comments=post.comments, shares=post.shares,
     ))
     return True
+
+def _web_query(brand: Brand) -> str:
+    parts = [brand.name] + brand.keywords_list()[:5]
+    return " ".join(p for p in parts if p).strip() or brand.name
+
+
+def _domain(url: str) -> str:
+    try:
+        return urlparse(url).netloc or "web"
+    except Exception:
+        return "web"
+
+
+def _web_published(value) -> datetime:
+    if value:
+        for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(value[:len(fmt) + 2], fmt).replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                continue
+    return _now()
+
+
+def collect_web(session: Session, brand: Brand, provider) -> int:
+    """Search the web for the brand's topic and store relevant results as web mentions.
+
+    Reuses the niche-mention storage + relevance gate. Dedup is by (platform, post_id)
+    where post_id = sha1(url). Returns the count of relevant results stored this pass.
+    """
+    results = provider.search(_web_query(brand))
+    terms = _brand_terms(brand)
+    n = 0
+    for r in results:
+        url = r.get("url")
+        if not url:
+            continue
+        text = f"{r.get('title', '')}. {r.get('content', '')}".strip()
+        if terms and not _term_hit(text, terms):
+            continue  # off-topic — skip (no relevance terms → keep all)
+        post = Post(
+            post_id=hashlib.sha1(url.encode()).hexdigest()[:16],
+            platform="web", author=_domain(url), followers=0,
+            text=text, hashtags=[], created_at=_web_published(r.get("published")),
+            likes=0, views=0, comments=0, shares=0,
+        )
+        if _store_niche_post(session, brand.id, post, spam=False):
+            n += 1
+    session.commit()
+    return n
+
 
 def collect_probe(session: Session, probe: Probe, provider: SearchProvider) -> int:
     brand = session.get(Brand, probe.brand_id)

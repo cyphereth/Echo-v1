@@ -44,3 +44,41 @@ def test_web_search_empty_on_http_error(monkeypatch):
     def _boom(*a, **k): raise RuntimeError("network down")
     monkeypatch.setattr(W.httpx, "post", _boom)
     assert W.WebSearchProvider().search("x") == []
+
+
+from datetime import datetime, timezone
+
+
+def _mem():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as _S
+    from radar.models import Base
+    eng = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(eng)
+    return _S(eng)
+
+
+class _FakeWeb:
+    def __init__(self, rows): self.rows = rows
+    def search(self, query, max_results=None): return self.rows
+
+
+def test_collect_web_stores_relevant_dedup(monkeypatch):
+    import radar.collector as C
+    from radar.models import Brand, Mention
+    s = _mem()
+    b = Brand(id=1, name="Бренд", keywords='["пожар"]', niche_keywords='["пожар"]')
+    s.add(b); s.commit()
+    prov = _FakeWeb([
+        {"title": "Пожар на заводе", "url": "https://news.ru/a", "content": "сильный пожар", "published": "2026-06-15"},
+        {"title": "Погода", "url": "https://news.ru/b", "content": "солнечно и тепло", "published": None},  # irrelevant → filtered
+    ])
+    n = C.collect_web(s, b, prov)
+    assert n == 1
+    rows = s.query(Mention).filter_by(platform="web").all()
+    assert len(rows) == 1
+    assert rows[0].author == "news.ru"     # domain
+    assert rows[0].source == "niche"
+    # second run = dedup (same URL) → no new rows
+    C.collect_web(s, b, prov)
+    assert s.query(Mention).filter_by(platform="web").count() == 1

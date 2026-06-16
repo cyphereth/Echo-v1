@@ -23,8 +23,10 @@ class WebSearchProvider:
         try:
             resp = httpx.post(
                 WEB_SEARCH_URL,
+                # topic="general" (default) searches the whole web, not just news;
+                # advanced depth pulls fuller content per result.
                 json={"api_key": WEB_SEARCH_API_KEY, "query": query,
-                      "search_depth": "basic", "topic": "news",
+                      "search_depth": "advanced", "topic": "general",
                       "max_results": max_results or WEB_MAX_RESULTS},
                 timeout=60,
             )

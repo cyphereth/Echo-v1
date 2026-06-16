@@ -66,6 +66,7 @@ class _FakeWeb:
 def test_collect_web_stores_relevant_dedup(monkeypatch):
     import radar.collector as C
     from radar.models import Brand, Mention
+    from radar.scope import scope_for_brand
     s = _mem()
     b = Brand(id=1, name="Бренд", keywords='["пожар"]', niche_keywords='["пожар"]')
     s.add(b); s.commit()
@@ -73,14 +74,14 @@ def test_collect_web_stores_relevant_dedup(monkeypatch):
         {"title": "Пожар на заводе", "url": "https://news.ru/a", "content": "сильный пожар", "published": None},  # no date → treated as fresh
         {"title": "Погода", "url": "https://news.ru/b", "content": "солнечно и тепло", "published": None},  # irrelevant → filtered
     ])
-    n = C.collect_web(s, b, prov)
+    n = C.collect_web(s, scope_for_brand(b), prov)
     assert n == 1
     rows = s.query(Mention).filter_by(platform="web").all()
     assert len(rows) == 1
     assert rows[0].author == "news.ru"     # domain
     assert rows[0].source == "niche"
     # second run = dedup (same URL) → no new rows
-    C.collect_web(s, b, prov)
+    C.collect_web(s, scope_for_brand(b), prov)
     assert s.query(Mention).filter_by(platform="web").count() == 1
 
 

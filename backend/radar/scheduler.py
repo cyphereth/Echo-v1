@@ -60,9 +60,10 @@ def _run_web_pass(session, web_provider):
     import radar.pipeline as _pipeline
     import radar.stories as _stories
     from .models import Brand
+    from .scope import scope_for_brand
     for b in session.query(Brand).filter(Brand.auto_collect.is_(True)).all():
         try:
-            n = _collector.collect_web(session, b, web_provider)
+            n = _collector.collect_web(session, scope_for_brand(b), web_provider)
         except Exception:
             log.exception("collect_web failed for brand %s", b.id)
             continue

@@ -38,3 +38,19 @@ def test_scope_owner_kwargs_and_keywords():
     sb = scope_for_brand(b); st = scope_for_topic(t)
     assert sb.kind == "brand" and sb.owner_kwargs() == {"brand_id": 1} and "k1" in sb.keywords
     assert st.kind == "topic" and st.owner_kwargs() == {"topic_id": 1} and "n2" in st.niche_keywords
+
+
+def test_collect_web_by_topic():
+    import radar.collector as C
+    from radar.scope import scope_for_topic
+    from radar.models import Topic, Mention
+    s = _mem()
+    t = Topic(id=1, name="Военное", keywords='["удар"]', niche_keywords='["удар"]', kind="default")
+    s.add(t); s.commit()
+    class _W:
+        def search(self, q, max_results=None):
+            return [{"title":"Удар по складу","url":"https://n.ru/a","content":"удар дрона","published":None}]
+    n = C.collect_web(s, scope_for_topic(t), _W())
+    assert n == 1
+    m = s.query(Mention).filter_by(platform="web").one()
+    assert m.topic_id == 1 and m.brand_id is None

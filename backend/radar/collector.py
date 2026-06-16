@@ -7,6 +7,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from .models import Brand, Mention, MentionSnapshot, Probe
 from .providers.base import Post, SearchProvider
+from .scope import Scope, scope_for_brand
 from .spam import looks_like_ad_cheap
 
 log = logging.getLogger(__name__)
@@ -143,10 +144,11 @@ def _matches(post: Post, brand: Brand, probe: Probe) -> bool:
             return False
     return True
 
-def _upsert_mention(session: Session, post: Post, brand_id: int) -> Mention:
+def _upsert_mention(session: Session, post: Post, scope: Scope) -> Mention:
     stmt = (
         sqlite_insert(Mention).values(
-            brand_id=brand_id, platform=post.platform, post_id=post.post_id,
+            **scope.owner_kwargs(),
+            platform=post.platform, post_id=post.post_id,
             author=post.author, followers=post.followers, text=post.text,
             hashtags=json.dumps(post.hashtags), sound_id=post.sound_id,
             created_at=post.created_at, likes=post.likes, views=post.views,
@@ -165,7 +167,7 @@ def _upsert_mention(session: Session, post: Post, brand_id: int) -> Mention:
     return session.query(Mention).filter_by(platform=post.platform, post_id=post.post_id).one()
 
 
-def _store_niche_post(session: Session, brand_id: int, post: Post, spam: bool) -> bool:
+def _store_niche_post(session: Session, scope: Scope, post: Post, spam: bool) -> bool:
     """Upsert a niche-source mention (store-but-hide when spam). Adds a snapshot and
     returns True only when the post counts toward pipeline volume (i.e. not spam).
     Shared by collect_geo, collect_chats and collect_web so the persist contract lives
@@ -177,7 +179,7 @@ def _store_niche_post(session: Session, brand_id: int, post: Post, spam: bool) -
     created = post.created_at.replace(tzinfo=None) if post.created_at.tzinfo else post.created_at
     if (_now().replace(tzinfo=None) - created) > timedelta(hours=NICHE_FRESH_HOURS):
         return False  # stale niche post — useless for engagement, don't store
-    mention = _upsert_mention(session, post, brand_id)
+    mention = _upsert_mention(session, post, scope)
     mention.source = "niche"
     mention.is_spam = spam
     if spam:
@@ -189,9 +191,13 @@ def _store_niche_post(session: Session, brand_id: int, post: Post, spam: bool) -
     ))
     return True
 
+def _web_query_terms(name: str, keywords: list[str]) -> str:
+    parts = [name] + keywords[:5]
+    return " ".join(p for p in parts if p).strip() or name
+
+
 def _web_query(brand: Brand) -> str:
-    parts = [brand.name] + brand.keywords_list()[:5]
-    return " ".join(p for p in parts if p).strip() or brand.name
+    return _web_query_terms(brand.name, brand.keywords_list())
 
 
 def _domain(url: str) -> str:
@@ -211,14 +217,15 @@ def _web_published(value) -> datetime:
     return _now()
 
 
-def collect_web(session: Session, brand: Brand, provider) -> int:
-    """Search the web for the brand's topic and store relevant results as web mentions.
+def collect_web(session: Session, scope: Scope, provider) -> int:
+    """Search the web for the scope's topic and store relevant results as web mentions.
 
-    Reuses the niche-mention storage + relevance gate. Dedup is by (platform, post_id)
-    where post_id = sha1(url). Returns the count of relevant results stored this pass.
+    Accepts a Scope (brand or topic). Reuses the niche-mention storage + relevance gate.
+    Dedup is by (platform, post_id) where post_id = sha1(url). Returns the count of
+    relevant results stored this pass.
     """
-    results = provider.search(_web_query(brand))
-    terms = _brand_terms(brand)
+    results = provider.search(_web_query_terms(scope.name, scope.keywords))
+    terms = [t.lower() for t in scope.niche_keywords if t]
     n = 0
     for r in results:
         url = r.get("url")
@@ -233,7 +240,7 @@ def collect_web(session: Session, brand: Brand, provider) -> int:
             text=text, hashtags=[], created_at=_web_published(r.get("published")),
             likes=0, views=0, comments=0, shares=0,
         )
-        if _store_niche_post(session, brand.id, post, spam=False):
+        if _store_niche_post(session, scope, post, spam=False):
             n += 1
     session.commit()
     return n
@@ -242,6 +249,7 @@ def collect_web(session: Session, brand: Brand, provider) -> int:
 def collect_probe(session: Session, probe: Probe, provider: SearchProvider) -> int:
     brand = session.get(Brand, probe.brand_id)
     if not brand: return 0
+    brand_scope = scope_for_brand(brand)
     new_watermark = None
     count         = 0
     cursor        = None
@@ -261,7 +269,7 @@ def collect_probe(session: Session, probe: Probe, provider: SearchProvider) -> i
                 # Cheap ad/spam rules + tiny-account floor → store-but-hide.
                 spam = looks_like_ad_cheap(post.text, post.author, post.hashtags) \
                     or _below_follower_floor(post, getattr(brand, "local_mode", False))
-                mention = _upsert_mention(session, post, brand.id)
+                mention = _upsert_mention(session, post, brand_scope)
                 mention.source = probe.source
                 mention.competitor = probe.label if probe.source == "competitor" else None
                 mention.is_spam = spam
@@ -303,6 +311,7 @@ def collect_geo(session: Session, brand: Brand, provider: SearchProvider) -> int
         t = text.lower()
         return any(term in t for term in terms) or any(w in t for w in sphere_words)
 
+    brand_scope = scope_for_brand(brand)
     count = 0
     try:
         posts = provider.fetch_location_posts(city, "instagram", limit=15)
@@ -317,7 +326,7 @@ def collect_geo(session: Session, brand: Brand, provider: SearchProvider) -> int
             # client's lifestyle post won't contain a literal niche word).
             if not spam and not local and not _on_topic(post.text):
                 spam = True
-            if _store_niche_post(session, brand.id, post, spam):
+            if _store_niche_post(session, brand_scope, post, spam):
                 count += 1
         session.commit()
     except Exception:
@@ -477,6 +486,7 @@ def collect_chats(session: Session, brand: Brand, provider) -> int:
     def _topical(text: str) -> bool:
         return _term_hit(text, terms)
 
+    brand_scope = scope_for_brand(brand)
     count = 0
     for probe in chats:
         handle = probe.query
@@ -508,7 +518,7 @@ def collect_chats(session: Session, brand: Brand, provider) -> int:
                     # is full of "ага"/"спасибо" noise we don't want as mentions.
                     if not spam and not (_topical(post.text) or _looks_like_intent(post.text)):
                         spam = True
-                    if _store_niche_post(session, brand.id, post, spam):
+                    if _store_niche_post(session, brand_scope, post, spam):
                         count += 1
             session.commit()
         except Exception:

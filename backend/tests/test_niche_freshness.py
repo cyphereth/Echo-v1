@@ -23,11 +23,13 @@ def test_store_niche_post_skips_stale():
     """Niche posts older than the freshness window must not be stored."""
     import radar.collector as C
     from radar.models import Brand, Mention
+    from radar.scope import scope_for_brand
     s = _mem()
-    s.add(Brand(id=1, name="b")); s.commit()
+    b = Brand(id=1, name="b"); s.add(b); s.commit()
+    scope = scope_for_brand(b)
     now = datetime.now(timezone.utc)
-    assert C._store_niche_post(s, 1, _post("fresh", now), spam=False) is True
-    assert C._store_niche_post(s, 1, _post("stale", now - timedelta(hours=48)), spam=False) is False
+    assert C._store_niche_post(s, scope, _post("fresh", now), spam=False) is True
+    assert C._store_niche_post(s, scope, _post("stale", now - timedelta(hours=48)), spam=False) is False
     s.commit()
     assert s.query(Mention).filter_by(post_id="fresh").count() == 1
     assert s.query(Mention).filter_by(post_id="stale").count() == 0

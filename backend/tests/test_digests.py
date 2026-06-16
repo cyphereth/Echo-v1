@@ -3,6 +3,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from datetime import datetime, timezone, timedelta
 
 
+def _brand1_scope(s):
+    from radar.models import Brand
+    from radar.scope import scope_for_brand
+    b = s.get(Brand, 1)
+    if b is None:
+        b = Brand(id=1, name="TestBrand", keywords='[]', niche_keywords='[]')
+        s.add(b); s.flush()
+    return scope_for_brand(b)
+
+
 def _mem():
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session as _S
@@ -47,7 +57,7 @@ def test_build_daily_digest_creates_report(monkeypatch):
         return "СВОДКА: всё под контролем."
     monkeypatch.setattr(D.llm, "complete", _fake_complete)
 
-    report = D.build_daily_digest(s, brand_id=1)
+    report = D.build_daily_digest(s, _brand1_scope(s))
     assert report is not None
     assert report.kind == "digest"
     assert report.body == "СВОДКА: всё под контролем."
@@ -60,7 +70,7 @@ def test_build_daily_digest_none_when_no_stories(monkeypatch):
     import radar.digests as D
     s = _mem()
     monkeypatch.setattr(D.llm, "complete", lambda *a, **k: "x")
-    assert D.build_daily_digest(s, brand_id=1) is None
+    assert D.build_daily_digest(s, _brand1_scope(s)) is None
 
 
 def test_run_digest_pass_calls_builder_for_autocollect_brands(monkeypatch):
@@ -74,6 +84,6 @@ def test_run_digest_pass_calls_builder_for_autocollect_brands(monkeypatch):
 
     called = []
     monkeypatch.setattr("radar.digests.build_daily_digest",
-                        lambda sess, bid: called.append(bid) or None)
+                        lambda sess, scope: called.append(scope.id) or None)
     SCH._run_digest_pass(s)
     assert sorted(called) == [1, 3]

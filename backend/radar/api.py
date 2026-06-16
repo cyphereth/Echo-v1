@@ -1326,11 +1326,12 @@ def explore_cities(user: User = Depends(current_user), session: Session = Depend
 
 @app.post("/brands/{brand_id}/digest", response_model=ReportOut)
 def create_digest(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
-    _owned_brand(session, brand_id, user)
+    brand = _owned_brand(session, brand_id, user)
     from .digests import build_daily_digest
     from .llm import LLMNotConfigured
+    from .scope import scope_for_brand
     try:
-        report = build_daily_digest(session, brand_id)
+        report = build_daily_digest(session, scope_for_brand(brand))
     except LLMNotConfigured:
         raise HTTPException(503, "Digest generation unavailable — set LLM_API_KEY in backend/.env")
     if report is None:
@@ -1396,6 +1397,7 @@ def get_story(story_id: int, user: User = Depends(current_user), session: Sessio
 
 @app.post("/stories/recompute")
 def recompute_stories(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
-    _owned_brand(session, brand_id, user)
+    brand = _owned_brand(session, brand_id, user)
     from .stories import update_stories
-    return update_stories(session, brand_id)
+    from .scope import scope_for_brand
+    return update_stories(session, scope_for_brand(brand))

@@ -11,6 +11,18 @@ def _mem():
     return _S(eng)
 
 
+def _mem_with_vec():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as _S
+    from radar.models import Base
+    from radar import vec
+    eng = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(eng)
+    with eng.begin() as conn:
+        vec.create_vec_tables(conn)
+    return _S(eng)
+
+
 def test_topic_and_topic_id_columns():
     from radar.models import Topic, Mention, Story
     from datetime import datetime, timezone
@@ -54,3 +66,27 @@ def test_collect_web_by_topic():
     assert n == 1
     m = s.query(Mention).filter_by(platform="web").one()
     assert m.topic_id == 1 and m.brand_id is None
+
+
+def test_stories_and_digest_by_topic(monkeypatch):
+    import numpy as np
+    import radar.stories as S, radar.digests as D
+    from radar.scope import scope_for_topic
+    from radar.models import Topic, Mention, Story, Report
+    from datetime import datetime, timezone, timedelta
+    s = _mem_with_vec()
+    t = Topic(id=1, name="Эконом", keywords='["рубль"]', niche_keywords='["рубль"]', kind="default")
+    s.add(t); s.flush()
+    base = datetime.now(timezone.utc)
+    for i in range(2):
+        s.add(Mention(topic_id=1, platform="web", post_id=f"p{i}", author="a",
+                      text="рубль падает", source="niche", tone="negative",
+                      created_at=base - timedelta(minutes=i)))
+    s.commit()
+    monkeypatch.setattr(S.embeddings, "embed",
+        lambda texts: np.tile(np.array([1.0,0,0]+[0]*381, dtype="float32"), (len(texts),1)))
+    S.update_stories(s, scope_for_topic(t))
+    assert s.query(Story).filter_by(topic_id=1).count() >= 1
+    monkeypatch.setattr(D.llm, "complete", lambda *a, **k: "сводка")
+    rep = D.build_daily_digest(s, scope_for_topic(t))
+    assert rep is not None and rep.topic_id == 1

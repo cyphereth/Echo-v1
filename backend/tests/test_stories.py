@@ -24,12 +24,26 @@ def _session():
 
 
 def _mk(s, **kw):
-    from radar.models import Mention
+    from radar.models import Mention, Brand
+    # ensure brand 1 exists (idempotent)
+    if not s.get(Brand, 1):
+        s.add(Brand(id=1, name="TestBrand", keywords='[]', niche_keywords='[]'))
+        s.flush()
     d = dict(brand_id=1, platform="telegram", post_id="p", author="@a",
              text="t", source="niche", is_spam=False,
              created_at=datetime.now(timezone.utc))
     d.update(kw)
     m = Mention(**d); s.add(m); s.flush(); return m
+
+
+def _brand1_scope(s):
+    from radar.models import Brand
+    from radar.scope import scope_for_brand
+    b = s.get(Brand, 1)
+    if b is None:
+        b = Brand(id=1, name="TestBrand", keywords='[]', niche_keywords='[]')
+        s.add(b); s.flush()
+    return scope_for_brand(b)
 
 
 def _fake_embed(mapping):
@@ -106,7 +120,7 @@ def test_dedup_collapses_near_duplicates(monkeypatch):
         "пожар завод дубль": [0.99, 0.01, 0.0],   # near-duplicate of m1
         "концерт в парке":   [0.0, 1.0, 0.0],     # different
     }))
-    S.update_stories(s, brand_id=1)
+    S.update_stories(s, _brand1_scope(s))
     s.refresh(m1); s.refresh(m2); s.refresh(m3)
     assert m1.incident_id == m2.incident_id          # collapsed
     assert m3.incident_id != m1.incident_id          # separate incident
@@ -128,7 +142,7 @@ def test_incidents_link_into_one_story(monkeypatch):
         "скандал день1": [1.0, 0.0, 0.0],
         "скандал день2": [0.82, 0.57, 0.0],   # cos≈0.82: new incident, same story
     }))
-    S.update_stories(s, brand_id=1)
+    S.update_stories(s, _brand1_scope(s))
     stories = s.query(Story).all()
     assert len(stories) == 1
     assert stories[0].post_count == 2
@@ -149,7 +163,7 @@ def test_recompute_points_buckets_by_hour(monkeypatch):
         "тема x две": [0.999, 0.01, 0.0],
         "тема x три": [0.999, 0.0, 0.01],
     }))
-    S.update_stories(s, brand_id=1)
+    S.update_stories(s, _brand1_scope(s))
     pts = s.query(StoryPoint).order_by(StoryPoint.bucket_start).all()
     assert len(pts) == 2
     assert pts[0].mention_count == 2
@@ -161,15 +175,21 @@ def test_recompute_points_buckets_by_hour(monkeypatch):
 
 def test_scheduler_calls_update_stories(monkeypatch):
     import radar.scheduler as SCH
+    from radar.models import Brand
+    from radar.scope import Scope
     calls = []
     monkeypatch.setattr("radar.stories.update_stories",
-                        lambda sess, bid: calls.append(bid) or {})
+                        lambda sess, scope: calls.append(scope) or {})
     monkeypatch.setattr("radar.pipeline.classify_and_draft", lambda sess, bid: {})
     monkeypatch.setattr("radar.pipeline.fetch_new_comments",
                         lambda sess, bid, p, t: 0)
+    # Provide a real session with brand 7 so scope_for_brand can build a scope.
+    s = _session()
+    s.add(Brand(id=7, name="TestBrand7", keywords='[]', niche_keywords='[]'))
+    s.commit()
     # exercise the per-brand post-collect block in isolation
-    SCH._run_brand_pipeline(session=object(), brand_id=7, provider=None, tg_provider=None)
-    assert calls == [7]
+    SCH._run_brand_pipeline(session=s, brand_id=7, provider=None, tg_provider=None)
+    assert len(calls) == 1 and isinstance(calls[0], Scope) and calls[0].id == 7
 
 
 def test_update_stories_flags_anomaly(monkeypatch):
@@ -188,6 +208,6 @@ def test_update_stories_flags_anomaly(monkeypatch):
     s.commit()
     # identical text -> identical vector -> one incident -> one story
     monkeypatch.setattr(S.embeddings, "embed", _fake_embed({"тема": [1.0, 0.0, 0.0]}))
-    S.update_stories(s, brand_id=1)
+    S.update_stories(s, _brand1_scope(s))
     st = s.query(Story).one()
     assert st.is_anomaly is True

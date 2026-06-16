@@ -1,4 +1,4 @@
-import logging, os, random, time, threading
+﻿import logging, os, random, time, threading
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from .db import get_session
@@ -12,6 +12,7 @@ INTERVAL_CHATS  = 1800   # group-chat monitoring cadence (discover + search)
 ENABLE_DIGESTS      = os.getenv("ENABLE_DIGESTS", "0") == "1"   # opt-in; default OFF (no surprise paid LLM calls)
 INTERVAL_DIGEST     = int(os.getenv("DIGEST_INTERVAL_SEC", "86400"))  # once per ~24h
 INTERVAL_WEB    = int(os.getenv("INTERVAL_WEB", "3600"))   # web-source cadence
+INTERVAL_NEWS   = int(os.getenv("INTERVAL_NEWS", "900"))   # independent news-intel cadence
 NIGHT_START_UTC = 21
 NIGHT_END_UTC   = 6
 NIGHT_MULTIPLIER = 2.0
@@ -74,6 +75,21 @@ def _run_web_pass(session, web_provider):
                 log.exception("web pipeline failed for brand %s", b.id)
 
 
+def _run_news_pass(session, tg_provider=None):
+    """Collect independent news-intelligence topics. Best-effort and public-mode safe."""
+    import radar.news as _news
+    from .models import NewsTopic
+    _news.ensure_default_topics(session)
+    topics = session.query(NewsTopic).filter(NewsTopic.status == "active").all()
+    for topic in topics:
+        try:
+            result = _news.collect_topic(topic.id, tg_provider=tg_provider)
+            if result.get("added"):
+                log.info("News pass: topic=%s added=%s", topic.id, result["added"])
+        except Exception:
+            log.exception("News pass failed for topic %s", topic.id)
+
+
 def _run_digest_pass(session):
     """Generate a daily digest for each auto-collect brand. Best-effort."""
     import radar.digests as _digests
@@ -114,6 +130,7 @@ class Scheduler:
         self._last_chats    = 0.0
         self._last_digest   = 0.0
         self._last_web      = 0.0
+        self._last_news     = 0.0
         self._chats_thread  = None   # background worker for the chat-monitoring pass
 
     def start(self):
@@ -188,6 +205,7 @@ class Scheduler:
             self._maybe_collect_chats(session)
             self._maybe_daily_digest(session)
             self._maybe_collect_web(session)
+            self._maybe_collect_news(session)
         finally:
             session.close()
 
@@ -220,6 +238,14 @@ class Scheduler:
             return
         self._last_web = time.monotonic()
         _run_web_pass(session, self._web_provider)
+
+    def _maybe_collect_news(self, session):
+        if self._web_provider is None:
+            return
+        if time.monotonic() - self._last_news < INTERVAL_NEWS:
+            return
+        self._last_news = time.monotonic()
+        _run_news_pass(session, tg_provider=self._tg_provider)
 
     def _collect_chats_worker(self):
         session = get_session()
@@ -255,3 +281,4 @@ class Scheduler:
                 log.info("Hot-watch re-polled %d mention(s)", n)
         except Exception:
             log.exception("Hot-watch tick failed")
+

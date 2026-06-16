@@ -1,4 +1,4 @@
-const TOKEN_KEY = 'echo_token';
+﻿const TOKEN_KEY = 'echo_token';
 export const getToken   = () => localStorage.getItem(TOKEN_KEY);
 export const setToken   = (t) => localStorage.setItem(TOKEN_KEY, t);
 export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
@@ -114,3 +114,12 @@ export const getStory   = (id)      => request(`/stories/${id}`);
 
 export const getDigests   = (brandId) => request(`/brands/${brandId}/digests`);
 export const createDigest = (brandId) => request(`/brands/${brandId}/digest`, { method: 'POST' });
+
+export const getNewsTopics  = () => request('/news/topics');
+export const createNewsTopic = (name, query = '', description = '') =>
+  request('/news/topics', { method: 'POST', body: JSON.stringify({ name, query, description }) });
+export const getNewsSummary = (topicId) => request(`/news/summary${topicId ? `?topic_id=${topicId}` : ''}`);
+export const getNewsEvents  = (topicId, q = '') =>
+  request(`/news/events?${new URLSearchParams({ ...(topicId ? { topic_id: String(topicId) } : {}), ...(q ? { q } : {}) })}`);
+export const collectNews = (topicId) => request(`/news/collect?topic_id=${topicId}`, { method: 'POST' });
+

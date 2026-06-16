@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Optional
@@ -174,6 +174,38 @@ class CityReport(Base):
     created_at:   Mapped[datetime] = mapped_column(default=_now)
 
 
+class NewsTopic(Base):
+    """Independent news-intelligence topic, not tied to a brand or user."""
+    __tablename__ = "news_topics"
+    id:          Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name:        Mapped[str]      = mapped_column(Text, unique=True, nullable=False)
+    query:       Mapped[str]      = mapped_column(Text, default="")
+    description: Mapped[str]      = mapped_column(Text, default="")
+    status:      Mapped[str]      = mapped_column(Text, default="active")  # active | paused
+    created_at:  Mapped[datetime] = mapped_column(default=_now)
+
+
+class NewsEvent(Base):
+    """A normalized signal/event collected for a news topic."""
+    __tablename__ = "news_events"
+    __table_args__ = (UniqueConstraint("topic_id", "source_url"),)
+    id:          Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
+    topic_id:    Mapped[int]      = mapped_column(ForeignKey("news_topics.id"))
+    event_type:  Mapped[str]      = mapped_column(Text, default="signal")
+    zone:        Mapped[str]      = mapped_column(Text, default="")
+    title:       Mapped[str]      = mapped_column(Text, default="")
+    text:        Mapped[str]      = mapped_column(Text, default="")
+    source:      Mapped[str]      = mapped_column(Text, default="")
+    source_url:  Mapped[str]      = mapped_column(Text, default="")
+    source_count: Mapped[int]     = mapped_column(Integer, default=1)
+    confidence:  Mapped[float]    = mapped_column(Float, default=0.5)
+    severity:    Mapped[float]    = mapped_column(Float, default=0.0)
+    lat:         Mapped[Optional[float]] = mapped_column(Float)
+    lon:         Mapped[Optional[float]] = mapped_column(Float)
+    occurred_at: Mapped[datetime] = mapped_column(nullable=False)
+    created_at:  Mapped[datetime] = mapped_column(default=_now)
+
+
 class Incident(Base):
     __tablename__ = "incidents"
     id:            Mapped[int]           = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -220,3 +252,4 @@ class Report(Base):
     kind:       Mapped[str]           = mapped_column(Text, default="digest")  # digest | story | alert
     body:       Mapped[str]           = mapped_column(Text, default="")
     created_at: Mapped[datetime]      = mapped_column(default=_now)
+

@@ -1,4 +1,4 @@
-"""Seed: create demo account only. No brands, no mentions."""
+﻿"""Seed: create demo account only. No brands, no mentions."""
 from __future__ import annotations
 from sqlalchemy.orm import Session
 from .models import Brand, User
@@ -9,8 +9,13 @@ DEMO_PASSWORD = "demo12345"
 
 
 def run(session: Session) -> None:
-    """No-op: mock data removed. Real data comes from live collection."""
-    pass
+    """Startup hooks that must run after FastAPI app exists."""
+    from .api import app, _get_tg_provider
+    from .news import router as news_router
+    app.state.get_tg_provider = _get_tg_provider
+    if not getattr(app.state, "news_router_registered", False):
+        app.include_router(news_router)
+        app.state.news_router_registered = True
 
 
 def ensure_demo_user(session: Session) -> User:
@@ -24,3 +29,4 @@ def ensure_demo_user(session: Session) -> User:
         b.user_id = user.id
     session.commit()
     return user
+

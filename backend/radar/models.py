@@ -51,10 +51,26 @@ class Brand(Base):
     def tg_channels_list(self):    return json.loads(self.tg_channels or "[]")
     def tone_examples_list(self):  return json.loads(self.tone_examples or "[]")
 
+class Topic(Base):
+    __tablename__ = "topics"
+    id:             Mapped[int]           = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id:        Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"))  # NULL = global default
+    name:           Mapped[str]           = mapped_column(Text, nullable=False)
+    keywords:       Mapped[str]           = mapped_column(Text, default="[]")
+    niche_keywords: Mapped[str]           = mapped_column(Text, default="[]")
+    kind:           Mapped[str]           = mapped_column(Text, default="search")  # default | search
+    market:         Mapped[str]           = mapped_column(Text, default="ru")
+    auto_collect:   Mapped[bool]          = mapped_column(Boolean, default=True)
+    created_at:     Mapped[datetime]      = mapped_column(default=_now)
+
+    def keywords_list(self):       return json.loads(self.keywords or "[]")
+    def niche_keywords_list(self): return json.loads(self.niche_keywords or "[]")
+
+
 class Probe(Base):
     __tablename__ = "probes"
     id:           Mapped[int]           = mapped_column(Integer, primary_key=True, autoincrement=True)
-    brand_id:     Mapped[int]           = mapped_column(ForeignKey("brands.id"))
+    brand_id:     Mapped[Optional[int]] = mapped_column(ForeignKey("brands.id"), nullable=True)
     platform:     Mapped[str]           = mapped_column(Text)
     kind:         Mapped[str]           = mapped_column(Text)
     query:        Mapped[str]           = mapped_column(Text)
@@ -62,6 +78,7 @@ class Probe(Base):
     label:        Mapped[Optional[str]] = mapped_column(Text)                    # competitor name / niche term
     watermark:    Mapped[Optional[str]] = mapped_column(Text)
     next_run_at:  Mapped[datetime]      = mapped_column(default=_now)
+    topic_id:     Mapped[Optional[int]] = mapped_column(ForeignKey("topics.id"))
     interval_sec: Mapped[int]           = mapped_column(Integer, default=3600)
     brand:        Mapped[Brand]         = relationship(back_populates="probes")
 
@@ -69,7 +86,8 @@ class Mention(Base):
     __tablename__ = "mentions"
     __table_args__ = (UniqueConstraint("platform", "post_id"),)
     id:           Mapped[int]           = mapped_column(Integer, primary_key=True, autoincrement=True)
-    brand_id:     Mapped[int]           = mapped_column(ForeignKey("brands.id"))
+    brand_id:     Mapped[Optional[int]] = mapped_column(ForeignKey("brands.id"), nullable=True)
+    topic_id:     Mapped[Optional[int]] = mapped_column(ForeignKey("topics.id"))
     platform:     Mapped[str]           = mapped_column(Text)
     post_id:      Mapped[str]           = mapped_column(Text)
     author:       Mapped[str]           = mapped_column(Text)
@@ -177,7 +195,8 @@ class CityReport(Base):
 class Incident(Base):
     __tablename__ = "incidents"
     id:            Mapped[int]           = mapped_column(Integer, primary_key=True, autoincrement=True)
-    brand_id:      Mapped[int]           = mapped_column(ForeignKey("brands.id"))
+    brand_id:      Mapped[Optional[int]] = mapped_column(ForeignKey("brands.id"), nullable=True)
+    topic_id:      Mapped[Optional[int]] = mapped_column(ForeignKey("topics.id"))
     story_id:      Mapped[Optional[int]] = mapped_column(ForeignKey("stories.id"))
     title:         Mapped[str]           = mapped_column(Text, default="")
     summary:       Mapped[Optional[str]] = mapped_column(Text)   # filled by LLM later
@@ -190,9 +209,10 @@ class Incident(Base):
 
 class Story(Base):
     __tablename__ = "stories"
-    id:            Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
-    brand_id:      Mapped[int]      = mapped_column(ForeignKey("brands.id"))
-    title:         Mapped[str]      = mapped_column(Text, default="")
+    id:            Mapped[int]           = mapped_column(Integer, primary_key=True, autoincrement=True)
+    brand_id:      Mapped[Optional[int]] = mapped_column(ForeignKey("brands.id"), nullable=True)
+    topic_id:      Mapped[Optional[int]] = mapped_column(ForeignKey("topics.id"))
+    title:         Mapped[str]           = mapped_column(Text, default="")
     status:        Mapped[str]      = mapped_column(Text, default="active")   # active | dormant
     is_anomaly:    Mapped[bool]     = mapped_column(Boolean, default=False)   # set by detector later
     post_count:    Mapped[int]      = mapped_column(Integer, default=0)
@@ -215,7 +235,8 @@ class StoryPoint(Base):
 class Report(Base):
     __tablename__ = "reports"
     id:         Mapped[int]           = mapped_column(Integer, primary_key=True, autoincrement=True)
-    brand_id:   Mapped[int]           = mapped_column(ForeignKey("brands.id"))
+    brand_id:   Mapped[Optional[int]] = mapped_column(ForeignKey("brands.id"), nullable=True)
+    topic_id:   Mapped[Optional[int]] = mapped_column(ForeignKey("topics.id"))
     story_id:   Mapped[Optional[int]] = mapped_column(ForeignKey("stories.id"))
     kind:       Mapped[str]           = mapped_column(Text, default="digest")  # digest | story | alert
     body:       Mapped[str]           = mapped_column(Text, default="")

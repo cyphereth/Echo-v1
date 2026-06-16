@@ -74,6 +74,7 @@ def on_startup():
     try:
         seed_module.run(session)
         seed_module.ensure_demo_user(session)   # idempotent: demo login + backfill owners
+        seed_module.ensure_default_topics(session)
     finally:
         session.close()
 

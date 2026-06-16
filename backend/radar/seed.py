@@ -7,6 +7,12 @@ from .auth import hash_password
 DEMO_EMAIL    = "demo@echo.app"
 DEMO_PASSWORD = "demo12345"
 
+DEFAULT_TOPICS = {
+    "Экономика":   ["инфляция","рубль","курс доллара","санкции","бюджет","нефть","газ","экспорт"],
+    "Геополитика": ["переговоры","саммит","договор","конфликт","граница","дипломатия","НАТО","ООН"],
+    "Военное":     ["обстрел","удар","БПЛА","ПВО","фронт","наступление","эвакуация","взрыв"],
+}
+
 
 def run(session: Session) -> None:
     """No-op: mock data removed. Real data comes from live collection."""
@@ -24,3 +30,15 @@ def ensure_demo_user(session: Session) -> User:
         b.user_id = user.id
     session.commit()
     return user
+
+
+def ensure_default_topics(session: Session) -> None:
+    """Idempotent: create global default topics for the news-mode feed."""
+    import json as _j
+    from .models import Topic
+    for name, kws in DEFAULT_TOPICS.items():
+        if not session.query(Topic).filter_by(name=name, kind="default").first():
+            session.add(Topic(name=name, kind="default", user_id=None,
+                              keywords=_j.dumps(kws, ensure_ascii=False),
+                              niche_keywords=_j.dumps(kws, ensure_ascii=False)))
+    session.commit()

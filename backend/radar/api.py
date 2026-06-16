@@ -12,7 +12,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .db import init_db, get_session
-from .models import Brand, Probe, Mention, DraftEdit, Comment, User, Story, Incident, StoryPoint
+from .models import Brand, Probe, Mention, DraftEdit, Comment, User, Story, Incident, StoryPoint, Report
 from .auth import hash_password, verify_password, create_token, decode_token
 from .classify import classify
 from .drafts import generate_draft
@@ -162,6 +162,13 @@ class IncidentOut(BaseModel):
 class StoryDetailOut(StoryOut):
     points: list[StoryPointOut]
     incidents: list[IncidentOut]
+
+class ReportOut(BaseModel):
+    id: int
+    kind: str
+    body: str
+    created_at: datetime
+    story_id: int | None = None
 
 def _user_card(u: User) -> dict:
     return {"id": u.id, "email": u.email}
@@ -1296,6 +1303,34 @@ def explore_cities(user: User = Depends(current_user), session: Session = Depend
         if len(out) >= 30:
             break
     return out
+
+
+# ── Digests ───────────────────────────────────────────────────────────────────
+
+@app.post("/brands/{brand_id}/digest", response_model=ReportOut)
+def create_digest(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    _owned_brand(session, brand_id, user)
+    from .digests import build_daily_digest
+    from .llm import LLMNotConfigured
+    try:
+        report = build_daily_digest(session, brand_id)
+    except LLMNotConfigured:
+        raise HTTPException(503, "Digest generation unavailable — set LLM_API_KEY in backend/.env")
+    if report is None:
+        raise HTTPException(404, "No active stories to summarize")
+    session.commit()
+    return ReportOut(id=report.id, kind=report.kind, body=report.body,
+                     created_at=report.created_at, story_id=report.story_id)
+
+
+@app.get("/brands/{brand_id}/digests", response_model=list[ReportOut])
+def list_digests(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    _owned_brand(session, brand_id, user)
+    rows = (session.query(Report)
+            .filter(Report.brand_id == brand_id, Report.kind == "digest")
+            .order_by(Report.created_at.desc()).limit(50).all())
+    return [ReportOut(id=r.id, kind=r.kind, body=r.body,
+                      created_at=r.created_at, story_id=r.story_id) for r in rows]
 
 
 # ── Stories ───────────────────────────────────────────────────────────────────

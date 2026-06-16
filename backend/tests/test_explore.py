@@ -131,6 +131,12 @@ def test_city_report_roundtrip():
     assert r.created_at is not None
 
 
+class _BG:
+    """Minimal stand-in for FastAPI BackgroundTasks — records scheduled tasks."""
+    def __init__(self): self.tasks = []
+    def add_task(self, fn, *a, **k): self.tasks.append((fn, a, k))
+
+
 def test_explore_city_uses_cache(monkeypatch):
     from datetime import datetime, timezone
     from radar import api
@@ -144,48 +150,53 @@ def test_explore_city_uses_cache(monkeypatch):
     class U: id = 1; email = "u@x.com"
     def boom(*a, **k): raise AssertionError("provider must not be called on fresh cache")
     monkeypatch.setattr(api, "_get_provider", boom)
-    body = api.ExploreCityBody(city="Москва")
-    out = api.explore_city(body, user=U(), session=s)
+    bg = _BG()
+    out = api.explore_city(api.ExploreCityBody(city="Москва"), bg, user=U(), session=s)
     assert out["cached"] is True
     assert out["summary"]["overview"] == "cached"
+    assert bg.tasks == []                       # cache hit → no background work
 
 
-def test_explore_city_live_when_missing(monkeypatch):
+def test_explore_city_missing_schedules_background():
     from radar import api
-    from radar.models import CityReport
     s = _mem_session()
-    monkeypatch.setattr(api, "_get_provider", lambda: object())
-    monkeypatch.setattr("radar.explore.run_city_search",
-                        lambda provider, city: ([{"text": "p"}], 3, ["tiktok"]))
-    monkeypatch.setattr("radar.explore.summarize_city",
-                        lambda city, posts: {"overview": "fresh", "themes": []})
     class U: id = 1; email = "u@x.com"
-    out = api.explore_city(api.ExploreCityBody(city="Казань"), user=U(), session=s)
-    assert out["cached"] is False and out["summary"]["overview"] == "fresh"
-    assert s.query(CityReport).filter_by(city="казань").count() == 1
+    bg = _BG()
+    out = api.explore_city(api.ExploreCityBody(city="Казань"), bg, user=U(), session=s)
+    assert out["status"] == "collecting"
+    assert len(bg.tasks) == 1
+    fn, args, _ = bg.tasks[0]
+    assert fn is api._run_city_explore and args == ("Казань",)
 
 
-def test_explore_city_refresh_bypasses_fresh_cache(monkeypatch):
+def test_explore_city_refresh_schedules_background_even_if_cached():
     from datetime import datetime, timezone
     from radar import api
     from radar.models import CityReport
     s = _mem_session()
     s.add(CityReport(city="москва", display_city="Москва",
-                     summary='{"overview":"stale-but-fresh-dated"}', post_count=1,
-                     platforms="tiktok", created_at=datetime.now(timezone.utc)))
+                     summary='{"overview":"old"}', post_count=1, platforms="tiktok",
+                     created_at=datetime.now(timezone.utc)))
     s.commit()
-    used = {"live": False}
-
-    def live(provider, city):
-        used["live"] = True
-        return ([{"text": "p"}], 9, ["tiktok", "instagram"])
-
-    monkeypatch.setattr(api, "_get_provider", lambda: object())
-    monkeypatch.setattr("radar.explore.run_city_search", live)
-    monkeypatch.setattr("radar.explore.summarize_city",
-                        lambda city, posts: {"overview": "regenerated"})
     class U: id = 1; email = "u@x.com"
-    out = api.explore_city(api.ExploreCityBody(city="Москва", refresh=True), user=U(), session=s)
-    assert used["live"] is True                       # cache bypassed, live run happened
-    assert out["cached"] is False and out["summary"]["overview"] == "regenerated"
-    assert s.query(CityReport).filter_by(city="москва").count() == 2  # new row added
+    bg = _BG()
+    out = api.explore_city(api.ExploreCityBody(city="Москва", refresh=True), bg, user=U(), session=s)
+    assert out["status"] == "collecting"        # refresh bypasses fresh cache
+    assert len(bg.tasks) == 1
+
+
+def test_run_city_explore_stores_report(monkeypatch):
+    import json
+    from radar import api
+    from radar.models import CityReport
+    s = _mem_session()
+    monkeypatch.setattr(api, "get_session", lambda: s)
+    monkeypatch.setattr(api, "_get_provider", lambda: object())
+    monkeypatch.setattr("radar.explore.run_city_search",
+                        lambda provider, city: ([{"text": "p"}], 7, ["tiktok", "instagram"]))
+    monkeypatch.setattr("radar.explore.summarize_city",
+                        lambda city, posts: {"overview": "fresh"})
+    api._run_city_explore("Казань")
+    row = s.query(CityReport).filter_by(city="казань").one()
+    assert row.post_count == 7
+    assert json.loads(row.summary)["overview"] == "fresh"

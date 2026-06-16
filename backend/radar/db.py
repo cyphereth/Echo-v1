@@ -39,6 +39,7 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "geo":            "TEXT DEFAULT ''",
         "category_terms": "TEXT DEFAULT '[]'",
         "audience_terms": "TEXT DEFAULT '[]'",
+        "tg_channels":    "TEXT DEFAULT '[]'",
         "followers":      "INTEGER DEFAULT 0",
         "local_mode":     "BOOLEAN DEFAULT 0",
     },

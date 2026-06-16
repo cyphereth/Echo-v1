@@ -24,6 +24,24 @@ log = logging.getLogger(__name__)
 
 TIKHUB_TOKEN = os.getenv("TIKHUB_TOKEN", "")
 SOCIALCRAWL_TOKEN = os.getenv("SOCIALCRAWL_TOKEN", "")
+TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID", "")
+_tg_provider_singleton = None
+
+
+def _get_tg_provider():
+    """Singleton TelegramProvider, or None if not configured / session missing."""
+    global _tg_provider_singleton
+    if not TELEGRAM_API_ID:
+        return None
+    if _tg_provider_singleton is None:
+        try:
+            from .providers.telegram import TelegramProvider
+            _tg_provider_singleton = TelegramProvider()
+        except Exception:
+            log.exception("Telegram provider init failed (run `python -m radar.tg_auth`?)")
+            return None
+    return _tg_provider_singleton
+
 
 def _get_provider():
     if SOCIALCRAWL_TOKEN:
@@ -63,7 +81,8 @@ def on_startup():
     global _scheduler
     if os.getenv("ENABLE_SCHEDULER", "1") == "1" and _scheduler is None:
         from .scheduler import Scheduler
-        _scheduler = Scheduler(_get_provider(), tick_sec=int(os.getenv("SCHEDULER_TICK_SEC", "60")))
+        _scheduler = Scheduler(_get_provider(), tick_sec=int(os.getenv("SCHEDULER_TICK_SEC", "60")),
+                               tg_provider=_get_tg_provider())
         _scheduler.start()
         log.info("Auto-collect scheduler started (tick=%ss)", _scheduler._tick_sec)
 
@@ -161,6 +180,14 @@ def _post_url(m: Mention) -> Optional[str]:
     if m.platform == "instagram":
         # post_id is the shortcode for IG mentions collected via TikHub.
         return f"https://www.instagram.com/p/{m.post_id}/"
+    if m.platform == "telegram":
+        # Chat messages carry a composite post_id "<ns>/msgid". A numeric namespace is a
+        # username-less group → t.me/c/<id>/<msg>; a textual one is a public @handle.
+        pid = m.post_id or ""
+        if "/" in pid:
+            ns = pid.split("/", 1)[0]
+            return f"https://t.me/c/{pid}" if ns.isdigit() else f"https://t.me/{pid}"
+        return f"https://t.me/{(m.author or '').lstrip('@')}/{pid}"
     return None
 
 import re as _re
@@ -322,6 +349,7 @@ def _brand_card(b: Brand) -> dict:
         "geo":           getattr(b, "geo", "") or "",
         "category_terms": b.category_terms_list() if hasattr(b, "category_terms_list") else [],
         "audience_terms": b.audience_terms_list() if hasattr(b, "audience_terms_list") else [],
+        "tg_channels":    b.tg_channels_list() if hasattr(b, "tg_channels_list") else [],
         "followers":      getattr(b, "followers", 0) or 0,
         "local_mode":     bool(getattr(b, "local_mode", False)),
         "auto_collect":  bool(b.auto_collect),
@@ -331,13 +359,20 @@ def _brand_card(b: Brand) -> dict:
 
 # ── Probe building ────────────────────────────────────────────────────────────
 
-# Monitor each term on every supported platform — one probe per (term, platform).
+# Keyword search runs on TikTok + Instagram. Telegram has NO public global search
+# (the user API only searches chats the account already follows), so keyword probes
+# there return nothing — Telegram is monitored via explicit channel probes instead.
 MONITORED_PLATFORMS = ("tiktok", "instagram")
 
 
 def _rebuild_probes(session: Session, brand: Brand) -> None:
-    """Replace a brand's probes from its current keywords / competitors / niche."""
-    session.query(Probe).filter_by(brand_id=brand.id).delete()
+    """Replace a brand's probes from its current keywords / competitors / niche.
+    Preserves auto-discovered chat probes (kind chat/chat_linked) — those come from the
+    Telegram graph crawl, not brand config, so a config edit must NOT wipe them (re-crawl
+    is expensive and throttled)."""
+    (session.query(Probe)
+     .filter(Probe.brand_id == brand.id, Probe.kind.notin_(("chat", "chat_linked")))
+     .delete(synchronize_session=False))
     geo = (getattr(brand, "geo", "") or "").strip()
     # City is appended only to audience-discovery probes (category + niche) —
     # brand & named-competitor mentions don't depend on the city.
@@ -356,6 +391,12 @@ def _rebuild_probes(session: Session, brand: Brand) -> None:
         if getattr(brand, "local_mode", False) and geo:
             for term in brand.audience_terms_list():
                 session.add(Probe(brand_id=brand.id, platform=pf, kind="keyword", source="niche", label=term, query=f"{term} {geo}"))
+    if TELEGRAM_API_ID:
+        # Telegram channels are audience/discovery sources (food bloggers, review
+        # channels) — the niche lane, not competitors.
+        for handle in brand.tg_channels_list():
+            session.add(Probe(brand_id=brand.id, platform="telegram", kind="channel",
+                              source="niche", label=handle, query=handle))
     session.flush()
 
 
@@ -392,6 +433,7 @@ class BrandConfigBody(BaseModel):
     audience_terms: Optional[list[str]] = None
     followers:      Optional[int]       = None
     local_mode:     Optional[bool]      = None
+    tg_channels:    Optional[list[str]] = None
 
 @app.post("/brands/{brand_id}/config")
 def update_brand_config(brand_id: int, body: BrandConfigBody, user: User = Depends(current_user), session: Session = Depends(db)):
@@ -409,9 +451,10 @@ def update_brand_config(brand_id: int, body: BrandConfigBody, user: User = Depen
     if body.audience_terms is not None: b.audience_terms = json.dumps(_clean_list(body.audience_terms))
     if body.followers      is not None: b.followers      = body.followers
     if body.local_mode     is not None: b.local_mode     = body.local_mode
+    if body.tg_channels    is not None: b.tg_channels    = json.dumps(_clean_list(body.tg_channels))
     if body.keywords       is not None: b.keywords       = json.dumps(_ensure_name_in_keywords(body.name or b.name, _clean_list(body.keywords)))
     # Rebuild probes (brand + competitor + niche) so collect picks up every source
-    if any(v is not None for v in (body.keywords, body.competitors, body.niche_keywords, body.category_terms, body.geo, body.audience_terms, body.local_mode)):
+    if any(v is not None for v in (body.keywords, body.competitors, body.niche_keywords, body.category_terms, body.geo, body.audience_terms, body.local_mode, body.tg_channels)):
         _rebuild_probes(session, b)
     session.commit()
     return _brand_card(b)
@@ -716,11 +759,15 @@ def _run_collect(brand_id: int) -> dict:
             _rebuild_probes(session, brand)
             probes = session.query(Probe).filter_by(brand_id=brand_id).all()
 
+        tg_provider = _get_tg_provider()
         total = 0
         for probe in probes:
+            prov = tg_provider if probe.platform == "telegram" else provider
+            if prov is None:
+                continue  # telegram probe but provider unavailable — skip
             try:
-                log.info("Collecting probe '%s' via %s", probe.query, provider.__class__.__name__)
-                count = collect_probe(session, probe, provider)
+                log.info("Collecting probe '%s' via %s", probe.query, prov.__class__.__name__)
+                count = collect_probe(session, probe, prov)
                 log.info("Probe '%s' → %d new mentions", probe.query, count)
                 total += count
             except Exception as e:
@@ -733,9 +780,21 @@ def _run_collect(brand_id: int) -> dict:
         except Exception as e:
             log.warning("collect_geo failed: %s", e)
 
+        # Telegram group-chat monitoring: discover public food/niche chats, then pull
+        # messages that match niche/intent terms (fail-open; no-op without TG provider).
+        try:
+            from .collector import ensure_chats_discovered, collect_chats
+            ensure_chats_discovered(session, brand, tg_provider)
+            total += collect_chats(session, brand, tg_provider)
+        except Exception as e:
+            log.warning("collect_chats failed: %s", e)
+
         # Classify + draft (shared with the scheduler)
         result = classify_and_draft(session, brand_id)
-        return {"collected": total, **result}
+        # Auto-fetch comments on fresh competitor/niche mentions → opportunity pipeline.
+        from .pipeline import fetch_new_comments
+        comments = fetch_new_comments(session, brand_id, provider, tg_provider)
+        return {"collected": total, "comments": comments, **result}
     finally:
         session.close()
 
@@ -875,88 +934,11 @@ def _comment_card(c: Comment) -> dict:
 
 
 def _fetch_and_store_comments(session: Session, mention: Mention) -> int:
-    """Pull comments from the provider, classify sentiment, draft relevant replies, store."""
-    provider = _get_provider()
-    fetched  = provider.fetch_comments(mention.post_id, None, mention.platform)
-    if not fetched:
-        return 0
-
-    brand         = session.get(Brand, mention.brand_id)
-    tone_examples = brand.tone_examples_list() if brand else []
-    edits         = recent_edits(session, mention.brand_id)
-    existing      = {c.comment_id for c in mention.comment_rows}
-
-    from .drafts import _is_opportunity_candidate, evaluate_opportunity
-    from .spam import looks_like_ad_cheap, classify_ads_batch
-    from .engagement import thread_already_engaged, is_duplicate_reply
-    engaged = thread_already_engaged(session, mention.id)
-    sent_replies = [c.draft for c in mention.comment_rows
-                    if c.draft and c.status in ("sent", "posted")]
-    is_comp_niche = mention.source in ("competitor", "niche")
-
-    # New comments only; cheap spam rules first, then one batched Claude ad-check.
-    from .collector import MIN_FOLLOWERS
-    local = bool(getattr(brand, "local_mode", False))
-    new = [fc for fc in fetched if fc.comment_id not in existing]
-    # Tiny-account floor for comments: 0 < followers < 100 → hide (off in local_mode).
-    # followers==0 (no data, common for comments) is not penalized.
-    cheap_spam = {
-        fc.comment_id: looks_like_ad_cheap(fc.text, fc.author, [])
-                       or (not local and 0 < (fc.followers or 0) < MIN_FOLLOWERS)
-        for fc in new
-    }
-    survivors = [fc for fc in new if not cheap_spam[fc.comment_id]]
-    ad_flags = classify_ads_batch([fc.text for fc in survivors],
-                                  sphere=getattr(brand, "sphere", "") or "")
-    ad_spam = {fc.comment_id: bool(flag) for fc, flag in zip(survivors, ad_flags)}
-
-    stored, drafted = 0, 0
-    fetched.sort(key=lambda fc: fc.likes, reverse=True)
-    for fc in new:
-        is_spam = cheap_spam.get(fc.comment_id) or ad_spam.get(fc.comment_id, False)
-        sentiment = classify(fc.text).tone
-        draft = draft_flag = opp_reason = None
-        is_opp = False
-
-        if is_spam:
-            pass  # stored hidden, no draft
-        elif is_comp_niche and not engaged:
-            # Honest engagement: one brand reply per thread, prefilter cheaply,
-            # then let Claude decide and write an openly-branded reply. Skip
-            # near-duplicate drafts so the brand never repeats a canned line.
-            if _is_opportunity_candidate(fc.text, sentiment) and drafted < MAX_COMMENT_DRAFTS:
-                ev = evaluate_opportunity(
-                    fc.text, mention.source, mention.competitor,
-                    brand.name if brand else None,
-                )
-                reply = ev.get("reply")
-                if ev.get("is_opportunity") and reply and not is_duplicate_reply(reply, sent_replies):
-                    draft      = reply
-                    opp_reason = ev.get("reason") or None
-                    is_opp     = True
-                    drafted   += 1
-                    engaged    = True  # cap to one fresh draft per thread per fetch
-        elif sentiment == "negative" and drafted < MAX_COMMENT_DRAFTS:
-            # brand-lane: reply to negative comments as before
-            dr = generate_draft(
-                fc.text, "comment", sentiment, 0.9, tone_examples, edits,
-                source=mention.source, competitor=mention.competitor,
-                brand_name=brand.name if brand else None,
-            )
-            if dr:
-                draft, draft_flag = dr.text, dr.flag
-                drafted += 1
-
-        session.add(Comment(
-            mention_id=mention.id, comment_id=fc.comment_id, author=fc.author,
-            followers=fc.followers, text=fc.text, likes=fc.likes,
-            sentiment=sentiment, draft=draft, draft_flag=draft_flag,
-            is_opportunity=is_opp, opportunity=opp_reason, is_spam=is_spam,
-            created_at=fc.created_at,
-        ))
-        stored += 1
-    session.commit()
-    return stored
+    """Pull comments for one mention, classify, draft, store. Thin wrapper over the
+    shared pipeline impl — supplies the live provider singletons. Kept so the
+    on-demand comments endpoint and the collection pipeline share one code path."""
+    from .pipeline import fetch_and_store_comments
+    return fetch_and_store_comments(session, mention, _get_provider(), _get_tg_provider())
 
 
 @app.get("/mentions/{mention_id}/comments")
@@ -1216,15 +1198,42 @@ def _city_report_card(r) -> dict:
     }
 
 
+def _run_city_explore(city: str) -> None:
+    """Background task: search, summarize, store CityReport. Runs outside request context."""
+    from . import explore
+    from .models import CityReport
+    session = get_session()
+    try:
+        key, _ = explore.normalize_city(city)
+        agg, n, platforms = explore.run_city_search(_get_provider(), city)
+        if n == 0:
+            log.warning("city explore: no posts for %r", city)
+            return
+        summary = explore.summarize_city(city, agg)
+        if not summary:
+            log.warning("city explore: LLM summary failed for %r", city)
+            return
+        row = CityReport(city=key, display_city=city.strip(),
+                         summary=json.dumps(summary, ensure_ascii=False),
+                         post_count=n, platforms=",".join(platforms))
+        session.add(row); session.commit()
+        log.info("city explore: stored report for %r (%d posts)", city, n)
+    except Exception:
+        log.exception("city explore failed for %r", city)
+    finally:
+        session.close()
+
+
 @app.post("/explore/city")
-def explore_city(body: ExploreCityBody, user: User = Depends(current_user),
-                 session: Session = Depends(db)):
+def explore_city(body: ExploreCityBody, background_tasks: BackgroundTasks,
+                 user: User = Depends(current_user), session: Session = Depends(db)):
     from . import explore
     from .models import CityReport
     key, _ = explore.normalize_city(body.city)
     if not key:
         raise HTTPException(400, "City is required")
 
+    # Cache hit — return immediately (free, instant)
     if not body.refresh:
         latest = (session.query(CityReport).filter_by(city=key)
                   .order_by(CityReport.created_at.desc()).first())
@@ -1236,18 +1245,10 @@ def explore_city(body: ExploreCityBody, user: User = Depends(current_user),
             if age_days < CITY_REPORT_TTL_DAYS:
                 return {**_city_report_card(latest), "cached": True}
 
-    agg, n, platforms = explore.run_city_search(_get_provider(), body.city)
-    if n == 0:
-        raise HTTPException(502, "No posts found (provider unavailable or out of credits)")
-    summary = explore.summarize_city(body.city, agg)
-    if not summary:
-        raise HTTPException(503, "Summary unavailable — set LLM_API_KEY in backend/.env")
-
-    row = CityReport(city=key, display_city=body.city.strip(),
-                     summary=json.dumps(summary, ensure_ascii=False),
-                     post_count=n, platforms=",".join(platforms))
-    session.add(row); session.commit()
-    return {**_city_report_card(row), "cached": False}
+    # Miss or refresh — kick off background collection, return immediately
+    background_tasks.add_task(_run_city_explore, body.city)
+    return {"status": "collecting", "city": body.city.strip(),
+            "message": "Сбор запущен, обновите страницу через 30–60 секунд"}
 
 
 @app.get("/explore/cities")

@@ -1,6 +1,7 @@
 from __future__ import annotations
-import json, logging, re
-from datetime import datetime, timezone
+import json, logging, os, re
+from functools import lru_cache
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from .models import Brand, Mention, MentionSnapshot, Probe
@@ -9,12 +10,47 @@ from .spam import looks_like_ad_cheap
 
 log = logging.getLogger(__name__)
 
+# Russian morphology — lets domain terms match inflected forms ("ресторане",
+# "ресторанов" → "ресторан"). pymorphy3 is the Py3.11+ fork (pymorphy2 needs the
+# removed pkg_resources); fall back to exact matching if neither is importable.
+def _load_morph():
+    for mod in ("pymorphy2", "pymorphy3"):
+        try:
+            return __import__(mod).MorphAnalyzer()
+        except Exception:
+            continue
+    log.info("pymorphy not available — term matching falls back to exact word match")
+    return None
+
+_MORPH    = _load_morph()
+_WORD_RE  = re.compile(r"\w+", re.UNICODE)
+
+@lru_cache(maxsize=50_000)
+def _lemma(word: str) -> str:
+    if _MORPH is None:
+        return word
+    try:
+        return _MORPH.parse(word)[0].normal_form
+    except Exception:
+        return word
+
+def _lemmas(text: str) -> set[str]:
+    return {_lemma(w) for w in _WORD_RE.findall(text.lower())}
+
 VIRAL_VIEWS  = 500_000  # views above this = viral (post passes filters regardless)
 VIRAL_LIKES  = 1_500    # smaller RU market: 1.5k likes already means a post took off
 MIN_TEXT_LEN = 20       # posts/comments shorter than this are noise ("огонь", "👍")
 MIN_FOLLOWERS = 100     # accounts below this are hidden unless the post went viral
 
 def _now(): return datetime.now(timezone.utc)
+
+def _word_in(text: str, term: str) -> bool:
+    """Whole-word (boundary) match of `term` within `text` (both already lowercased).
+    Word boundaries avoid substring collisions — "кафе" in "кафедральный", "вб" in
+    "обувь". Empty term never matches."""
+    if not term:
+        return False
+    return bool(re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", text))
 
 def _is_viral(post: Post) -> bool:
     return (post.likes or 0) >= VIRAL_LIKES or (post.views or 0) >= VIRAL_VIEWS
@@ -28,14 +64,23 @@ def _below_follower_floor(post: Post, local_mode: bool = False) -> bool:
     f = post.followers or 0
     return 0 < f < MIN_FOLLOWERS and not _is_viral(post)
 
+# Letters unique to Ukrainian (і ї є ґ) or Kazakh (ә ғ қ ң ө ұ ү һ і) — never used
+# in Russian. Their presence means the post is NOT Russian-market, even though it's
+# Cyrillic. Geo is geo: a viral Ukrainian/Kazakh post is still the wrong country.
+_NON_RU_CYRILLIC = set("іїєґІЇЄҐәғқңөұүһəҒҚҢӨҰҮҺ")
+
 def _passes_language(post: Post, brand: Brand) -> bool:
-    """For RU/CIS brands keep only Cyrillic posts — unless the post is viral,
-    in which case a foreign-language post is worth showing."""
+    """For RU-market brands keep Russian Cyrillic posts only. Ukrainian/Kazakh
+    (also Cyrillic) are excluded by their distinctive letters; foreign-language
+    posts are kept only when viral."""
     if getattr(brand, "market", "global") != "ru":
         return True
+    text = post.text or ""
+    if any(ch in _NON_RU_CYRILLIC for ch in text):
+        return False                      # Ukrainian/Kazakh — wrong geo, drop always
     if _is_viral(post):
         return True
-    clean = " ".join(w for w in post.text.split() if not w.startswith("#"))
+    clean = " ".join(w for w in text.split() if not w.startswith("#"))
     return bool(re.search(r"[а-яёА-ЯЁ]", clean))
 
 def _matches(post: Post, brand: Brand, probe: Probe) -> bool:
@@ -46,6 +91,12 @@ def _matches(post: Post, brand: Brand, probe: Probe) -> bool:
 
     if not _passes_language(post, brand):
         return False
+
+    # Channel-monitoring probes (Telegram @channels the user explicitly chose to
+    # watch): the channel itself is the relevance signal, so keep every post —
+    # don't require a brand/competitor keyword in the text.
+    if getattr(probe, "kind", None) == "channel":
+        return True
 
     # Note: ad/spam/length/hashtag checks are NOT a hard drop anymore — matched
     # posts are stored with is_spam=True (store-but-hide) in collect_probe.
@@ -71,7 +122,7 @@ def _matches(post: Post, brand: Brand, probe: Probe) -> bool:
         term = term.lower().lstrip("#")
         if not term:
             return False
-        if re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", text_lower):
+        if _word_in(text_lower, term):
             return True
         return any(term == h or term in h for h in post_hashtags)
 
@@ -107,6 +158,23 @@ def _upsert_mention(session: Session, post: Post, brand_id: int) -> Mention:
     session.execute(stmt)
     session.flush()
     return session.query(Mention).filter_by(platform=post.platform, post_id=post.post_id).one()
+
+
+def _store_niche_post(session: Session, brand_id: int, post: Post, spam: bool) -> bool:
+    """Upsert a niche-source mention (store-but-hide when spam). Adds a snapshot and
+    returns True only when the post counts toward pipeline volume (i.e. not spam).
+    Shared by collect_geo and collect_chats so the persist contract lives in one place."""
+    mention = _upsert_mention(session, post, brand_id)
+    mention.source = "niche"
+    mention.is_spam = spam
+    if spam:
+        return False
+    session.add(MentionSnapshot(
+        mention_id=mention.id, ts=_now(),
+        likes=post.likes, views=post.views,
+        comments=post.comments, shares=post.shares,
+    ))
+    return True
 
 def collect_probe(session: Session, probe: Probe, provider: SearchProvider) -> int:
     brand = session.get(Brand, probe.brand_id)
@@ -186,19 +254,207 @@ def collect_geo(session: Session, brand: Brand, provider: SearchProvider) -> int
             # client's lifestyle post won't contain a literal niche word).
             if not spam and not local and not _on_topic(post.text):
                 spam = True
-            mention = _upsert_mention(session, post, brand.id)
-            mention.source = "niche"
-            mention.is_spam = spam
-            if spam:
-                continue
-            session.add(MentionSnapshot(
-                mention_id=mention.id, ts=_now(),
-                likes=post.likes, views=post.views,
-                comments=post.comments, shares=post.shares,
-            ))
-            count += 1
+            if _store_niche_post(session, brand.id, post, spam):
+                count += 1
         session.commit()
     except Exception:
         session.rollback()
         log.warning("collect_geo failed for brand %s city %r", brand.id, city)
+    return count
+
+
+# Sphere-NEUTRAL recommendation-intent search phrases — surface "asking for a
+# recommendation" messages in ANY vertical (food, e-commerce, services, travel…).
+# The brand's own niche_keywords add the domain specificity at search time.
+UNIVERSAL_INTENT_TERMS = ["посоветуйте", "подскажите", "что выбрать", "какой лучше", "стоит ли"]
+MAX_CHATS_PER_RUN      = int(os.getenv("MAX_CHATS_PER_RUN", "15"))
+
+
+def _term_hit(text: str, terms: list[str]) -> bool:
+    """True if any of `terms` appears in `text` as a whole word OR an inflected form
+    of it ("ресторане"/"ресторанов" → "ресторан"). Tokenize+lemmatize keeps word
+    boundaries, so "кафе" still does NOT match "кафедральный" (distinct lemmas).
+    Falls back to exact whole-word match when morphology is unavailable."""
+    tlow = (text or "").lower()
+    tl: set[str] | None = None  # text lemmas, computed once on demand
+    for term in terms:
+        if not term:
+            continue
+        tt = term.lower()
+        if _word_in(tlow, tt):                 # exact whole-word/phrase (keeps adjacency)
+            return True
+        words = _WORD_RE.findall(tt)
+        if not words:
+            continue
+        if tl is None:
+            tl = _lemmas(tlow)
+        if all(_lemma(w) in tl for w in words):  # inflected match (all term words present)
+            return True
+    return False
+
+
+def _brand_terms(brand: Brand) -> list[str]:
+    """The brand's domain vocabulary (niche + category keywords + meaningful sphere
+    words) used to judge sphere-relevance — sphere-agnostic, from the brand's config."""
+    terms = [t.lower() for t in (brand.niche_keywords_list() + brand.category_terms_list())]
+    terms += [w.lower() for w in (getattr(brand, "sphere", "") or "").split() if len(w) > 3]
+    return [t for t in dict.fromkeys(terms) if t]
+
+
+MAX_DISCOVERY_CHANNELS = int(os.getenv("MAX_DISCOVERY_CHANNELS", "60"))
+
+
+def ensure_chats_discovered(session: Session, brand: Brand, provider,
+                            min_chats: int = 8, max_add: int = 40) -> int:
+    """Auto-discover food/niche discussion chats by GROWING A GRAPH from the brand's
+    already-curated channels (brand.tg_channels): expand them with Telegram's
+    "similar channels" recommendations, then take each channel's linked discussion
+    group — that's where the audience actually asks "куда сходить?". Far higher
+    signal than blind keyword search. No-op once enough chats exist. Fail-open."""
+    if not (hasattr(provider, "linked_chat") and hasattr(provider, "channel_recommendations")):
+        return 0
+    existing = (session.query(Probe)
+                .filter(Probe.brand_id == brand.id, Probe.platform == "telegram",
+                        Probe.kind.in_(("chat", "chat_linked"))).all())
+    if len(existing) >= min_chats:
+        return 0
+
+    seeds = list(brand.tg_channels_list())
+    # Bootstrap seed channels ONLY for brands that have curated NONE: search Telegram for
+    # channels in the brand's sphere/niche/geo. Sphere-agnostic — works for a restaurant,
+    # an online shop, a clinic, etc. (queries come from the brand's own config). Brands
+    # with even a few curated channels grow purely from their own graph (cleaner seeds).
+    if not seeds and hasattr(provider, "discover_channels"):
+        geo     = (getattr(brand, "geo", "") or "").strip()
+        sphere  = (getattr(brand, "sphere", "") or "").strip()
+        queries = [f"{kw} {geo}".strip() for kw in brand.niche_keywords_list()[:3]]
+        if sphere:
+            queries.append(f"{sphere} {geo}".strip())
+        # contacts.Search is fuzzy (e.g. "ресторан Брянск" can return a cathedral) —
+        # keep only channels whose TITLE actually mentions the brand's domain.
+        terms = _brand_terms(brand)
+        for q in dict.fromkeys(x for x in queries if x):
+            try:
+                for c in provider.discover_channels(q, limit=20):
+                    if _term_hit(c.get("title", ""), terms):
+                        seeds.append(c["handle"])
+            except Exception:
+                log.warning("discover_channels failed for %r", q)
+        seeds = list(dict.fromkeys(seeds))
+    if not seeds:
+        return 0  # nothing to grow from (no channels, no sphere/niche to search)
+
+    # 1 hop of "similar channels" off each seed → a wider on-topic channel set.
+    channels = list(seeds)
+    for s in seeds:
+        try:
+            channels += provider.channel_recommendations(s, limit=10)
+        except Exception:
+            log.warning("channel_recommendations failed for %s", s)
+    channels = list(dict.fromkeys(channels))[:MAX_DISCOVERY_CHANNELS]
+
+    seen  = {p.query for p in existing}
+    added = 0
+    for ch in channels:
+        if added >= max_add:
+            break
+        try:
+            linked = provider.linked_chat(ch)
+        except Exception:
+            log.warning("linked_chat failed for %s", ch)
+            continue
+        if not linked:
+            continue
+        # Public-username group → address it directly. Otherwise reach it through its
+        # parent channel (kind="chat_linked", query = parent handle).
+        if linked.get("handle"):
+            kind, key = "chat", linked["handle"]
+        elif linked.get("id") and linked.get("via"):
+            kind, key = "chat_linked", linked["via"]
+        else:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        session.add(Probe(
+            brand_id=brand.id, platform="telegram", kind=kind,
+            query=key, source="niche", label=(linked["title"] or "")[:120],
+            next_run_at=_now(), interval_sec=3600,
+        ))
+        added += 1
+    session.commit()
+    return added
+
+
+def collect_chats(session: Session, brand: Brand, provider) -> int:
+    """Monitor public group chats as a niche source: search each discovered chat
+    (stored as kind="chat" probes) for the brand's niche terms + generic intent
+    phrases, and store matching messages as niche mentions. Intent questions get
+    flagged as opportunities downstream by the pipeline. Fail-open per chat."""
+    if not hasattr(provider, "search_chat"):
+        return 0  # provider doesn't support chat search (TikHub/SocialCrawl)
+    # Least-recently-run first so a brand with more chats than MAX_CHATS_PER_RUN
+    # rotates through all of them across successive runs instead of starving the tail.
+    chats = (
+        session.query(Probe)
+        .filter(Probe.brand_id == brand.id, Probe.platform == "telegram",
+                Probe.kind.in_(("chat", "chat_linked")))
+        .order_by(Probe.next_run_at.asc())
+        .limit(MAX_CHATS_PER_RUN)
+        .all()
+    )
+    if not chats:
+        return 0
+
+    from .pipeline import _looks_like_intent
+    terms = _brand_terms(brand)
+    # Search the brand's top niche keywords (domain) + sphere-neutral intent phrases.
+    search_terms = list(dict.fromkeys(brand.niche_keywords_list()[:3] + UNIVERSAL_INTENT_TERMS))
+
+    def _topical(text: str) -> bool:
+        return _term_hit(text, terms)
+
+    count = 0
+    for probe in chats:
+        handle = probe.query
+        # username group → search_chat; username-less linked group → resolve via parent.
+        method = "search_linked_chat" if probe.kind == "chat_linked" else "search_chat"
+        search = getattr(provider, method, None)
+        if search is None:
+            log.warning("collect_chats: provider has no %s — skipping %s", method, handle)
+            continue
+        # Watermark: only fetch messages newer than the last one we saw, so a busy chat
+        # isn't re-scanned from scratch every run. Stored as the max message id seen.
+        wm = int(probe.watermark) if (probe.watermark or "").isdigit() else 0
+        newest = wm
+        seen: set[str] = set()
+        try:
+            for term in search_terms:
+                for post in search(handle, term, limit=20, min_id=wm):
+                    try:
+                        newest = max(newest, int(post.post_id.rsplit("/", 1)[-1]))
+                    except ValueError:
+                        pass
+                    if post.post_id in seen:
+                        continue
+                    seen.add(post.post_id)
+                    clean = " ".join(w for w in post.text.split() if not w.startswith("#")).strip()
+                    spam = looks_like_ad_cheap(post.text, post.author, post.hashtags) \
+                        or len(clean) < MIN_TEXT_LEN
+                    # Keep only on-topic or recommendation-intent messages — a busy chat
+                    # is full of "ага"/"спасибо" noise we don't want as mentions.
+                    if not spam and not (_topical(post.text) or _looks_like_intent(post.text)):
+                        spam = True
+                    if _store_niche_post(session, brand.id, post, spam):
+                        count += 1
+            session.commit()
+        except Exception:
+            session.rollback()
+            log.warning("collect_chats failed for brand %s chat %s", brand.id, handle)
+        # Advance the watermark past everything seen, and move this chat to the back of
+        # the rotation — regardless of outcome.
+        if newest > wm:
+            probe.watermark = str(newest)
+        probe.next_run_at = _now() + timedelta(seconds=probe.interval_sec or 3600)
+        session.commit()
     return count

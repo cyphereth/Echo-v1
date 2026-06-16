@@ -4,25 +4,57 @@ import * as api from '../../services/api';
 import styles from './cityexplorer.module.css';
 
 export function CityExplorerScreen() {
-  const [city, setCity]       = useState('');
-  const [report, setReport]   = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState('');
-  const [history, setHistory] = useState([]);
+  const [city, setCity]         = useState('');
+  const [report, setReport]     = useState(null);
+  const [loading, setLoading]   = useState(false);
+  const [collecting, setCollecting] = useState(null); // city being collected in background
+  const [error, setError]       = useState('');
+  const [history, setHistory]   = useState([]);
 
   const loadHistory = () => api.getCityReports().then(d => Array.isArray(d) && setHistory(d)).catch(() => {});
   useEffect(() => { loadHistory(); }, []);
 
+  // Poll history every 5s while background collection is running
+  useEffect(() => {
+    if (!collecting) return;
+    const iv = setInterval(() => {
+      api.getCityReports().then(d => {
+        if (!Array.isArray(d)) return;
+        setHistory(d);
+        const done = d.find(h => h.city === collecting);
+        if (done) {
+          // Report ready — fetch full report (cached hit now)
+          api.exploreCity(done.display_city, false)
+            .then(r => { if (r.cached || r.summary) { setReport(r); setCity(r.display_city); } })
+            .catch(() => {});
+          setCollecting(null);
+          setLoading(false);
+        }
+      }).catch(() => {});
+    }, 5000);
+    return () => clearInterval(iv);
+  }, [collecting]);
+
   async function run(targetCity, refresh = false) {
     const c = (targetCity ?? city).trim();
     if (!c) return;
-    setLoading(true); setError('');
+    setLoading(true); setError(''); setReport(null);
     try {
       const r = await api.exploreCity(c, refresh);
-      setReport(r); setCity(r.display_city || c); loadHistory();
+      if (r.status === 'collecting') {
+        // Background job started — poll until ready
+        const { normalize } = { normalize: (s) => s.trim().toLowerCase() };
+        setCollecting(normalize(c));
+        setCity(c);
+      } else {
+        setReport(r); setCity(r.display_city || c);
+        setLoading(false);
+        loadHistory();
+      }
     } catch (e) {
-      setError('Не удалось собрать сводку — проверь баланс провайдера / LLM-ключ.');
-    } finally { setLoading(false); }
+      setError('Не удалось запустить сбор — проверь подключение к серверу.');
+      setLoading(false);
+    }
   }
 
   const s = report?.summary || {};
@@ -33,7 +65,7 @@ export function CityExplorerScreen() {
           value={city} onChange={e => setCity(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && run()} />
         <button className={styles.btnPrimary} onClick={() => run()} disabled={loading}>
-          <Icon name="sparkles" size={14} />{loading ? 'Собираю…' : 'Исследовать'}
+          <Icon name="sparkles" size={14} />{collecting ? 'Собираю данные…' : loading ? 'Запускаю…' : 'Исследовать'}
         </button>
         {report && (
           <button className={styles.btnGhost} onClick={() => run(report.display_city, true)} disabled={loading}>
@@ -44,7 +76,13 @@ export function CityExplorerScreen() {
       {error && <div className={styles.error}>{error}</div>}
       <div className={styles.body}>
         <div className={styles.main}>
-          {report ? (
+          {collecting ? (
+            <div className={styles.collecting}>
+              <Icon name="sparkles" size={28} />
+              <div>Собираем посты и строим сводку для <strong>{city}</strong>…</div>
+              <div style={{ fontSize: 12, color: 'var(--fg-4)', marginTop: 4 }}>Обычно 30–60 секунд</div>
+            </div>
+          ) : report ? (
             <>
               <div className={styles.metaRow}>
                 <span className={styles.cityName}>{report.display_city}</span>

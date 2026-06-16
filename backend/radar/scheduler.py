@@ -1,4 +1,4 @@
-import logging, random, time, threading
+import logging, os, random, time, threading
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from .db import get_session
@@ -9,6 +9,8 @@ INTERVAL_HOT    = 300
 INTERVAL_NORMAL = 3600
 INTERVAL_QUIET  = 7200
 INTERVAL_CHATS  = 1800   # group-chat monitoring cadence (discover + search)
+ENABLE_DIGESTS      = os.getenv("ENABLE_DIGESTS", "0") == "1"   # opt-in; default OFF (no surprise paid LLM calls)
+INTERVAL_DIGEST     = int(os.getenv("DIGEST_INTERVAL_SEC", "86400"))  # once per ~24h
 NIGHT_START_UTC = 21
 NIGHT_END_UTC   = 6
 NIGHT_MULTIPLIER = 2.0
@@ -51,6 +53,23 @@ def _run_brand_pipeline(session, brand_id, provider, tg_provider):
         log.exception("update_stories failed for brand %s (story layer skipped)", brand_id)
 
 
+def _run_digest_pass(session):
+    """Generate a daily digest for each auto-collect brand. Best-effort."""
+    import radar.digests as _digests
+    from .llm import LLMNotConfigured
+    from .models import Brand
+    brands = session.query(Brand).filter(Brand.auto_collect.is_(True)).all()
+    for b in brands:
+        try:
+            if _digests.build_daily_digest(session, b.id):
+                session.commit()
+                log.info("Daily digest generated for brand %s", b.id)
+        except LLMNotConfigured:
+            return  # no key configured — stop this pass
+        except Exception:
+            log.exception("Digest pass failed for brand %s", b.id)
+
+
 def adaptive_interval(probe: Probe, new_mentions: int) -> int:
     if new_mentions > 5:   interval = INTERVAL_HOT
     elif new_mentions > 0: interval = INTERVAL_NORMAL
@@ -71,6 +90,7 @@ class Scheduler:
         self._timer        = None
         self._last_hotwatch = 0.0
         self._last_chats    = 0.0
+        self._last_digest   = 0.0
         self._chats_thread  = None   # background worker for the chat-monitoring pass
 
     def start(self):
@@ -143,6 +163,7 @@ class Scheduler:
             self._maybe_hotwatch(session)
             # Group-chat monitoring on its own (slower) cadence.
             self._maybe_collect_chats(session)
+            self._maybe_daily_digest(session)
         finally:
             session.close()
 
@@ -159,6 +180,14 @@ class Scheduler:
         self._last_chats = time.monotonic()
         self._chats_thread = threading.Thread(target=self._collect_chats_worker, daemon=True)
         self._chats_thread.start()
+
+    def _maybe_daily_digest(self, session):
+        if not ENABLE_DIGESTS:
+            return
+        if time.monotonic() - self._last_digest < INTERVAL_DIGEST:
+            return
+        self._last_digest = time.monotonic()
+        _run_digest_pass(session)
 
     def _collect_chats_worker(self):
         session = get_session()

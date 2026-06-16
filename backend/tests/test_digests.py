@@ -61,3 +61,19 @@ def test_build_daily_digest_none_when_no_stories(monkeypatch):
     s = _mem()
     monkeypatch.setattr(D.llm, "complete", lambda *a, **k: "x")
     assert D.build_daily_digest(s, brand_id=1) is None
+
+
+def test_run_digest_pass_calls_builder_for_autocollect_brands(monkeypatch):
+    import radar.scheduler as SCH
+    from radar.models import Brand
+    s = _mem()
+    s.add(Brand(id=1, name="a", auto_collect=True))
+    s.add(Brand(id=2, name="b", auto_collect=False))   # excluded
+    s.add(Brand(id=3, name="c", auto_collect=True))
+    s.commit()
+
+    called = []
+    monkeypatch.setattr("radar.digests.build_daily_digest",
+                        lambda sess, bid: called.append(bid) or None)
+    SCH._run_digest_pass(s)
+    assert sorted(called) == [1, 3]

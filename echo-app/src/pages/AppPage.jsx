@@ -13,6 +13,8 @@ import { AIWizard } from '../components/app/AIWizard';
 import * as api from '../services/api';
 import styles from '../components/app/shell.module.css';
 
+const NEWS_SCREENS = ['feed', 'stories', 'digests'];
+
 function agoStr(isoString) {
   const mins = Math.round((Date.now() - new Date(isoString)) / 60000);
   if (mins < 1)    return 'только что';
@@ -62,20 +64,67 @@ function mentionToItem(m) {
   };
 }
 
+function TopicBar({ topics, activeId, onSelect, onAdd }) {
+  const [val, setVal] = useState('');
+  const pill = (active) => ({
+    padding: '6px 14px', borderRadius: 999, border: 'none', cursor: 'pointer',
+    fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-sans)',
+    background: active ? 'var(--brand)' : 'var(--surface-3)',
+    color: active ? '#fff' : 'var(--fg-2)', transition: 'all 0.15s', whiteSpace: 'nowrap',
+  });
+  return (
+    <div style={{
+      display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+      padding: '12px 20px', borderBottom: '1px solid var(--border)',
+    }}>
+      {topics.map((t) => (
+        <button key={t.id} style={pill(t.id === activeId)} onClick={() => onSelect(t.id)}>
+          {t.kind === 'default' ? t.name : `# ${t.name}`}
+        </button>
+      ))}
+      <form
+        onSubmit={(e) => { e.preventDefault(); const v = val.trim(); if (v) { onAdd(v); setVal(''); } }}
+        style={{ display: 'flex' }}
+      >
+        <input
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          placeholder="+ своя тема…"
+          style={{
+            padding: '6px 12px', borderRadius: 999, border: '1px solid var(--border)',
+            background: 'var(--surface-2)', color: 'var(--fg-1)', fontSize: 13,
+            fontFamily: 'var(--font-sans)', outline: 'none', width: 150,
+          }}
+        />
+      </form>
+    </div>
+  );
+}
+
 export default function AppPage() {
   const navigate = useNavigate();
+  const [mode, setMode]               = useState('news');   // 'news' | 'brand'
   const [screen, setScreen]           = useState('feed');
   const [selectedId, setSelectedId]   = useState(null);
   const [brand, setBrand]             = useState(null);
   const [brandLoaded, setBrandLoaded] = useState(false);
+  const [topics, setTopics]           = useState([]);
+  const [activeTopicId, setActiveTopicId] = useState(null);
   const [feedItems, setFeedItems]     = useState([]);
   const [collecting, setCollecting]   = useState(false);
   const [showWizard, setShowWizard]   = useState(false);
   const pollRef                       = useRef(null);
 
-  const loadFeed = useCallback(async (brandId) => {
+  // Current scope: a topic in news mode, the brand in brand mode (null until ready).
+  const activeTopic = topics.find((t) => t.id === activeTopicId) || null;
+  const scope = mode === 'news'
+    ? (activeTopicId ? { kind: 'topic', id: activeTopicId, name: activeTopic?.name } : null)
+    : (brand?.id ? { kind: 'brand', id: brand.id, name: brand.name } : null);
+
+  const loadFeed = useCallback(async (sc) => {
+    if (!sc?.id) { setFeedItems([]); return 0; }
     try {
-      const inbox = await api.getInbox(brandId);
+      const inbox = await api.getInboxScoped(sc);
       const all = [...inbox.pr, ...inbox.smm];
       setFeedItems(all.map(mentionToItem));
       return all.length;
@@ -88,18 +137,48 @@ export default function AppPage() {
   const loadBrand = useCallback(async () => {
     try {
       const list = await api.getBrands();
-      if (list.length > 0) {
-        setBrand(list[0]);
-        loadFeed(list[0].id);
-      }
+      if (list.length > 0) setBrand(list[0]);
     } catch (e) {
       console.warn('Backend unavailable');
     }
     setBrandLoaded(true);
-  }, [loadFeed]);
+  }, []);
 
-  useEffect(() => { loadBrand(); }, [loadBrand]);
+  const loadTopics = useCallback(async () => {
+    try {
+      const ts = await api.getNewsTopics();
+      setTopics(ts);
+      setActiveTopicId((prev) => prev ?? ts[0]?.id ?? null);
+    } catch (e) {
+      console.warn('Failed to load topics:', e.message);
+    }
+  }, []);
+
+  useEffect(() => { loadBrand(); loadTopics(); }, [loadBrand, loadTopics]);
   useEffect(() => () => clearInterval(pollRef.current), []);
+
+  // Reload feed whenever the active scope changes.
+  useEffect(() => {
+    if (mode === 'news' && activeTopicId) loadFeed({ kind: 'topic', id: activeTopicId });
+    else if (mode === 'brand' && brand?.id) loadFeed({ kind: 'brand', id: brand.id });
+    else setFeedItems([]);
+    setSelectedId(null);
+  }, [mode, activeTopicId, brand?.id, loadFeed]);
+
+  function handleModeChange(m) {
+    setScreen((s) => (m === 'news' && !NEWS_SCREENS.includes(s)) ? 'feed' : s);
+    setMode(m);
+  }
+
+  async function handleAddTopic(name) {
+    try {
+      const t = await api.createNewsTopic(name, [name]);
+      setTopics((prev) => [t, ...prev.filter((p) => p.id !== t.id)]);
+      setActiveTopicId(t.id);
+    } catch (e) {
+      console.warn('Failed to add topic:', e.message);
+    }
+  }
 
   function handleLogout() {
     api.logout();
@@ -113,7 +192,7 @@ export default function AppPage() {
     let ticks = 0;
     pollRef.current = setInterval(async () => {
       ticks++;
-      const n = await loadFeed(brand.id);
+      const n = await loadFeed({ kind: 'brand', id: brand.id });
       if (n > 0 || ticks >= 12) { clearInterval(pollRef.current); setCollecting(false); }
     }, 4000);
   }
@@ -121,8 +200,9 @@ export default function AppPage() {
   async function handleBrandSaved(updatedBrand) {
     setBrand(updatedBrand);
     setShowWizard(false);
+    setMode('brand');
     if (!updatedBrand?.id) return;
-    await loadFeed(updatedBrand.id);
+    await loadFeed({ kind: 'brand', id: updatedBrand.id });
     // The wizard kicks off a background collect; the first run scans all probes
     // and takes a while, so poll the feed until results land (up to ~80s).
     setCollecting(true);
@@ -130,13 +210,13 @@ export default function AppPage() {
     let ticks = 0;
     pollRef.current = setInterval(async () => {
       ticks++;
-      const n = await loadFeed(updatedBrand.id);
+      const n = await loadFeed({ kind: 'brand', id: updatedBrand.id });
       if (n > 0 || ticks >= 20) { clearInterval(pollRef.current); setCollecting(false); }
     }, 4000);
   }
 
-  // No brand yet → show onboarding wizard fullscreen
-  if (brandLoaded && !brand) {
+  // Brand mode with no brand yet → show onboarding wizard fullscreen.
+  if (mode === 'brand' && brandLoaded && !brand) {
     return <AIWizard mode="create" onSaved={handleBrandSaved} />;
   }
 
@@ -149,20 +229,28 @@ export default function AppPage() {
         setScreen={setScreen}
         brand={brand}
         onLogout={handleLogout}
+        mode={mode}
+        onModeChange={handleModeChange}
       />
       <div className={styles.main}>
         <TopBar
           title={
-            screen === 'feed'      ? 'Лента' :
+            screen === 'feed'      ? (mode === 'news' ? 'Новости' : 'Лента') :
             screen === 'queue'     ? 'Очередь ответов' :
             screen === 'analytics' ? 'Аналитика' :
             screen === 'stories'   ? 'Сюжеты' :
             screen === 'digests'   ? 'Дайджесты' :
             screen === 'cities'    ? 'Города' : 'Настройки'
           }
-          sub={screen === 'feed' ? 'Instagram · TikTok · Telegram · реальные данные' : undefined}
+          sub={
+            screen === 'feed'
+              ? (mode === 'news'
+                  ? (scope?.name ? `Тема: ${scope.name} · Telegram + веб` : 'Выберите тему')
+                  : 'Instagram · TikTok · Telegram · реальные данные')
+              : undefined
+          }
         >
-          {brand && (
+          {mode === 'brand' && brand && (
             <button
               onClick={handleCollect}
               disabled={collecting}
@@ -181,6 +269,15 @@ export default function AppPage() {
           )}
         </TopBar>
 
+        {mode === 'news' && (
+          <TopicBar
+            topics={topics}
+            activeId={activeTopicId}
+            onSelect={setActiveTopicId}
+            onAdd={handleAddTopic}
+          />
+        )}
+
         {screen === 'feed' ? (
           <div className={styles.workspace}>
             <Feed items={feedItems} selectedId={selectedId} onSelect={setSelectedId} />
@@ -191,9 +288,9 @@ export default function AppPage() {
         ) : screen === 'analytics' ? (
           <div className={styles.workspace}><AnalyticsScreen brandId={brand?.id} /></div>
         ) : screen === 'stories' ? (
-          <div className={styles.workspace}><StoriesScreen brand={brand} /></div>
+          <div className={styles.workspace}><StoriesScreen scope={scope} /></div>
         ) : screen === 'digests' ? (
-          <div className={styles.workspace}><DigestsScreen brand={brand} /></div>
+          <div className={styles.workspace}><DigestsScreen scope={scope} /></div>
         ) : screen === 'cities' ? (
           <div className={styles.workspace}><CityExplorerScreen /></div>
         ) : (

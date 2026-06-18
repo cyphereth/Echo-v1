@@ -114,3 +114,26 @@ export const getStory   = (id)      => request(`/stories/${id}`);
 
 export const getDigests   = (brandId) => request(`/brands/${brandId}/digests`);
 export const createDigest = (brandId) => request(`/brands/${brandId}/digest`, { method: 'POST' });
+
+// ── News mode: topics + scope-aware feed/stories/digests ───────────────────────
+// A "scope" is { kind: 'brand' | 'topic', id, name }. The brand path is unchanged.
+
+const scopeQuery = (scope) =>
+  scope.kind === 'topic' ? `topic_id=${scope.id}` : `brand_id=${scope.id}`;
+
+export const getNewsTopics  = ()                  => request('/news/topics');
+export const createNewsTopic = (name, keywords = []) =>
+  request('/news/topics', { method: 'POST', body: JSON.stringify({ name, keywords }) });
+
+export const getInboxScoped   = (scope) => request(`/inbox?${scopeQuery(scope)}`);
+export const getStoriesScoped = (scope) => request(`/stories?${scopeQuery(scope)}`);
+
+export const getDigestsScoped = (scope) =>
+  scope.kind === 'topic'
+    ? request(`/topics/${scope.id}/digests`)
+    : request(`/brands/${scope.id}/digests`);
+
+export const createDigestScoped = (scope) =>
+  scope.kind === 'topic'
+    ? request(`/topics/${scope.id}/digest`, { method: 'POST' })
+    : request(`/brands/${scope.id}/digest`, { method: 'POST' });

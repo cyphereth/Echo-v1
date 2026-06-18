@@ -86,9 +86,46 @@ def _migrate() -> None:
                     conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
 
+# brand_id shipped NOT NULL, but news-mode rows are topic-scoped (exactly one of
+# brand_id/topic_id is set). SQLite can't ALTER a column to drop NOT NULL, so we
+# rewrite the table's stored DDL via writable_schema. Idempotent: tables whose
+# brand_id is already nullable are skipped.
+_NULLABLE_BRAND_ID = ("mentions", "incidents", "stories", "reports", "probes")
+
+
+def _relax_brand_id_not_null() -> None:
+    if not _DATABASE_URL.startswith("sqlite"):
+        return
+    raw = engine.raw_connection()
+    try:
+        cur = raw.cursor()
+        placeholders = ",".join("?" * len(_NULLABLE_BRAND_ID))
+        rows = cur.execute(
+            f"SELECT name, sql FROM sqlite_master WHERE type='table' "
+            f"AND name IN ({placeholders})", _NULLABLE_BRAND_ID,
+        ).fetchall()
+        targets = [(n, s) for (n, s) in rows if "brand_id INTEGER NOT NULL" in s]
+        if not targets:
+            return
+        cur.execute("PRAGMA writable_schema = ON")
+        for name, ddl in targets:
+            cur.execute(
+                "UPDATE sqlite_master SET sql = ? WHERE type='table' AND name = ?",
+                (ddl.replace("brand_id INTEGER NOT NULL", "brand_id INTEGER"), name),
+            )
+        # Bump schema_version so every other connection reparses on next use.
+        ver = cur.execute("PRAGMA schema_version").fetchone()[0]
+        cur.execute(f"PRAGMA schema_version = {ver + 1}")
+        cur.execute("PRAGMA writable_schema = OFF")
+        raw.commit()
+    finally:
+        raw.close()
+
+
 def init_db() -> None:
     Base.metadata.create_all(engine)
     _migrate()
+    _relax_brand_id_not_null()
     from .vec import create_vec_tables
     with engine.begin() as conn:
         create_vec_tables(conn)

@@ -34,7 +34,8 @@ def test_report_model_persists():
 
 def _mk_story(s, title, post_count, anomaly=False, sent=0.0):
     from radar.models import Story, StoryPoint
-    base = datetime(2026, 6, 16, 9, 0, tzinfo=timezone.utc)
+    # Relative to now so the story stays inside DIGEST_WINDOW_H regardless of date.
+    base = datetime.now(timezone.utc) - timedelta(hours=1)
     st = Story(brand_id=1, title=title, status="active", is_anomaly=anomaly,
                post_count=post_count, first_seen_at=base, last_seen_at=base)
     s.add(st); s.flush()

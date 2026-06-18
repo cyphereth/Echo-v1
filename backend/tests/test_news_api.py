@@ -50,6 +50,44 @@ def test_inbox_shows_unlaned_topic_mentions(monkeypatch, tmp_path):
     api.app.dependency_overrides.clear()
 
 
+def test_sources_panel_list_add_delete(monkeypatch, tmp_path):
+    from datetime import datetime, timezone
+    api, client, s, u = _client(monkeypatch, tmp_path)
+    # use a default global topic (Экономика exists from seed)
+    from radar.models import Topic, Probe, Mention
+    t = s.query(Topic).filter_by(name="Экономика").first()
+    s.add(Probe(topic_id=t.id, platform="telegram", kind="channel", query="@junk", source="niche", label="Junk"))
+    s.flush()
+    now = datetime.now(timezone.utc)
+    s.add(Mention(topic_id=t.id, platform="telegram", post_id="m1", author="@junk",
+                  text="мусор из канала", source="niche", created_at=now))
+    s.add(Mention(topic_id=t.id, platform="web", post_id="w1", author="rbc.ru",
+                  text="новость", source="niche", created_at=now))
+    s.commit()
+
+    # list: channel probe + web domain, with counts
+    body = client.get(f"/topics/{t.id}/sources").json()
+    by_handle = {x["handle"]: x for x in body}
+    assert by_handle["@junk"]["mention_count"] == 1 and by_handle["@junk"]["kind"] == "channel"
+    assert by_handle["rbc.ru"]["kind"] == "web"
+
+    # add a channel
+    r = client.post(f"/topics/{t.id}/sources", json={"handle": "@interfaxonline"})
+    assert r.status_code == 200, r.text
+    handles = {x["handle"] for x in client.get(f"/topics/{t.id}/sources").json()}
+    assert "@interfaxonline" in handles
+    # duplicate add → 409
+    assert client.post(f"/topics/{t.id}/sources", json={"handle": "@interfaxonline"}).status_code == 409
+
+    # delete the junk probe → probe + its mentions gone
+    pid = by_handle["@junk"]["id"]
+    assert client.delete(f"/topics/{t.id}/sources/{pid}").status_code == 200
+    handles2 = {x["handle"] for x in client.get(f"/topics/{t.id}/sources").json()}
+    assert "@junk" not in handles2
+    assert s.query(Mention).filter_by(author="@junk").count() == 0
+    api.app.dependency_overrides.clear()
+
+
 def test_private_topic_not_readable_by_other_user(monkeypatch, tmp_path):
     api, client, s, u = _client(monkeypatch, tmp_path)
     tid = client.post("/news/topics", json={"name": "Секрет", "keywords": ["x"]}).json()["id"]

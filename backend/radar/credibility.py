@@ -55,6 +55,21 @@ def _parse(raw: str) -> tuple[str, str]:
     return "unrated", (raw or "").strip()[:300]
 
 
+_SUMMARY_SYSTEM = (
+    "Ты — новостной редактор. По набору сообщений об одном событии напиши краткую "
+    "фактическую сводку «что произошло» на русском: 1–2 предложения, только факты, "
+    "без оценок и воды."
+)
+
+
+def summarize_story(session: Session, story: Story) -> Story:
+    """LLM 'what happened' summary for one story → story.summary. Raises
+    llm.LLMNotConfigured when no key (caller → 503)."""
+    story.summary = llm.complete(_SUMMARY_SYSTEM, _story_evidence(session, story), max_tokens=200).strip()
+    session.flush()
+    return story
+
+
 def assess_credibility(session: Session, story: Story) -> Story:
     """LLM fake-detection for one story. Sets story.credibility +
     credibility_note. Raises llm.LLMNotConfigured when no key (caller → 503)."""

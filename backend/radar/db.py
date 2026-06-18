@@ -65,6 +65,7 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "verified":         "BOOLEAN DEFAULT 0",
         "credibility":      "TEXT DEFAULT 'unrated'",
         "credibility_note": "TEXT DEFAULT ''",
+        "summary":          "TEXT DEFAULT ''",
     },
     "reports": {
         "topic_id": "INTEGER",

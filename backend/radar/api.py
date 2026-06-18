@@ -178,6 +178,7 @@ class StoryOut(BaseModel):
     verified: bool = False
     credibility: str = "unrated"
     credibility_note: str = ""
+    summary: str = ""
 
 class StoryPointOut(BaseModel):
     bucket_start: datetime
@@ -192,9 +193,15 @@ class IncidentOut(BaseModel):
     post_count: int
     last_seen_at: datetime
 
+class SourceRefOut(BaseModel):
+    author: str
+    first_seen: datetime
+    count: int
+
 class StoryDetailOut(StoryOut):
     points: list[StoryPointOut]
     incidents: list[IncidentOut]
+    sources: list[SourceRefOut] = []
 
 class ReportOut(BaseModel):
     id: int
@@ -1422,7 +1429,19 @@ def _story_fields(session: Session, st: Story) -> dict:
     return dict(id=st.id, title=st.title, status=st.status, is_anomaly=st.is_anomaly,
                 post_count=st.post_count, last_seen_at=st.last_seen_at, avg_sentiment=avg,
                 source_count=st.source_count, verified=st.verified,
-                credibility=st.credibility, credibility_note=st.credibility_note)
+                credibility=st.credibility, credibility_note=st.credibility_note,
+                summary=st.summary)
+
+
+def _story_sources(session: Session, story_id: int) -> list[SourceRefOut]:
+    """Distinct sources behind a story with first-seen time + count, earliest first."""
+    rows = (session.query(Mention.author, func.min(Mention.created_at), func.count(Mention.id))
+            .join(Incident, Mention.incident_id == Incident.id)
+            .filter(Incident.story_id == story_id, Mention.author.isnot(None))
+            .group_by(Mention.author).all())
+    refs = [SourceRefOut(author=a, first_seen=fs, count=c) for (a, fs, c) in rows if (a or "").strip()]
+    refs.sort(key=lambda r: r.first_seen)
+    return refs
 
 
 def _owned_story(session: Session, story_id: int, user: User) -> Story:
@@ -1470,7 +1489,22 @@ def get_story(story_id: int, user: User = Depends(current_user), session: Sessio
                 for p in points],
         incidents=[IncidentOut(id=i.id, title=i.title, sentiment=i.sentiment,
                                post_count=i.post_count, last_seen_at=i.last_seen_at)
-                   for i in incidents])
+                   for i in incidents],
+        sources=_story_sources(session, story_id))
+
+
+@app.post("/stories/{story_id}/summarize", response_model=StoryOut)
+def summarize_story_endpoint(story_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    """LLM 'what happened' summary for one story (manual, opt-in). 503 if no LLM key."""
+    st = _owned_story(session, story_id, user)
+    from . import credibility
+    from .llm import LLMNotConfigured
+    try:
+        credibility.summarize_story(session, st)
+    except LLMNotConfigured:
+        raise HTTPException(503, "LLM not configured")
+    session.commit()
+    return StoryOut(**_story_fields(session, st))
 
 
 @app.post("/stories/{story_id}/assess", response_model=StoryOut)
@@ -1518,3 +1552,69 @@ def list_topic_digests(topic_id: int, user: User = Depends(current_user), sessio
     rows = (session.query(Report).filter(Report.topic_id == topic_id, Report.kind == "digest")
             .order_by(Report.created_at.desc()).limit(50).all())
     return [ReportOut(id=r.id, kind=r.kind, body=r.body, created_at=r.created_at, story_id=r.story_id) for r in rows]
+
+
+# ── Topic sources panel ───────────────────────────────────────────────────────
+
+class SourceOut(BaseModel):
+    id: int | None = None          # probe id (None for read-only web domains)
+    kind: str                       # channel | global | web
+    handle: str
+    title: str = ""
+    mention_count: int = 0
+
+class SourceAdd(BaseModel):
+    handle: str
+
+
+@app.get("/topics/{topic_id}/sources", response_model=list[SourceOut])
+def list_topic_sources(topic_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    _owned_topic(session, topic_id, user)
+    out: list[SourceOut] = []
+    probes = (session.query(Probe)
+              .filter(Probe.topic_id == topic_id, Probe.platform == "telegram",
+                      Probe.kind.in_(("channel", "global"))).all())
+    for p in probes:
+        cnt = (session.query(func.count(Mention.id))
+               .filter(Mention.topic_id == topic_id, Mention.author == p.query).scalar() or 0)
+        out.append(SourceOut(id=p.id, kind=p.kind, handle=p.query, title=p.label or "", mention_count=cnt))
+    web = (session.query(Mention.author, func.count(Mention.id))
+           .filter(Mention.topic_id == topic_id, Mention.platform == "web")
+           .group_by(Mention.author).all())
+    for author, cnt in web:
+        out.append(SourceOut(id=None, kind="web", handle=author or "?", mention_count=cnt))
+    out.sort(key=lambda x: x.mention_count, reverse=True)
+    return out
+
+
+@app.post("/topics/{topic_id}/sources", response_model=SourceOut)
+def add_topic_source(topic_id: int, body: SourceAdd, user: User = Depends(current_user), session: Session = Depends(db)):
+    _owned_topic(session, topic_id, user)
+    handle = body.handle.strip()
+    if not handle:
+        raise HTTPException(400, "handle required")
+    if not handle.startswith("@"):
+        handle = "@" + handle
+    exists = (session.query(Probe)
+              .filter(Probe.topic_id == topic_id, Probe.platform == "telegram",
+                      Probe.query == handle).first())
+    if exists:
+        raise HTTPException(409, "source already exists")
+    p = Probe(topic_id=topic_id, platform="telegram", kind="channel", query=handle,
+              source="niche", label="manual",
+              next_run_at=datetime.now(timezone.utc), interval_sec=3600)
+    session.add(p); session.commit()
+    return SourceOut(id=p.id, kind="channel", handle=handle, title="manual", mention_count=0)
+
+
+@app.delete("/topics/{topic_id}/sources/{probe_id}")
+def delete_topic_source(topic_id: int, probe_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    _owned_topic(session, topic_id, user)
+    p = session.get(Probe, probe_id)
+    if p is None or p.topic_id != topic_id:
+        raise HTTPException(404, "source not found")
+    (session.query(Mention)
+     .filter(Mention.topic_id == topic_id, Mention.author == p.query)
+     .delete(synchronize_session=False))
+    session.delete(p); session.commit()
+    return {"ok": True}

@@ -153,3 +153,26 @@ def test_assess_endpoint_updates_credibility(monkeypatch, tmp_path):
     assert r.json()["credibility"] == "credible"
     assert "источник" in r.json()["credibility_note"]
     api.app.dependency_overrides.clear()
+
+
+def test_story_detail_lists_sources_first_seen(monkeypatch, tmp_path):
+    api, client, s, u = _api(monkeypatch, tmp_path)
+    st = _topic_story(s, topic_id=1)   # authors @a,@b,@c, all same time
+    body = client.get(f"/stories/{st.id}").json()
+    authors = {x["author"] for x in body["sources"]}
+    assert authors == {"@a", "@b", "@c"}
+    assert all("first_seen" in x and x["count"] >= 1 for x in body["sources"])
+    api.app.dependency_overrides.clear()
+
+
+def test_summarize_endpoint_sets_summary(monkeypatch, tmp_path):
+    api, client, s, u = _api(monkeypatch, tmp_path)
+    st = _topic_story(s, topic_id=1)
+    import radar.credibility as CR
+    monkeypatch.setattr(CR.llm, "complete",
+                        lambda system, user, **k: "На заводе произошёл взрыв, есть пострадавшие.")
+    r = client.post(f"/stories/{st.id}/summarize")
+    assert r.status_code == 200, r.text
+    assert "взрыв" in r.json()["summary"]
+    assert "взрыв" in client.get(f"/stories/{st.id}").json()["summary"]
+    api.app.dependency_overrides.clear()

@@ -220,6 +220,7 @@ class Story(Base):
     verified:      Mapped[bool]     = mapped_column(Boolean, default=False)    # source_count >= threshold
     credibility:   Mapped[str]      = mapped_column(Text, default="unrated")   # unrated | credible | suspect
     credibility_note: Mapped[str]   = mapped_column(Text, default="")          # short LLM rationale
+    summary:       Mapped[str]      = mapped_column(Text, default="")          # LLM "what happened" (on demand)
     first_seen_at: Mapped[datetime] = mapped_column(nullable=False)
     last_seen_at:  Mapped[datetime] = mapped_column(nullable=False)
     created_at:    Mapped[datetime] = mapped_column(default=_now)

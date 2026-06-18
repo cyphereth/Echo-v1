@@ -9,6 +9,9 @@ INTERVAL_HOT    = 300
 INTERVAL_NORMAL = 3600
 INTERVAL_QUIET  = 7200
 INTERVAL_CHATS  = 1800   # group-chat monitoring cadence (discover + search)
+# TG is the PRIMARY, fastest news source — read topic channels often and on their
+# own worker, independent of (and ahead of) brand chats and the web pass.
+INTERVAL_TOPIC_TG = int(os.getenv("INTERVAL_TOPIC_TG", "600"))   # 10 min
 ENABLE_DIGESTS      = os.getenv("ENABLE_DIGESTS", "0") == "1"   # opt-in; default OFF (no surprise paid LLM calls)
 INTERVAL_DIGEST     = int(os.getenv("DIGEST_INTERVAL_SEC", "86400"))  # once per ~24h
 INTERVAL_WEB    = int(os.getenv("INTERVAL_WEB", "3600"))   # web-source cadence
@@ -199,7 +202,9 @@ class Scheduler:
         self._last_chats    = 0.0
         self._last_digest   = 0.0
         self._last_web      = 0.0
+        self._last_topic_tg = 0.0
         self._chats_thread  = None   # background worker for the chat-monitoring pass
+        self._topic_tg_thread = None # background worker for topic TG (news) collection
 
     def start(self):
         self._running = True
@@ -269,7 +274,9 @@ class Scheduler:
             # Re-poll hot mentions on their own (faster) cadence, scoped to
             # auto-collect brands so opted-out users cost no API calls.
             self._maybe_hotwatch(session)
-            # Group-chat monitoring on its own (slower) cadence.
+            # News-mode TG collection FIRST — TG is the primary, fastest source.
+            self._maybe_collect_topic_tg(session)
+            # Group-chat monitoring (brand) on its own (slower) cadence.
             self._maybe_collect_chats(session)
             self._maybe_daily_digest(session)
             self._maybe_collect_web(session)
@@ -289,6 +296,28 @@ class Scheduler:
         self._last_chats = time.monotonic()
         self._chats_thread = threading.Thread(target=self._collect_chats_worker, daemon=True)
         self._chats_thread.start()
+
+    def _maybe_collect_topic_tg(self, session: Session):
+        # Topic TG collection on its OWN fast worker, decoupled from brand chats
+        # (TG is the primary news source — read it often and first). One at a time.
+        if self._tg_provider is None:
+            return
+        if time.monotonic() - self._last_topic_tg < INTERVAL_TOPIC_TG:
+            return
+        if self._topic_tg_thread is not None and self._topic_tg_thread.is_alive():
+            return
+        self._last_topic_tg = time.monotonic()
+        self._topic_tg_thread = threading.Thread(target=self._topic_tg_worker, daemon=True)
+        self._topic_tg_thread.start()
+
+    def _topic_tg_worker(self):
+        session = get_session()
+        try:
+            _run_topic_tg_pass(session, self._tg_provider)
+        except Exception:
+            log.exception("Topic TG worker failed")
+        finally:
+            session.close()
 
     def _maybe_daily_digest(self, session):
         if not ENABLE_DIGESTS:
@@ -318,9 +347,8 @@ class Scheduler:
                 if n:
                     _run_brand_pipeline(session, b.id, self._provider, self._tg_provider)
                     log.info("Chat monitor: %d new niche message(s) for brand %s", n, b.id)
-            # News-mode: discover + collect Telegram per auto-collect topic on the
-            # same TG worker thread/cadence (heavy, throttled — keep off the tick).
-            _run_topic_tg_pass(session, self._tg_provider)
+            # (Topic TG collection runs on its own faster worker — see
+            # _maybe_collect_topic_tg — so it isn't gated behind brand chats.)
         except Exception:
             log.exception("Chat monitor worker failed")
         finally:

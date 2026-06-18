@@ -10,6 +10,17 @@ from .base import SearchProvider, SearchPage, Post, Comment
 
 log = logging.getLogger(__name__)
 
+
+class TelegramFloodWait(RuntimeError):
+    """Raised when Telegram returns a flood-wait longer than the provider's
+    threshold. Carries ``.seconds`` so callers can back off / abort the cycle
+    instead of hammering on. Subclasses RuntimeError so existing broad handlers
+    still catch it."""
+    def __init__(self, seconds: int):
+        self.seconds = seconds
+        super().__init__(f"Telegram flood wait {seconds}s")
+
+
 SESSION_FILE = os.path.join(os.path.dirname(__file__), "..", "tg_session")
 API_ID   = os.getenv("TELEGRAM_API_ID", "")
 API_HASH = os.getenv("TELEGRAM_API_HASH", "")
@@ -155,7 +166,7 @@ class TelegramProvider(SearchProvider):
             msgs = self._await(self._client.get_messages(None, search=query, limit=20, offset_id=offset_id))
         except FloodWaitError as e:
             log.warning("Telegram flood wait %ds", e.seconds)
-            raise RuntimeError(f"Telegram flood wait {e.seconds}s")
+            raise TelegramFloodWait(e.seconds)
         posts = []
         for m in msgs:
             chat = getattr(m, "chat", None)
@@ -178,7 +189,7 @@ class TelegramProvider(SearchProvider):
             msgs = self._await(self._client.get_messages(entity, limit=20, offset_id=offset_id))
         except FloodWaitError as e:
             log.warning("Telegram flood wait %ds", e.seconds)
-            raise RuntimeError(f"Telegram flood wait {e.seconds}s")
+            raise TelegramFloodWait(e.seconds)
         except (ChannelPrivateError, UsernameNotOccupiedError, ValueError) as e:
             # Channel private, banned, or the @handle simply doesn't exist — skip cleanly.
             log.warning("Telegram channel unavailable (%s): %s", handle, type(e).__name__)
@@ -203,7 +214,7 @@ class TelegramProvider(SearchProvider):
                 entity, reply_to=int(post_id), limit=30))
         except FloodWaitError as e:
             log.warning("Telegram flood wait %ds", e.seconds)
-            raise RuntimeError(f"Telegram flood wait {e.seconds}s")
+            raise TelegramFloodWait(e.seconds)
         except Exception as e:
             # No discussion group, comments closed, invalid msg id, etc. — skip.
             log.warning("Telegram comments unavailable (%s/%s): %s", handle, post_id, type(e).__name__)
@@ -220,7 +231,7 @@ class TelegramProvider(SearchProvider):
             res = self._await(self._client(SearchRequest(q=query, limit=limit)))
         except FloodWaitError as e:
             log.warning("Telegram flood wait %ds", e.seconds)
-            raise RuntimeError(f"Telegram flood wait {e.seconds}s")
+            raise TelegramFloodWait(e.seconds)
         except Exception as e:
             log.warning("Telegram channel discovery failed (%r): %s", query, type(e).__name__)
             return []
@@ -249,7 +260,7 @@ class TelegramProvider(SearchProvider):
             rec = self._await(self._client(GetChannelRecommendationsRequest(channel=ent)))
         except FloodWaitError as e:
             log.warning("Telegram flood wait %ds", e.seconds)
-            raise RuntimeError(f"Telegram flood wait {e.seconds}s")
+            raise TelegramFloodWait(e.seconds)
         except Exception as e:
             log.warning("Telegram recommendations failed (%s): %s", h, type(e).__name__)
             return []
@@ -274,7 +285,7 @@ class TelegramProvider(SearchProvider):
             full = self._await(self._client(GetFullChannelRequest(ent)))
         except FloodWaitError as e:
             log.warning("Telegram flood wait %ds", e.seconds)
-            raise RuntimeError(f"Telegram flood wait {e.seconds}s")
+            raise TelegramFloodWait(e.seconds)
         except Exception as e:
             log.warning("Telegram linked-chat lookup failed (%s): %s", h, type(e).__name__)
             return None
@@ -305,7 +316,7 @@ class TelegramProvider(SearchProvider):
             msgs = self._await(self._client.get_messages(entity, search=term, limit=limit, min_id=min_id))
         except FloodWaitError as e:
             log.warning("Telegram flood wait %ds", e.seconds)
-            raise RuntimeError(f"Telegram flood wait {e.seconds}s")
+            raise TelegramFloodWait(e.seconds)
         except (ChannelPrivateError, UsernameNotOccupiedError, ValueError) as e:
             log.warning("Telegram chat unavailable (%s): %s", h, type(e).__name__)
             return []
@@ -331,7 +342,7 @@ class TelegramProvider(SearchProvider):
             msgs = self._await(self._client.get_messages(linked, search=term, limit=limit, min_id=min_id))
         except FloodWaitError as e:
             log.warning("Telegram flood wait %ds", e.seconds)
-            raise RuntimeError(f"Telegram flood wait {e.seconds}s")
+            raise TelegramFloodWait(e.seconds)
         except Exception as e:
             log.warning("Telegram linked-chat search failed (%s): %s", h, type(e).__name__)
             return []

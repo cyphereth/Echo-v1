@@ -108,14 +108,17 @@ def test_collect_probe_respects_watermark():
 # ── ensure_topic_channels_discovered ────────────────────────────────────────────
 
 class _DiscoverProv:
-    def __init__(self, by_query): self.by_query = by_query
+    def __init__(self, by_query):
+        self.by_query = by_query
+        self.recs_called = False
     def discover_channels(self, query, limit=30):
         return self.by_query.get(query, [])
     def channel_recommendations(self, handle, limit=10):
+        self.recs_called = True   # anti-flood: discovery must NOT fan out via recs
         return []
 
 
-def test_ensure_topic_channels_discovered_creates_filtered_probes():
+def test_ensure_topic_channels_discovered_creates_filtered_probes_no_recs_hop():
     import radar.collector as C
     from radar.models import Topic, Probe
     s = _mem()
@@ -129,6 +132,7 @@ def test_ensure_topic_channels_discovered_creates_filtered_probes():
     assert added == 1
     probes = s.query(Probe).filter(Probe.topic_id == 1, Probe.kind == "channel").all()
     assert [p.query for p in probes] == ["@econ_news"]
+    assert prov.recs_called is False  # no recommendations fan-out (flood control)
 
 
 def test_ensure_topic_channels_discovered_idempotent_when_full():
@@ -193,3 +197,63 @@ def test_run_topic_tg_pass_noop_without_provider(monkeypatch):
                         lambda sess, t: called.append(t.id))
     SCH._run_topic_tg_pass(s, tg_provider=None)
     assert called == []
+
+
+# ── anti-flood hardening ────────────────────────────────────────────────────────
+
+def test_telegram_floodwait_is_runtimeerror():
+    from radar.providers.telegram import TelegramFloodWait
+    e = TelegramFloodWait(42)
+    assert isinstance(e, RuntimeError)
+    assert e.seconds == 42 and "42" in str(e)
+
+
+def test_run_topic_tg_pass_caps_and_rotates_channels(monkeypatch):
+    from datetime import datetime, timezone, timedelta
+    import radar.scheduler as SCH
+    from radar.models import Topic, Probe
+    s = _mem()
+    s.add(Topic(id=1, name="Эк", kind="default", auto_collect=True,
+                keywords='["k"]', niche_keywords='["k"]'))
+    s.flush()
+    now = datetime.now(timezone.utc)
+    for i in range(5):  # c0 is least-recently-run
+        s.add(Probe(topic_id=1, platform="telegram", kind="channel", query=f"@c{i}",
+                    source="niche", next_run_at=now + timedelta(seconds=i), interval_sec=3600))
+    s.commit()
+    monkeypatch.setattr("radar.collector.ensure_topic_channels_discovered", lambda *a, **k: 0)
+    monkeypatch.setattr("radar.collector.ensure_topic_global_probe", lambda *a, **k: None)
+    monkeypatch.setattr("radar.stories.update_stories", lambda *a, **k: {})
+    monkeypatch.setattr(SCH, "MAX_TOPIC_CHANNELS_PER_RUN", 2)
+    read = []
+    monkeypatch.setattr("radar.collector.collect_probe",
+                        lambda sess, probe, prov: read.append(probe.query) or 0)
+    SCH._run_topic_tg_pass(s, tg_provider=object())
+    assert read == ["@c0", "@c1"]  # only the 2 least-recently-run this pass
+    # and they got pushed to the back of the rotation (past the untouched ones)
+    c0 = s.query(Probe).filter_by(query="@c0").one()   # collected → next_run_at advanced
+    c4 = s.query(Probe).filter_by(query="@c4").one()   # untouched this pass
+    assert c0.next_run_at > c4.next_run_at
+
+
+def test_run_topic_tg_pass_aborts_on_floodwait(monkeypatch):
+    import radar.scheduler as SCH
+    from radar.models import Topic, Probe
+    from radar.providers.telegram import TelegramFloodWait
+    s = _mem()
+    s.add(Topic(id=1, name="Эк", auto_collect=True, keywords='["k"]', niche_keywords='["k"]'))
+    s.flush()
+    for i in range(3):
+        s.add(Probe(topic_id=1, platform="telegram", kind="channel", query=f"@c{i}", source="niche"))
+    s.commit()
+    monkeypatch.setattr("radar.collector.ensure_topic_channels_discovered", lambda *a, **k: 0)
+    monkeypatch.setattr("radar.collector.ensure_topic_global_probe", lambda *a, **k: None)
+    monkeypatch.setattr("radar.stories.update_stories", lambda *a, **k: {})
+    monkeypatch.setattr(SCH, "MAX_TOPIC_CHANNELS_PER_RUN", 10)
+    calls = []
+    def boom(sess, probe, prov):
+        calls.append(probe.query)
+        raise TelegramFloodWait(30)
+    monkeypatch.setattr("radar.collector.collect_probe", boom)
+    SCH._run_topic_tg_pass(s, tg_provider=object())
+    assert len(calls) == 1  # aborted after the first flood, didn't hammer the rest

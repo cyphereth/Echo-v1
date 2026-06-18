@@ -128,3 +128,23 @@ existing topic-ownership model; no new authz.
   backend's throttled scheduler cadence, not rapid manual scripts.
 - The Telethon **file session locks** (sqlite): stop the backend before running
   `radar.tg_login` or any standalone provider script, and never run two at once.
+
+## Flood control (implemented 2026-06-18)
+
+Four hardening measures, all unit-tested:
+
+1. **`TelegramFloodWait(RuntimeError)`** — provider raises this (with `.seconds`)
+   on floods over `TG_FLOOD_THRESHOLD` instead of a generic `RuntimeError`, so
+   callers can detect and back off precisely.
+2. **No discovery fan-out** — topic channel discovery uses `discover_channels`
+   per keyword only; the "similar channels" recommendations hop (one call per
+   discovered channel — the worst burst) was removed.
+3. **Cap + rotation** — `_run_topic_tg_pass` reads at most
+   `MAX_TOPIC_CHANNELS_PER_RUN` (default 8) channels per topic per pass,
+   least-recently-run first, advancing `next_run_at` so the rest rotate in on
+   later passes (mirrors brand `MAX_CHATS_PER_RUN`).
+4. **Circuit breaker** — a `TelegramFloodWait` during discovery or collection
+   aborts the entire pass for that cycle rather than hammering the next probe.
+
+Steady state stays cheap because channel reads are watermarked (collect_probe
+stops at the last-seen post id), so only genuinely new messages are fetched.

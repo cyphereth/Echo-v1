@@ -593,6 +593,9 @@ def ensure_topic_channels_discovered(session: Session, topic: Topic, provider,
 
     terms = _topic_terms(topic)
     channels: list[tuple[str, str]] = []  # (handle, title)
+    # One discover_channels call per top keyword only. NO "similar channels" hop:
+    # it fans out into one call per discovered channel and flood-limits fresh
+    # accounts fast. discover_channels alone yields plenty of on-topic channels.
     for kw in topic.keywords_list()[:4]:
         try:
             for c in provider.discover_channels(kw, limit=20):
@@ -600,16 +603,6 @@ def ensure_topic_channels_discovered(session: Session, topic: Topic, provider,
                     channels.append((c.get("handle"), c.get("title", "")))
         except Exception:
             log.warning("discover_channels failed for topic %s kw %r", topic.id, kw)
-    # 1 hop of "similar channels" widens the on-topic set.
-    if hasattr(provider, "channel_recommendations"):
-        for handle, _title in list(channels):
-            if not handle:
-                continue
-            try:
-                for rec in provider.channel_recommendations(handle, limit=10):
-                    channels.append((rec, ""))
-            except Exception:
-                log.warning("channel_recommendations failed for %s", handle)
 
     seen = {p.query for p in existing}
     added = 0

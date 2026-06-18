@@ -102,29 +102,54 @@ def _run_topic_web_pass(session, web_provider):
                 log.exception("topic web pipeline failed for topic %s", t.id)
 
 
+# Per-pass cap on channel reads per topic — least-recently-run first, rest rotate
+# in on later passes. Keeps a topic with dozens of channels from bursting into a
+# flood-wait every cycle (mirrors MAX_CHATS_PER_RUN for brand chats).
+MAX_TOPIC_CHANNELS_PER_RUN = int(os.getenv("MAX_TOPIC_CHANNELS_PER_RUN", "8"))
+
+
 def _run_topic_tg_pass(session, tg_provider):
     """Discover + collect Telegram for each auto-collect topic, then cluster into
-    stories. Global search + public-channel reads only (no joining). Best-effort."""
+    stories. Global search + public-channel reads only (no joining). Best-effort.
+
+    Flood control: no discovery fan-out, channel reads capped + rotated per pass,
+    and a flood-wait aborts the whole cycle (don't keep hammering a limited account)."""
     if tg_provider is None:
         return
     import radar.collector as _collector
     import radar.stories as _stories
     from .models import Topic, Probe
     from .scope import scope_for_topic
+    from .providers.telegram import TelegramFloodWait
     for t in session.query(Topic).filter(Topic.auto_collect.is_(True)).all():
         try:
             _collector.ensure_topic_channels_discovered(session, t, tg_provider)
             _collector.ensure_topic_global_probe(session, t)
+        except TelegramFloodWait as e:
+            log.warning("topic TG pass: flood wait %ss during discovery — aborting cycle", e.seconds)
+            return
         except Exception:
             log.exception("topic TG discovery failed for topic %s", t.id)
-        probes = (session.query(Probe)
-                  .filter(Probe.topic_id == t.id, Probe.platform == "telegram",
-                          Probe.kind.in_(("global", "channel"))).all())
-        for probe in probes:
+        # One global probe (cheap) + the least-recently-run channel probes, capped.
+        gprobes = (session.query(Probe)
+                   .filter(Probe.topic_id == t.id, Probe.platform == "telegram",
+                           Probe.kind == "global").all())
+        cprobes = (session.query(Probe)
+                   .filter(Probe.topic_id == t.id, Probe.platform == "telegram",
+                           Probe.kind == "channel")
+                   .order_by(Probe.next_run_at.asc())
+                   .limit(MAX_TOPIC_CHANNELS_PER_RUN).all())
+        for probe in gprobes + cprobes:
             try:
                 _collector.collect_probe(session, probe, tg_provider)
+            except TelegramFloodWait as e:
+                log.warning("topic TG pass: flood wait %ss — aborting cycle", e.seconds)
+                return
             except Exception:
                 log.exception("collect_probe failed for topic probe %s", probe.id)
+            # Push to the back of the rotation regardless of outcome.
+            probe.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=probe.interval_sec or 3600)
+        session.commit()
         # update_stories returns early when there are no new mentions, so calling
         # it unconditionally is cheap and keeps the pass simple.
         try:

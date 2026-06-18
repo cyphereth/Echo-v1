@@ -102,6 +102,37 @@ def _run_topic_web_pass(session, web_provider):
                 log.exception("topic web pipeline failed for topic %s", t.id)
 
 
+def _run_topic_tg_pass(session, tg_provider):
+    """Discover + collect Telegram for each auto-collect topic, then cluster into
+    stories. Global search + public-channel reads only (no joining). Best-effort."""
+    if tg_provider is None:
+        return
+    import radar.collector as _collector
+    import radar.stories as _stories
+    from .models import Topic, Probe
+    from .scope import scope_for_topic
+    for t in session.query(Topic).filter(Topic.auto_collect.is_(True)).all():
+        try:
+            _collector.ensure_topic_channels_discovered(session, t, tg_provider)
+            _collector.ensure_topic_global_probe(session, t)
+        except Exception:
+            log.exception("topic TG discovery failed for topic %s", t.id)
+        probes = (session.query(Probe)
+                  .filter(Probe.topic_id == t.id, Probe.platform == "telegram",
+                          Probe.kind.in_(("global", "channel"))).all())
+        for probe in probes:
+            try:
+                _collector.collect_probe(session, probe, tg_provider)
+            except Exception:
+                log.exception("collect_probe failed for topic probe %s", probe.id)
+        # update_stories returns early when there are no new mentions, so calling
+        # it unconditionally is cheap and keeps the pass simple.
+        try:
+            _stories.update_stories(session, scope_for_topic(t))
+        except Exception:
+            log.exception("topic TG clustering failed for topic %s", t.id)
+
+
 def _run_digest_pass(session):
     """Generate a daily digest for each auto-collect brand. Best-effort."""
     import radar.digests as _digests
@@ -262,6 +293,9 @@ class Scheduler:
                 if n:
                     _run_brand_pipeline(session, b.id, self._provider, self._tg_provider)
                     log.info("Chat monitor: %d new niche message(s) for brand %s", n, b.id)
+            # News-mode: discover + collect Telegram per auto-collect topic on the
+            # same TG worker thread/cadence (heavy, throttled — keep off the tick).
+            _run_topic_tg_pass(session, self._tg_provider)
         except Exception:
             log.exception("Chat monitor worker failed")
         finally:

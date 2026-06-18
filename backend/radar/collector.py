@@ -5,9 +5,9 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
-from .models import Brand, Mention, MentionSnapshot, Probe
+from .models import Brand, Mention, MentionSnapshot, Probe, Topic
 from .providers.base import Post, SearchProvider
-from .scope import Scope, scope_for_brand
+from .scope import Scope, scope_for_brand, scope_for_topic, scope_for_probe
 from .spam import looks_like_ad_cheap
 
 log = logging.getLogger(__name__)
@@ -247,9 +247,15 @@ def collect_web(session: Session, scope: Scope, provider) -> int:
 
 
 def collect_probe(session: Session, probe: Probe, provider: SearchProvider) -> int:
-    brand = session.get(Brand, probe.brand_id)
-    if not brand: return 0
-    brand_scope = scope_for_brand(brand)
+    # Resolve the probe's owner (brand or topic); bail if it was deleted.
+    if probe.topic_id is not None:
+        if session.get(Topic, probe.topic_id) is None:
+            return 0
+    elif session.get(Brand, probe.brand_id) is None:
+        return 0
+    scope = scope_for_probe(session, probe)
+    brand = session.get(Brand, probe.brand_id) if scope.kind == "brand" else None
+    topic_terms = [t.lower() for t in scope.niche_keywords if t] if scope.kind == "topic" else []
     new_watermark = None
     count         = 0
     cursor        = None
@@ -263,13 +269,19 @@ def collect_probe(session: Session, probe: Probe, provider: SearchProvider) -> i
                     new_watermark = post.post_id
                 if probe.watermark and post.post_id == probe.watermark:
                     found_watermark = True; break
-                if not _matches(post, brand, probe): continue
+                # Relevance gate: brand-matching for brands; topic term-match for topics
+                # (mirrors collect_web). Empty topic terms → keep everything.
+                if scope.kind == "brand":
+                    if not _matches(post, brand, probe): continue
+                elif topic_terms and not _term_hit(post.text, topic_terms):
+                    continue
                 age = (_now().replace(tzinfo=None) - post.created_at.replace(tzinfo=None)).days
                 if age > 7: continue
-                # Cheap ad/spam rules + tiny-account floor → store-but-hide.
-                spam = looks_like_ad_cheap(post.text, post.author, post.hashtags) \
-                    or _below_follower_floor(post, getattr(brand, "local_mode", False))
-                mention = _upsert_mention(session, post, brand_scope)
+                # Cheap ad/spam rules (+ tiny-account floor for brands only).
+                spam = looks_like_ad_cheap(post.text, post.author, post.hashtags)
+                if scope.kind == "brand":
+                    spam = spam or _below_follower_floor(post, getattr(brand, "local_mode", False))
+                mention = _upsert_mention(session, post, scope)
                 mention.source = probe.source
                 mention.competitor = probe.label if probe.source == "competitor" else None
                 mention.is_spam = spam
@@ -531,3 +543,76 @@ def collect_chats(session: Session, brand: Brand, provider) -> int:
         probe.next_run_at = _now() + timedelta(seconds=probe.interval_sec or 3600)
         session.commit()
     return count
+
+
+# ── Topic (news-mode) Telegram discovery ────────────────────────────────────────
+
+def _topic_terms(topic: Topic) -> list[str]:
+    terms = topic.keywords_list() + topic.niche_keywords_list() + [topic.name]
+    return [t.lower() for t in terms if t]
+
+
+def ensure_topic_global_probe(session: Session, topic: Topic) -> None:
+    """Idempotently ensure one global-search Telegram probe exists for the topic."""
+    exists = (session.query(Probe)
+              .filter(Probe.topic_id == topic.id, Probe.platform == "telegram",
+                      Probe.kind == "global").first())
+    if exists is not None:
+        return
+    session.add(Probe(
+        topic_id=topic.id, platform="telegram", kind="global",
+        query=_web_query_terms(topic.name, topic.keywords_list()),
+        source="niche", next_run_at=_now(), interval_sec=3600,
+    ))
+    session.commit()
+
+
+def ensure_topic_channels_discovered(session: Session, topic: Topic, provider,
+                                     min_chan: int = 6, max_add: int = 30) -> int:
+    """Discover public channels for a topic by keyword and store them as
+    kind="channel" Telegram probes (read-only; no joining). Keeps only channels
+    whose title hits the topic's terms. No-op once enough exist. Fail-open."""
+    if not hasattr(provider, "discover_channels"):
+        return 0
+    existing = (session.query(Probe)
+                .filter(Probe.topic_id == topic.id, Probe.platform == "telegram",
+                        Probe.kind == "channel").all())
+    if len(existing) >= min_chan:
+        return 0
+
+    terms = _topic_terms(topic)
+    channels: list[tuple[str, str]] = []  # (handle, title)
+    for kw in topic.keywords_list()[:4]:
+        try:
+            for c in provider.discover_channels(kw, limit=20):
+                if _term_hit(c.get("title", ""), terms):
+                    channels.append((c.get("handle"), c.get("title", "")))
+        except Exception:
+            log.warning("discover_channels failed for topic %s kw %r", topic.id, kw)
+    # 1 hop of "similar channels" widens the on-topic set.
+    if hasattr(provider, "channel_recommendations"):
+        for handle, _title in list(channels):
+            if not handle:
+                continue
+            try:
+                for rec in provider.channel_recommendations(handle, limit=10):
+                    channels.append((rec, ""))
+            except Exception:
+                log.warning("channel_recommendations failed for %s", handle)
+
+    seen = {p.query for p in existing}
+    added = 0
+    for handle, title in channels:
+        if added >= max_add:
+            break
+        if not handle or handle in seen:
+            continue
+        seen.add(handle)
+        session.add(Probe(
+            topic_id=topic.id, platform="telegram", kind="channel",
+            query=handle, source="niche", label=(title or "")[:120],
+            next_run_at=_now(), interval_sec=3600,
+        ))
+        added += 1
+    session.commit()
+    return added

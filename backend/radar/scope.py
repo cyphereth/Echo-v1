@@ -29,3 +29,11 @@ def scope_for_brand(b) -> Scope:
 def scope_for_topic(t) -> Scope:
     return Scope("topic", t.id, t.name, t.keywords_list(), t.niche_keywords_list(),
                  getattr(t, "market", "ru"), False)
+
+
+def scope_for_probe(session, probe) -> Scope:
+    """Resolve a Probe's owner (topic takes precedence over brand)."""
+    from .models import Brand, Topic
+    if getattr(probe, "topic_id", None) is not None:
+        return scope_for_topic(session.get(Topic, probe.topic_id))
+    return scope_for_brand(session.get(Brand, probe.brand_id))

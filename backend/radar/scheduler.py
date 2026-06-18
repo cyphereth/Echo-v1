@@ -78,6 +78,30 @@ def _run_web_pass(session, web_provider):
                 log.exception("web pipeline failed for brand %s", b.id)
 
 
+def _run_topic_web_pass(session, web_provider):
+    """Search the web per auto-collect topic and cluster results into stories.
+
+    News-mode counterpart of :func:`_run_web_pass`: topics have no brand and no
+    reply-drafting pipeline, so we only collect + cluster (no classify_and_draft).
+    """
+    import radar.collector as _collector
+    import radar.stories as _stories
+    from .models import Topic
+    from .scope import scope_for_topic
+    for t in session.query(Topic).filter(Topic.auto_collect.is_(True)).all():
+        scope = scope_for_topic(t)
+        try:
+            n = _collector.collect_web(session, scope, web_provider)
+        except Exception:
+            log.exception("collect_web failed for topic %s", t.id)
+            continue
+        if n:
+            try:
+                _stories.update_stories(session, scope)
+            except Exception:
+                log.exception("topic web pipeline failed for topic %s", t.id)
+
+
 def _run_digest_pass(session):
     """Generate a daily digest for each auto-collect brand. Best-effort."""
     import radar.digests as _digests
@@ -225,6 +249,7 @@ class Scheduler:
             return
         self._last_web = time.monotonic()
         _run_web_pass(session, self._web_provider)
+        _run_topic_web_pass(session, self._web_provider)
 
     def _collect_chats_worker(self):
         session = get_session()

@@ -97,3 +97,31 @@ def test_run_web_pass_collects_for_autocollect_brands(monkeypatch):
                         lambda sess, brand, prov: calls.append(brand.id) or 0)
     SCH._run_web_pass(s, web_provider=object())
     assert calls == [1]
+
+
+def test_run_topic_web_pass_collects_for_autocollect_topics(monkeypatch):
+    import radar.scheduler as SCH
+    from radar.models import Topic
+    s = _mem()
+    s.add(Topic(id=1, name="Экономика", kind="default", auto_collect=True))
+    s.add(Topic(id=2, name="Приват", kind="search", auto_collect=False))  # excluded
+    s.commit()
+    scopes = []
+    monkeypatch.setattr("radar.collector.collect_web",
+                        lambda sess, scope, prov: scopes.append((scope.kind, scope.id)) or 0)
+    SCH._run_topic_web_pass(s, web_provider=object())
+    assert scopes == [("topic", 1)]
+
+
+def test_run_topic_web_pass_clusters_when_collected(monkeypatch):
+    import radar.scheduler as SCH
+    from radar.models import Topic
+    s = _mem()
+    s.add(Topic(id=1, name="Экономика", kind="default", auto_collect=True))
+    s.commit()
+    monkeypatch.setattr("radar.collector.collect_web", lambda sess, scope, prov: 3)
+    clustered = []
+    monkeypatch.setattr("radar.stories.update_stories",
+                        lambda sess, scope: clustered.append(scope.id) or {})
+    SCH._run_topic_web_pass(s, web_provider=object())
+    assert clustered == [1]

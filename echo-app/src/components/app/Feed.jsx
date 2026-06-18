@@ -82,9 +82,10 @@ function FeedCard({ item, active, onClick }) {
   );
 }
 
-export function Feed({ items: allItems = [], selectedId, onSelect }) {
+export function Feed({ items: allItems = [], selectedId, onSelect, lanes = true }) {
   const [tab, setTab] = useState('brand');
-  const items = allItems.filter(i => i.lane === tab);
+  // News mode (lanes=false): one flat chronological list, no brand/competitor/niche tabs.
+  const items = lanes ? allItems.filter(i => i.lane === tab) : allItems;
 
   const counts = {
     brand:      allItems.filter(i => i.lane === 'brand').length,
@@ -94,21 +95,24 @@ export function Feed({ items: allItems = [], selectedId, onSelect }) {
 
   return (
     <div className={styles.feed}>
-      <div className={styles.tabs}>
-        {TABS.map(t => (
-          <button key={t.key} className={styles.tab} data-active={tab === t.key ? '1' : '0'}
-            onClick={() => setTab(t.key)}>
-            {t.label}
-            <span className={styles.tabCount} style={{
-              background: tab === t.key ? getLaneColor(t.key) + '22' : 'var(--surface-2)',
-              color: tab === t.key ? getLaneColor(t.key) : 'var(--fg-4)',
-            }}>
-              {counts[t.key]}
-            </span>
-          </button>
-        ))}
-      </div>
+      {lanes && (
+        <div className={styles.tabs}>
+          {TABS.map(t => (
+            <button key={t.key} className={styles.tab} data-active={tab === t.key ? '1' : '0'}
+              onClick={() => setTab(t.key)}>
+              {t.label}
+              <span className={styles.tabCount} style={{
+                background: tab === t.key ? getLaneColor(t.key) + '22' : 'var(--surface-2)',
+                color: tab === t.key ? getLaneColor(t.key) : 'var(--fg-4)',
+              }}>
+                {counts[t.key]}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
       <div className={styles.list}>
+        {items.length === 0 && <div style={{ padding: 24, color: 'var(--fg-3)', fontSize: 13 }}>Пока пусто — источники собираются.</div>}
         {items.map(item => (
           <FeedCard key={item.id} item={item}
             active={selectedId === item.id}

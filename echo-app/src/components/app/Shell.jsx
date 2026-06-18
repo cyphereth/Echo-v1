@@ -48,10 +48,15 @@ export function Sidebar({ screen, setScreen, brand, onLogout, mode, onModeChange
       <EchoLogo />
       <ModeSwitch mode={mode} onModeChange={onModeChange} />
       <nav className={styles.nav}>
-        <NavItem icon="radio"    label="Лента"     active={screen === 'feed'}      badge={mode === 'brand' ? negCount : 0} onClick={() => setScreen('feed')} />
-        <NavItem icon="activity" label="Сюжеты"    active={screen === 'stories'}  onClick={() => setScreen('stories')} />
-        <NavItem icon="zap"      label="Дайджесты" active={screen === 'digests'}   onClick={() => setScreen('digests')} />
-        {mode === 'brand' && <>
+        {mode === 'news' ? <>
+          <NavItem icon="activity" label="Сюжеты"    active={screen === 'stories'}  onClick={() => setScreen('stories')} />
+          <NavItem icon="radio"    label="Лента"     active={screen === 'feed'}     onClick={() => setScreen('feed')} />
+          <NavItem icon="zap"      label="Дайджесты" active={screen === 'digests'}  onClick={() => setScreen('digests')} />
+          <NavItem icon="search"   label="Источники" active={screen === 'sources'}  onClick={() => setScreen('sources')} />
+        </> : <>
+          <NavItem icon="radio"    label="Лента"     active={screen === 'feed'}      badge={negCount} onClick={() => setScreen('feed')} />
+          <NavItem icon="activity" label="Сюжеты"    active={screen === 'stories'}  onClick={() => setScreen('stories')} />
+          <NavItem icon="zap"      label="Дайджесты" active={screen === 'digests'}   onClick={() => setScreen('digests')} />
           <NavItem icon="inbox"    label="Очередь"   active={screen === 'queue'}     onClick={() => setScreen('queue')} />
           <NavItem icon="pieChart" label="Аналитика" active={screen === 'analytics'} onClick={() => setScreen('analytics')} />
           <NavItem icon="search"   label="Города"    active={screen === 'cities'}    onClick={() => setScreen('cities')} />

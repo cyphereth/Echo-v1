@@ -36,16 +36,24 @@ function CredibilityBadge({ story }) {
   return null;
 }
 
+function fmtTime(iso) {
+  const d = new Date(iso);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 function StoryDetail({ id }) {
   const [data, setData] = useState(null);
   const [assessing, setAssessing] = useState(false);
+  const [summarizing, setSummarizing] = useState(false);
   useEffect(() => { api.getStory(id).then(setData).catch(() => setData(null)); }, [id]);
   if (!data) return <div className={styles.empty}>Загрузка…</div>;
+  // News view: volume bars (spike) + source-count growth (corroboration). No sentiment.
   const chart = data.points.map((p) => ({
     t: fmtHour(p.bucket_start),
     mentions: p.mention_count,
-    sentiment: p.avg_sentiment,
+    sources: p.source_count,
   }));
+  const sources = data.sources || [];
   const assess = async () => {
     setAssessing(true);
     try {
@@ -54,42 +62,64 @@ function StoryDetail({ id }) {
     } catch { /* 503 when LLM off — leave as-is */ }
     finally { setAssessing(false); }
   };
+  const summarize = async () => {
+    setSummarizing(true);
+    try {
+      const upd = await api.summarizeStory(id);
+      setData((d) => ({ ...d, summary: upd.summary }));
+    } catch { /* 503 when LLM off */ }
+    finally { setSummarizing(false); }
+  };
   return (
     <div className={styles.detail}>
       <h2>{data.title}</h2>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '4px 0 10px' }}>
         <VerifiedBadge story={data} />
         <CredibilityBadge story={data} />
-        <button
-          onClick={assess}
-          disabled={assessing}
-          style={{ ...badge('var(--brand)', '#fff'), border: 'none', cursor: assessing ? 'default' : 'pointer' }}
-        >
+        {data.is_anomaly && <span style={badge('rgba(245,158,11,0.15)', '#f59e0b')}>⚡ всплеск</span>}
+        <button onClick={summarize} disabled={summarizing}
+          style={{ ...badge('var(--surface-3)', 'var(--fg-2)'), border: 'none', cursor: summarizing ? 'default' : 'pointer' }}>
+          {summarizing ? '…' : '📝 Что произошло'}
+        </button>
+        <button onClick={assess} disabled={assessing}
+          style={{ ...badge('var(--brand)', '#fff'), border: 'none', cursor: assessing ? 'default' : 'pointer' }}>
           {assessing ? 'Анализ…' : '🔎 Оценить достоверность'}
         </button>
       </div>
-      {data.credibility_note && (
-        <div style={{ fontSize: 12, color: 'var(--fg-2)', marginBottom: 10 }}>{data.credibility_note}</div>
+
+      {data.summary && (
+        <div style={{ fontSize: 14, color: 'var(--fg-1)', background: 'var(--surface-2)',
+                      padding: '10px 12px', borderRadius: 'var(--r-md)', marginBottom: 10 }}>
+          {data.summary}
+        </div>
       )}
-      <div className={styles.meta}>
-        {data.post_count} упоминаний · тональность {(data.avg_sentiment ?? 0).toFixed(2)}
-        {data.is_anomaly && <span className={styles.anomaly}> ⚠ аномалия</span>}
-      </div>
-      <ResponsiveContainer width="100%" height={260}>
+      {data.credibility_note && (
+        <div style={{ fontSize: 12, color: 'var(--fg-2)', marginBottom: 10 }}>⚠ {data.credibility_note}</div>
+      )}
+
+      <div className={styles.meta}>{data.post_count} сообщений · {data.source_count} источников</div>
+
+      <ResponsiveContainer width="100%" height={240}>
         <ComposedChart data={chart}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="t" />
-          <YAxis yAxisId="l" />
-          <YAxis yAxisId="r" orientation="right" domain={[-1, 1]} />
+          <YAxis yAxisId="l" allowDecimals={false} />
+          <YAxis yAxisId="r" orientation="right" allowDecimals={false} />
           <Tooltip />
-          <Bar yAxisId="l" dataKey="mentions" name="Упоминания" fill="#6366f1" />
-          <Line yAxisId="r" dataKey="sentiment" name="Тональность" stroke="#ef4444" dot={false} />
+          <Bar yAxisId="l" dataKey="mentions" name="Сообщения/час" fill="#6366f1" />
+          <Line yAxisId="r" dataKey="sources" name="Источников" stroke="#16a34a" dot={false} strokeWidth={2} />
         </ComposedChart>
       </ResponsiveContainer>
-      <h3>Инциденты</h3>
+
+      <h3>Источники ({sources.length})</h3>
       <ul className={styles.incidents}>
-        {data.incidents.map((i) => (
-          <li key={i.id}>{i.title} <span>· {i.post_count}</span></li>
+        {sources.length === 0 && <li style={{ color: 'var(--fg-3)' }}>—</li>}
+        {sources.map((src, i) => (
+          <li key={src.author}>
+            {i === 0 && <span title="Сообщил первым" style={{ color: '#16a34a', fontWeight: 700 }}>⚑ </span>}
+            <span style={{ fontFamily: 'var(--font-mono)' }}>{src.author}</span>
+            <span> · {fmtTime(src.first_seen)} · {src.count}</span>
+          </li>
         ))}
       </ul>
     </div>
@@ -122,7 +152,7 @@ export function StoriesScreen({ scope }) {
               {s.title}
             </div>
             <div className={styles.sub} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span>{s.post_count} · {(s.avg_sentiment ?? 0).toFixed(2)}</span>
+              <span>{s.post_count} сообщений</span>
               <VerifiedBadge story={s} compact />
               {s.credibility === 'suspect' && <span title={s.credibility_note || ''}>⚠</span>}
             </div>

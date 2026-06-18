@@ -9,11 +9,12 @@ import { SettingsScreen } from '../components/app/Settings';
 import { CityExplorerScreen } from '../components/app/CityExplorer';
 import { StoriesScreen } from '../components/app/Stories';
 import { DigestsScreen } from '../components/app/Digests';
+import { SourcesScreen } from '../components/app/Sources';
 import { AIWizard } from '../components/app/AIWizard';
 import * as api from '../services/api';
 import styles from '../components/app/shell.module.css';
 
-const NEWS_SCREENS = ['feed', 'stories', 'digests'];
+const NEWS_SCREENS = ['stories', 'feed', 'digests', 'sources'];
 
 function agoStr(isoString) {
   const mins = Math.round((Date.now() - new Date(isoString)) / 60000);
@@ -104,7 +105,7 @@ function TopicBar({ topics, activeId, onSelect, onAdd }) {
 export default function AppPage() {
   const navigate = useNavigate();
   const [mode, setMode]               = useState('news');   // 'news' | 'brand'
-  const [screen, setScreen]           = useState('feed');
+  const [screen, setScreen]           = useState('stories'); // news lands on events
   const [selectedId, setSelectedId]   = useState(null);
   const [brand, setBrand]             = useState(null);
   const [brandLoaded, setBrandLoaded] = useState(false);
@@ -165,8 +166,12 @@ export default function AppPage() {
     setSelectedId(null);
   }, [mode, activeTopicId, brand?.id, loadFeed]);
 
+  const BRAND_SCREENS = ['feed', 'stories', 'digests', 'queue', 'analytics', 'cities', 'settings'];
   function handleModeChange(m) {
-    setScreen((s) => (m === 'news' && !NEWS_SCREENS.includes(s)) ? 'feed' : s);
+    setScreen((s) => {
+      if (m === 'news') return NEWS_SCREENS.includes(s) ? s : 'stories';
+      return BRAND_SCREENS.includes(s) ? s : 'feed';
+    });
     setMode(m);
   }
 
@@ -240,6 +245,7 @@ export default function AppPage() {
             screen === 'analytics' ? 'Аналитика' :
             screen === 'stories'   ? 'Сюжеты' :
             screen === 'digests'   ? 'Дайджесты' :
+            screen === 'sources'   ? 'Источники' :
             screen === 'cities'    ? 'Города' : 'Настройки'
           }
           sub={
@@ -280,7 +286,7 @@ export default function AppPage() {
 
         {screen === 'feed' ? (
           <div className={styles.workspace}>
-            <Feed items={feedItems} selectedId={selectedId} onSelect={setSelectedId} />
+            <Feed items={feedItems} selectedId={selectedId} onSelect={setSelectedId} lanes={mode === 'brand'} />
             {selected ? <DetailPanel item={selected} /> : <EmptyDetail />}
           </div>
         ) : screen === 'queue' ? (
@@ -291,6 +297,8 @@ export default function AppPage() {
           <div className={styles.workspace}><StoriesScreen scope={scope} /></div>
         ) : screen === 'digests' ? (
           <div className={styles.workspace}><DigestsScreen scope={scope} /></div>
+        ) : screen === 'sources' ? (
+          <div className={styles.workspace}><SourcesScreen scope={scope} /></div>
         ) : screen === 'cities' ? (
           <div className={styles.workspace}><CityExplorerScreen /></div>
         ) : (

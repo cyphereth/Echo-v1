@@ -47,17 +47,18 @@ a story view built around corroboration and spike — not sentiment.
   fatal.
 - `collector.ensure_topic_channels_discovered` rewrite:
   1. **Seed:** add seed handles for the topic that aren't already probes.
-  2. **Graph:** expand via `channel_recommendations` off the seed handles only
-     (bounded by `TOPIC_RECS_PER_SEED`, default 5 — small seed set keeps the
-     fan-out flood-safe).
-  3. **LLM gate** for every *candidate not in the seed* (graph picks + any
-     `discover_channels` fallback): `credibility`-style call
-     `is_news_source(handle, title, topic)` → keep only news channels on-topic.
-     Seed channels skip the gate (already vetted).
-  4. Blind `discover_channels`-by-single-keyword is used **only** when the topic
-     has zero seed channels, and its results still pass the LLM gate.
-- New helper `collector.classify_source(provider_meta, topic) -> bool` calling
-  `llm.complete` with a strict yes/no system prompt; on `LLMNotConfigured`
+  2. **Graph (trusted):** when seeds exist, expand via `channel_recommendations`
+     off the seed handles only, bounded by `TOPIC_RECS_PER_SEED` (default 5).
+     Recommendations of a vetted news channel are news-adjacent, and the API
+     returns only handles (no title to gate on), so these are added directly —
+     the small bound keeps it flood-safe.
+  3. **Keyword discovery (gated):** only when the topic has **zero seeds** (user
+     search-topics), run `discover_channels` per keyword; each result has a
+     title, so pass it through the **LLM gate** `classify_source(title, topic)`
+     to kill homonyms/junk ("инфляция счастья", psychology "переговоры",
+     FX-bots, promo). Seeds skip the gate (already vetted).
+- New helper `collector.classify_source(title, topic) -> bool` calling
+  `llm.complete` with a strict YES/NO system prompt; on `LLMNotConfigured`
   degrade to the title term-hit filter (current behavior) so it still runs
   without a key.
 - Anti-flood from the prior sprint stays (cap + rotation + circuit breaker).

@@ -13,6 +13,18 @@ DEFAULT_TOPICS = {
     "Военное":     ["обстрел","удар","БПЛА","ПВО","фронт","наступление","эвакуация","взрыв"],
 }
 
+# Vetted news-channel seeds per default topic. Best-effort handles — each is
+# validated when added (a missing/renamed handle is skipped, not fatal), and the
+# editable Sources panel lets users fix the list. Seeds skip the LLM gate.
+TOPIC_SEED_CHANNELS = {
+    "Экономика":   ["@rbc_news", "@interfaxonline", "@tass_agency", "@thebell_io",
+                    "@frank_media", "@kommersant", "@rian_ru"],
+    "Геополитика": ["@bbcrussian", "@meduzalive", "@dwglavnoe", "@currenttime",
+                    "@rian_ru", "@tass_agency", "@kommersant"],
+    "Военное":     ["@astrapress", "@bazabazon", "@breakingmash", "@bbbreaking",
+                    "@rian_ru", "@bbcrussian", "@meduzalive"],
+}
+
 
 def run(session: Session) -> None:
     """No-op: mock data removed. Real data comes from live collection."""

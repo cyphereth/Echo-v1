@@ -7,6 +7,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from .models import Brand, Mention, MentionSnapshot, Probe, Topic
 from .providers.base import Post, SearchProvider
+from . import llm
 from .scope import Scope, scope_for_brand, scope_for_topic, scope_for_probe
 from .spam import looks_like_ad_cheap
 
@@ -578,45 +579,82 @@ def ensure_topic_global_probe(session: Session, topic: Topic) -> None:
     session.commit()
 
 
+TOPIC_RECS_PER_SEED = int(os.getenv("TOPIC_RECS_PER_SEED", "5"))
+
+
+def _seed_handles_for(topic: Topic) -> list[str]:
+    from .seed import TOPIC_SEED_CHANNELS
+    return TOPIC_SEED_CHANNELS.get(topic.name, [])
+
+
+def classify_source(title: str, topic: Topic) -> bool:
+    """LLM yes/no gate: is this a NEWS channel about the topic (not promo,
+    psychology, FX-bot, personal blog)? Degrades to the title term-hit filter
+    when no LLM key is configured."""
+    try:
+        ans = llm.complete(
+            "Ты — фильтр новостных источников. Ответь РОВНО одним словом: YES или NO.",
+            f"Тема: {topic.name} (ключевые слова: {', '.join(topic.keywords_list()[:6])}).\n"
+            f"Название Telegram-канала: «{title}».\n"
+            f"Это новостной канал по этой теме? NO, если это реклама, психология, "
+            f"мотивация, боты курсов валют, личный блог, торговые сигналы или не по теме.",
+            max_tokens=5,
+        )
+        return ans.strip().upper().startswith("Y")
+    except llm.LLMNotConfigured:
+        return _term_hit(title, _topic_terms(topic))
+
+
 def ensure_topic_channels_discovered(session: Session, topic: Topic, provider,
                                      min_chan: int = 6, max_add: int = 30) -> int:
-    """Discover public channels for a topic by keyword and store them as
-    kind="channel" Telegram probes (read-only; no joining). Keeps only channels
-    whose title hits the topic's terms. No-op once enough exist. Fail-open."""
-    if not hasattr(provider, "discover_channels"):
-        return 0
+    """Hybrid source discovery for a topic (read-only; no joining):
+      1. add vetted seed channels (no gate);
+      2. if still below min_chan, grow via 'similar channels' off the seeds
+         (trusted — news-adjacent, bounded);
+      3. for seed-less topics, fall back to keyword discovery, LLM-gated by title
+         to kill homonyms/junk.
+    Idempotent; fail-open per provider call."""
     existing = (session.query(Probe)
                 .filter(Probe.topic_id == topic.id, Probe.platform == "telegram",
                         Probe.kind == "channel").all())
-    if len(existing) >= min_chan:
-        return 0
-
-    terms = _topic_terms(topic)
-    channels: list[tuple[str, str]] = []  # (handle, title)
-    # One discover_channels call per top keyword only. NO "similar channels" hop:
-    # it fans out into one call per discovered channel and flood-limits fresh
-    # accounts fast. discover_channels alone yields plenty of on-topic channels.
-    for kw in topic.keywords_list()[:4]:
-        try:
-            for c in provider.discover_channels(kw, limit=20):
-                if _term_hit(c.get("title", ""), terms):
-                    channels.append((c.get("handle"), c.get("title", "")))
-        except Exception:
-            log.warning("discover_channels failed for topic %s kw %r", topic.id, kw)
-
     seen = {p.query for p in existing}
     added = 0
-    for handle, title in channels:
-        if added >= max_add:
-            break
-        if not handle or handle in seen:
-            continue
-        seen.add(handle)
-        session.add(Probe(
-            topic_id=topic.id, platform="telegram", kind="channel",
-            query=handle, source="niche", label=(title or "")[:120],
-            next_run_at=_now(), interval_sec=3600,
-        ))
-        added += 1
+
+    def _add(handle: str, label: str) -> None:
+        nonlocal added
+        if handle and handle not in seen and added < max_add:
+            seen.add(handle)
+            session.add(Probe(
+                topic_id=topic.id, platform="telegram", kind="channel",
+                query=handle, source="niche", label=(label or "")[:120],
+                next_run_at=_now(), interval_sec=3600,
+            ))
+            added += 1
+
+    # 1. Vetted seeds — always ensure present, no gate.
+    seeds = _seed_handles_for(topic)
+    for h in seeds:
+        _add(h, "seed")
+
+    # 2/3. Grow only if still thin.
+    if len(existing) + added < min_chan:
+        if seeds and hasattr(provider, "channel_recommendations"):
+            # Similar-to-vetted: news-adjacent, bounded, no title to gate on → trust.
+            for h in seeds:
+                try:
+                    for rec in provider.channel_recommendations(h, limit=TOPIC_RECS_PER_SEED):
+                        _add(rec, "similar")
+                except Exception:
+                    log.warning("channel_recommendations failed for %s", h)
+        elif not seeds and hasattr(provider, "discover_channels"):
+            # Seed-less (user) topic: keyword discovery, LLM-gated by title.
+            for kw in topic.keywords_list()[:4]:
+                try:
+                    for c in provider.discover_channels(kw, limit=20):
+                        if classify_source(c.get("title", ""), topic):
+                            _add(c.get("handle"), c.get("title", ""))
+                except Exception:
+                    log.warning("discover_channels failed for topic %s kw %r", topic.id, kw)
+
     session.commit()
     return added

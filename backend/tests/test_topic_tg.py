@@ -105,47 +105,8 @@ def test_collect_probe_respects_watermark():
     assert s.query(Mention).filter(Mention.topic_id == 1).count() == 1
 
 
-# ── ensure_topic_channels_discovered ────────────────────────────────────────────
-
-class _DiscoverProv:
-    def __init__(self, by_query):
-        self.by_query = by_query
-        self.recs_called = False
-    def discover_channels(self, query, limit=30):
-        return self.by_query.get(query, [])
-    def channel_recommendations(self, handle, limit=10):
-        self.recs_called = True   # anti-flood: discovery must NOT fan out via recs
-        return []
-
-
-def test_ensure_topic_channels_discovered_creates_filtered_probes_no_recs_hop():
-    import radar.collector as C
-    from radar.models import Topic, Probe
-    s = _mem()
-    s.add(Topic(id=1, name="Экономика", keywords='["инфляция"]', niche_keywords='["инфляция"]'))
-    s.flush()
-    prov = _DiscoverProv({"инфляция": [
-        {"handle": "@econ_news", "title": "Инфляция и экономика"},   # title hits term → kept
-        {"handle": "@cats",      "title": "Котики каждый день"},      # off-topic → dropped
-    ]})
-    added = C.ensure_topic_channels_discovered(s, s.get(Topic, 1), prov, min_chan=6)
-    assert added == 1
-    probes = s.query(Probe).filter(Probe.topic_id == 1, Probe.kind == "channel").all()
-    assert [p.query for p in probes] == ["@econ_news"]
-    assert prov.recs_called is False  # no recommendations fan-out (flood control)
-
-
-def test_ensure_topic_channels_discovered_idempotent_when_full():
-    import radar.collector as C
-    from radar.models import Topic, Probe
-    s = _mem()
-    s.add(Topic(id=1, name="Экономика", keywords='["инфляция"]', niche_keywords='["инфляция"]'))
-    s.flush()
-    for i in range(6):
-        s.add(Probe(topic_id=1, platform="telegram", kind="channel", query=f"@c{i}", source="niche"))
-    s.flush()
-    prov = _DiscoverProv({"инфляция": [{"handle": "@new", "title": "Инфляция"}]})
-    assert C.ensure_topic_channels_discovered(s, s.get(Topic, 1), prov, min_chan=6) == 0
+# NB: ensure_topic_channels_discovered (hybrid seed/graph/LLM-gate) is covered in
+# test_news_sources.py.
 
 
 # ── ensure_topic_global_probe ───────────────────────────────────────────────────

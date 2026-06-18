@@ -21,10 +21,11 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def _top_stories(session: Session, brand_id: int) -> list[Story]:
+def _top_stories(session: Session, scope) -> list[Story]:
     since = datetime.now(timezone.utc) - WINDOW
+    owner_col = getattr(Story, scope.kind + "_id")
     return (session.query(Story)
-            .filter(Story.brand_id == brand_id, Story.status == "active",
+            .filter(owner_col == scope.id, Story.status == "active",
                     Story.last_seen_at >= since)
             .order_by(Story.is_anomaly.desc(), Story.post_count.desc())
             .limit(TOP_N).all())
@@ -46,17 +47,18 @@ def _aggregate(session: Session, stories: list[Story]) -> str:
     return "Топ-сюжеты за период:\n" + "\n".join(lines)
 
 
-def build_daily_digest(session: Session, brand_id: int) -> Report | None:
-    """Generate and store a digest Report for the brand's top stories.
+def build_daily_digest(session: Session, scope) -> Report | None:
+    """Generate and store a digest Report for the scope's top stories.
 
+    ``scope`` is a :class:`radar.scope.Scope` (brand or topic).
     Returns the Report, or None if there are no active stories in the window.
     Raises llm.LLMNotConfigured if no key (caller maps to 503).
     """
-    stories = _top_stories(session, brand_id)
+    stories = _top_stories(session, scope)
     if not stories:
         return None
     body = llm.complete(_SYSTEM, _aggregate(session, stories), max_tokens=1024)
-    report = Report(brand_id=brand_id, kind="digest", body=body)
+    report = Report(**scope.owner_kwargs(), kind="digest", body=body)
     session.add(report)
     session.flush()
     return report

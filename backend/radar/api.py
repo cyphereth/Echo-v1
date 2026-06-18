@@ -12,13 +12,14 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .db import init_db, get_session
-from .models import Brand, Probe, Mention, DraftEdit, Comment, User, Story, Incident, StoryPoint, Report
+from .models import Brand, Probe, Mention, DraftEdit, Comment, User, Story, Incident, StoryPoint, Report, Topic
 from .auth import hash_password, verify_password, create_token, decode_token
 from .classify import classify
 from .drafts import generate_draft
 from .pipeline import classify_and_draft, recent_edits
 from .scoring import Snapshot, severity as calc_severity, phase as calc_phase
 from .hotwatch import rescore_mention
+from .scope import scope_for_brand, scope_for_topic
 from . import seed as seed_module
 
 log = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ def on_startup():
     try:
         seed_module.run(session)
         seed_module.ensure_demo_user(session)   # idempotent: demo login + backfill owners
+        seed_module.ensure_default_topics(session)
     finally:
         session.close()
 
@@ -126,6 +128,15 @@ def _owned_brand(session: Session, brand_id: int, user: User) -> Brand:
     return b
 
 
+def _owned_topic(session: Session, topic_id: int, user: User) -> Topic:
+    t = session.get(Topic, topic_id)
+    if not t:
+        raise HTTPException(404, "Topic not found")
+    if t.user_id is not None and t.user_id != user.id:
+        raise HTTPException(403, "Forbidden")
+    return t
+
+
 def _owned_mention(session: Session, mention_id: int, user: User) -> Mention:
     m = session.get(Mention, mention_id)
     if not m:
@@ -137,6 +148,20 @@ def _owned_mention(session: Session, mention_id: int, user: User) -> Mention:
 class AuthBody(BaseModel):
     email:    str
     password: str
+
+
+# ── Topic schemas ─────────────────────────────────────────────────────────────
+
+class TopicOut(BaseModel):
+    id:           int
+    name:         str
+    kind:         str
+    keywords:     list[str]
+    auto_collect: bool
+
+class TopicCreate(BaseModel):
+    name:     str
+    keywords: list[str] = []
 
 
 # ── Story schemas ─────────────────────────────────────────────────────────────
@@ -202,6 +227,32 @@ def login(body: AuthBody, session: Session = Depends(db)):
 @app.get("/auth/me")
 def auth_me(user: User = Depends(current_user)):
     return _user_card(user)
+
+
+# ── News / Topics ─────────────────────────────────────────────────────────────
+
+@app.get("/news/topics", response_model=list[TopicOut])
+def news_topics(user: User = Depends(current_user), session: Session = Depends(db)):
+    from sqlalchemy import or_
+    rows = (session.query(Topic)
+            .filter(or_(Topic.user_id.is_(None), Topic.user_id == user.id))
+            .order_by(Topic.kind.desc(), Topic.created_at.desc()).all())
+    return [TopicOut(id=t.id, name=t.name, kind=t.kind, keywords=t.keywords_list(),
+                     auto_collect=t.auto_collect) for t in rows]
+
+
+@app.post("/news/topics", response_model=TopicOut)
+def create_news_topic(body: TopicCreate, user: User = Depends(current_user), session: Session = Depends(db)):
+    import json as _j
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    kws = body.keywords or [name]
+    t = Topic(user_id=user.id, kind="search", name=name,
+              keywords=_j.dumps(kws, ensure_ascii=False),
+              niche_keywords=_j.dumps(kws, ensure_ascii=False), auto_collect=True)
+    session.add(t); session.commit()
+    return TopicOut(id=t.id, name=t.name, kind=t.kind, keywords=t.keywords_list(), auto_collect=t.auto_collect)
 
 
 # ── Serialization ─────────────────────────────────────────────────────────────
@@ -864,11 +915,19 @@ def set_autocollect(brand_id: int, body: AutoCollectBody, user: User = Depends(c
 # ── Inbox ─────────────────────────────────────────────────────────────────────
 
 @app.get("/inbox")
-def inbox(brand_id: int, include_hidden: int = 0, user: User = Depends(current_user), session: Session = Depends(db)):
-    _owned_brand(session, brand_id, user)
+def inbox(brand_id: int | None = None, topic_id: int | None = None,
+          include_hidden: int = 0, user: User = Depends(current_user), session: Session = Depends(db)):
+    if topic_id is not None:
+        _owned_topic(session, topic_id, user)
+        kind, oid = "topic", topic_id
+    elif brand_id is not None:
+        _owned_brand(session, brand_id, user)
+        kind, oid = "brand", brand_id
+    else:
+        raise HTTPException(400, "brand_id or topic_id required")
     q = (
         session.query(Mention)
-        .filter(Mention.brand_id == brand_id, Mention.status != "rejected")
+        .filter(getattr(Mention, kind + "_id") == oid, Mention.status != "rejected")
     )
     if not include_hidden:
         q = q.filter(Mention.is_spam.is_(False))
@@ -1325,11 +1384,11 @@ def explore_cities(user: User = Depends(current_user), session: Session = Depend
 
 @app.post("/brands/{brand_id}/digest", response_model=ReportOut)
 def create_digest(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
-    _owned_brand(session, brand_id, user)
+    brand = _owned_brand(session, brand_id, user)
     from .digests import build_daily_digest
     from .llm import LLMNotConfigured
     try:
-        report = build_daily_digest(session, brand_id)
+        report = build_daily_digest(session, scope_for_brand(brand))
     except LLMNotConfigured:
         raise HTTPException(503, "Digest generation unavailable — set LLM_API_KEY in backend/.env")
     if report is None:
@@ -1352,10 +1411,18 @@ def list_digests(brand_id: int, user: User = Depends(current_user), session: Ses
 # ── Stories ───────────────────────────────────────────────────────────────────
 
 @app.get("/stories", response_model=list[StoryOut])
-def list_stories(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
-    _owned_brand(session, brand_id, user)
+def list_stories(brand_id: int | None = None, topic_id: int | None = None,
+                 user: User = Depends(current_user), session: Session = Depends(db)):
+    if topic_id is not None:
+        _owned_topic(session, topic_id, user)
+        kind, oid = "topic", topic_id
+    elif brand_id is not None:
+        _owned_brand(session, brand_id, user)
+        kind, oid = "brand", brand_id
+    else:
+        raise HTTPException(400, "brand_id or topic_id required")
     rows = (session.query(Story)
-            .filter(Story.brand_id == brand_id, Story.status == "active")
+            .filter(getattr(Story, kind + "_id") == oid, Story.status == "active")
             .order_by(Story.is_anomaly.desc(), Story.last_seen_at.desc()).all())
     out = []
     for st in rows:
@@ -1395,6 +1462,32 @@ def get_story(story_id: int, user: User = Depends(current_user), session: Sessio
 
 @app.post("/stories/recompute")
 def recompute_stories(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
-    _owned_brand(session, brand_id, user)
+    brand = _owned_brand(session, brand_id, user)
     from .stories import update_stories
-    return update_stories(session, brand_id)
+    return update_stories(session, scope_for_brand(brand))
+
+
+# ── Topic digests ─────────────────────────────────────────────────────────────
+
+@app.post("/topics/{topic_id}/digest", response_model=ReportOut)
+def create_topic_digest(topic_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    t = _owned_topic(session, topic_id, user)
+    from .digests import build_daily_digest
+    from .llm import LLMNotConfigured
+    try:
+        report = build_daily_digest(session, scope_for_topic(t))
+    except LLMNotConfigured:
+        raise HTTPException(503, "Digest generation unavailable — set LLM_API_KEY in backend/.env")
+    if report is None:
+        raise HTTPException(404, "No active stories to summarize")
+    session.commit()
+    return ReportOut(id=report.id, kind=report.kind, body=report.body,
+                     created_at=report.created_at, story_id=report.story_id)
+
+
+@app.get("/topics/{topic_id}/digests", response_model=list[ReportOut])
+def list_topic_digests(topic_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    _owned_topic(session, topic_id, user)
+    rows = (session.query(Report).filter(Report.topic_id == topic_id, Report.kind == "digest")
+            .order_by(Report.created_at.desc()).limit(50).all())
+    return [ReportOut(id=r.id, kind=r.kind, body=r.body, created_at=r.created_at, story_id=r.story_id) for r in rows]

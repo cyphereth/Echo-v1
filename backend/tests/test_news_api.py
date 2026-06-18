@@ -1,0 +1,44 @@
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+
+def _client(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path/'t.db'}")
+    import importlib
+    import radar.db as db; importlib.reload(db); db.init_db()
+    import radar.seed as seed; importlib.reload(seed)
+    import radar.api as api; importlib.reload(api)
+    from fastapi.testclient import TestClient
+    from radar.models import User
+    s = db.get_session()
+    seed.ensure_default_topics(s)
+    u = User(email="u1@t.t", password_hash="x"); s.add(u); s.flush(); s.commit()
+    api.app.dependency_overrides[api.current_user] = lambda: u
+    return api, TestClient(api.app), s, u
+
+
+def test_news_topics_defaults_and_private(monkeypatch, tmp_path):
+    api, client, s, u = _client(monkeypatch, tmp_path)
+    r = client.get("/news/topics")
+    assert r.status_code == 200
+    names = {t["name"] for t in r.json()}
+    assert {"Экономика", "Геополитика", "Военное"} <= names
+    # create a private topic
+    r2 = client.post("/news/topics", json={"name": "Моя тема", "keywords": ["крипта"]})
+    assert r2.status_code == 200, r2.text
+    tid = r2.json()["id"]
+    # stories endpoint accepts topic_id (empty but 200)
+    r3 = client.get(f"/stories?topic_id={tid}")
+    assert r3.status_code == 200
+    api.app.dependency_overrides.clear()
+
+
+def test_private_topic_not_readable_by_other_user(monkeypatch, tmp_path):
+    api, client, s, u = _client(monkeypatch, tmp_path)
+    tid = client.post("/news/topics", json={"name": "Секрет", "keywords": ["x"]}).json()["id"]
+    from radar.models import User
+    other = User(email="u2@t.t", password_hash="x"); s.add(other); s.flush(); s.commit()
+    api.app.dependency_overrides[api.current_user] = lambda: other
+    r = client.get(f"/stories?topic_id={tid}")
+    assert r.status_code == 403
+    api.app.dependency_overrides.clear()

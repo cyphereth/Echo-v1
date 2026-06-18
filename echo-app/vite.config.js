@@ -18,6 +18,8 @@ export default defineConfig({
       '/opportunities':'http://127.0.0.1:8000',
       '/debug':        'http://127.0.0.1:8000',
       '/stories':      'http://127.0.0.1:8000',
+      '/news':         'http://127.0.0.1:8000',
+      '/topics':       'http://127.0.0.1:8000',
     },
   },
 })

@@ -47,16 +47,16 @@ function StoryDetail({ id }) {
   );
 }
 
-export function StoriesScreen({ brand }) {
+export function StoriesScreen({ scope }) {
   const [stories, setStories] = useState([]);
   const [selected, setSelected] = useState(null);
   useEffect(() => {
-    if (!brand?.id) return;
-    api.getStories(brand.id).then((rows) => {
+    if (!scope?.id) { setStories([]); setSelected(null); return; }
+    api.getStoriesScoped(scope).then((rows) => {
       setStories(rows);
       setSelected(rows[0]?.id ?? null);
     }).catch(() => setStories([]));
-  }, [brand?.id]);
+  }, [scope?.kind, scope?.id]);
 
   return (
     <div className={styles.wrap}>

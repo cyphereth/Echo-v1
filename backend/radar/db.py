@@ -44,8 +44,9 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "local_mode":     "BOOLEAN DEFAULT 0",
     },
     "probes": {
-        "source": "TEXT DEFAULT 'brand'",
-        "label":  "TEXT",
+        "source":    "TEXT DEFAULT 'brand'",
+        "label":     "TEXT",
+        "topic_id":  "INTEGER",
     },
     "mentions": {
         "source":      "TEXT DEFAULT 'brand'",
@@ -53,6 +54,16 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "opportunity": "TEXT",
         "is_spam":     "BOOLEAN DEFAULT 0",
         "incident_id": "INTEGER",
+        "topic_id":    "INTEGER",
+    },
+    "incidents": {
+        "topic_id": "INTEGER",
+    },
+    "stories": {
+        "topic_id": "INTEGER",
+    },
+    "reports": {
+        "topic_id": "INTEGER",
     },
     "comments": {
         "is_opportunity": "BOOLEAN DEFAULT 0",

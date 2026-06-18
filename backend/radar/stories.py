@@ -45,13 +45,14 @@ def _title(text: str) -> str:
     return (t[:80] + "…") if len(t) > 80 else (t or "(без текста)")
 
 
-def _attach_to_incident(session, conn, brand_id, m, v) -> Incident:
+def _attach_to_incident(session, conn, scope, m, v) -> Incident:
     created = _aware(m.created_at)
+    owner_id = getattr(m, scope.kind + "_id")
     for inc_id, dist in vec.knn(conn, "incident_vec", v, k=5):
         if (1.0 - dist) < INCIDENT_SIM:
             break  # sorted by distance; nothing closer qualifies
         inc = session.get(Incident, inc_id)
-        if inc is None or inc.brand_id != brand_id:
+        if inc is None or getattr(inc, scope.kind + "_id") != owner_id:
             continue
         if abs(_aware(inc.last_seen_at) - created) > INCIDENT_WINDOW:
             continue
@@ -65,7 +66,7 @@ def _attach_to_incident(session, conn, brand_id, m, v) -> Incident:
         inc.last_seen_at = max(_aware(inc.last_seen_at), created)
         session.flush()
         return inc
-    inc = Incident(brand_id=brand_id, title=_title(m.text),
+    inc = Incident(**scope.owner_kwargs(), title=_title(m.text),
                    sentiment=_tone_score(m.tone), post_count=1,
                    first_seen_at=created, last_seen_at=created)
     session.add(inc); session.flush()
@@ -73,22 +74,23 @@ def _attach_to_incident(session, conn, brand_id, m, v) -> Incident:
     return inc
 
 
-def _attach_to_story(session, conn, brand_id, inc, centroid) -> Story:
+def _attach_to_story(session, conn, scope, inc, centroid) -> Story:
     if inc.story_id is not None:
         st = session.get(Story, inc.story_id)
         _bump_story(conn, st, inc, centroid)
         return st
+    owner_id = getattr(inc, scope.kind + "_id")
     for st_id, dist in vec.knn(conn, "story_vec", centroid, k=5):
         if (1.0 - dist) < STORY_SIM:
             break
         st = session.get(Story, st_id)
-        if st is None or st.brand_id != brand_id:
+        if st is None or getattr(st, scope.kind + "_id") != owner_id:
             continue
         if abs(_aware(st.last_seen_at) - _aware(inc.last_seen_at)) > STORY_WINDOW:
             continue
         _bump_story(conn, st, inc, centroid)
         return st
-    st = Story(brand_id=brand_id, title=inc.title,
+    st = Story(**scope.owner_kwargs(), title=inc.title,
                first_seen_at=inc.first_seen_at, last_seen_at=inc.last_seen_at,
                post_count=0)
     session.add(st); session.flush()
@@ -137,10 +139,15 @@ def _recompute_points(session: Session, story_id: int) -> None:
     session.flush()
 
 
-def update_stories(session: Session, brand_id: int) -> dict:
+def update_stories(session: Session, scope) -> dict:
+    """Cluster unprocessed Mentions for the given Scope into Incidents and Stories.
+
+    ``scope`` is a :class:`radar.scope.Scope` (brand or topic).
+    """
     conn = _raw(session)
+    owner_col = getattr(Mention, scope.kind + "_id")
     new = (session.query(Mention)
-           .filter(Mention.brand_id == brand_id,
+           .filter(owner_col == scope.id,
                    Mention.incident_id.is_(None),
                    Mention.is_spam.is_(False))
            .order_by(Mention.created_at).all())
@@ -152,10 +159,10 @@ def update_stories(session: Session, brand_id: int) -> dict:
     for m, v in zip(new, vecs):
         v = _normalize(v)
         vec.store(conn, "mention_vec", m.id, v)
-        inc = _attach_to_incident(session, conn, brand_id, m, v)
+        inc = _attach_to_incident(session, conn, scope, m, v)
         m.incident_id = inc.id
         cen = _centroid(conn, "incident_vec", inc.id)
-        st = _attach_to_story(session, conn, brand_id, inc, cen)
+        st = _attach_to_story(session, conn, scope, inc, cen)
         inc.story_id = st.id
         incidents_touched.add(inc.id)
         stories_touched.add(st.id)

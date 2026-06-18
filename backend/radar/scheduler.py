@@ -43,13 +43,16 @@ class TokenBucket:
 def _run_brand_pipeline(session, brand_id, provider, tg_provider):
     import radar.pipeline as _pipeline
     import radar.stories as _stories
+    from .models import Brand
+    from .scope import scope_for_brand
     _pipeline.classify_and_draft(session, brand_id)
     _pipeline.fetch_new_comments(session, brand_id, provider, tg_provider)
     # Story clustering is additive and best-effort: it triggers the heavy
     # embedding-model load on first use, so a failure (no network/disk/OOM) must
     # NOT poison the core classify/draft pipeline. Degrade to "no stories this tick".
     try:
-        _stories.update_stories(session, brand_id)
+        b = session.get(Brand, brand_id)
+        _stories.update_stories(session, scope_for_brand(b))
     except Exception:
         log.exception("update_stories failed for brand %s (story layer skipped)", brand_id)
 
@@ -60,16 +63,17 @@ def _run_web_pass(session, web_provider):
     import radar.pipeline as _pipeline
     import radar.stories as _stories
     from .models import Brand
+    from .scope import scope_for_brand
     for b in session.query(Brand).filter(Brand.auto_collect.is_(True)).all():
         try:
-            n = _collector.collect_web(session, b, web_provider)
+            n = _collector.collect_web(session, scope_for_brand(b), web_provider)
         except Exception:
             log.exception("collect_web failed for brand %s", b.id)
             continue
         if n:
             try:
                 _pipeline.classify_and_draft(session, b.id)
-                _stories.update_stories(session, b.id)
+                _stories.update_stories(session, scope_for_brand(b))
             except Exception:
                 log.exception("web pipeline failed for brand %s", b.id)
 
@@ -79,10 +83,11 @@ def _run_digest_pass(session):
     import radar.digests as _digests
     from .llm import LLMNotConfigured
     from .models import Brand
+    from .scope import scope_for_brand
     brands = session.query(Brand).filter(Brand.auto_collect.is_(True)).all()
     for b in brands:
         try:
-            if _digests.build_daily_digest(session, b.id):
+            if _digests.build_daily_digest(session, scope_for_brand(b)):
                 session.commit()
                 log.info("Daily digest generated for brand %s", b.id)
         except LLMNotConfigured:

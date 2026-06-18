@@ -216,6 +216,10 @@ class Story(Base):
     status:        Mapped[str]      = mapped_column(Text, default="active")   # active | dormant
     is_anomaly:    Mapped[bool]     = mapped_column(Boolean, default=False)   # set by detector later
     post_count:    Mapped[int]      = mapped_column(Integer, default=0)
+    source_count:  Mapped[int]      = mapped_column(Integer, default=0)        # distinct independent sources
+    verified:      Mapped[bool]     = mapped_column(Boolean, default=False)    # source_count >= threshold
+    credibility:   Mapped[str]      = mapped_column(Text, default="unrated")   # unrated | credible | suspect
+    credibility_note: Mapped[str]   = mapped_column(Text, default="")          # short LLM rationale
     first_seen_at: Mapped[datetime] = mapped_column(nullable=False)
     last_seen_at:  Mapped[datetime] = mapped_column(nullable=False)
     created_at:    Mapped[datetime] = mapped_column(default=_now)

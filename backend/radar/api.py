@@ -174,6 +174,10 @@ class StoryOut(BaseModel):
     post_count: int
     last_seen_at: datetime
     avg_sentiment: float | None = None
+    source_count: int = 0
+    verified: bool = False
+    credibility: str = "unrated"
+    credibility_note: str = ""
 
 class StoryPointOut(BaseModel):
     bucket_start: datetime
@@ -1412,6 +1416,27 @@ def list_digests(brand_id: int, user: User = Depends(current_user), session: Ses
 
 # ── Stories ───────────────────────────────────────────────────────────────────
 
+def _story_fields(session: Session, st: Story) -> dict:
+    avg = (session.query(func.avg(StoryPoint.avg_sentiment))
+           .filter(StoryPoint.story_id == st.id).scalar())
+    return dict(id=st.id, title=st.title, status=st.status, is_anomaly=st.is_anomaly,
+                post_count=st.post_count, last_seen_at=st.last_seen_at, avg_sentiment=avg,
+                source_count=st.source_count, verified=st.verified,
+                credibility=st.credibility, credibility_note=st.credibility_note)
+
+
+def _owned_story(session: Session, story_id: int, user: User) -> Story:
+    """Load a story and enforce ownership via whichever owner it has (topic or brand)."""
+    st = session.get(Story, story_id)
+    if st is None:
+        raise HTTPException(404, "Story not found")
+    if st.topic_id is not None:
+        _owned_topic(session, st.topic_id, user)
+    else:
+        _owned_brand(session, st.brand_id, user)
+    return st
+
+
 @app.get("/stories", response_model=list[StoryOut])
 def list_stories(brand_id: int | None = None, topic_id: int | None = None,
                  user: User = Depends(current_user), session: Session = Depends(db)):
@@ -1426,40 +1451,40 @@ def list_stories(brand_id: int | None = None, topic_id: int | None = None,
     rows = (session.query(Story)
             .filter(getattr(Story, kind + "_id") == oid, Story.status == "active")
             .order_by(Story.is_anomaly.desc(), Story.last_seen_at.desc()).all())
-    out = []
-    for st in rows:
-        avg = (session.query(func.avg(StoryPoint.avg_sentiment))
-               .filter(StoryPoint.story_id == st.id).scalar())
-        out.append(StoryOut(
-            id=st.id, title=st.title, status=st.status,
-            is_anomaly=st.is_anomaly, post_count=st.post_count,
-            last_seen_at=st.last_seen_at, avg_sentiment=avg))
-    return out
+    return [StoryOut(**_story_fields(session, st)) for st in rows]
 
 
 @app.get("/stories/{story_id}", response_model=StoryDetailOut)
 def get_story(story_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
-    st = session.get(Story, story_id)
-    if st is None:
-        raise HTTPException(404, "Story not found")
-    _owned_brand(session, st.brand_id, user)   # enforce ownership
+    st = _owned_story(session, story_id, user)
     points = (session.query(StoryPoint)
               .filter(StoryPoint.story_id == story_id)
               .order_by(StoryPoint.bucket_start).all())
     incidents = (session.query(Incident)
                  .filter(Incident.story_id == story_id)
                  .order_by(Incident.last_seen_at.desc()).all())
-    avg = (session.query(func.avg(StoryPoint.avg_sentiment))
-           .filter(StoryPoint.story_id == story_id).scalar())
     return StoryDetailOut(
-        id=st.id, title=st.title, status=st.status, is_anomaly=st.is_anomaly,
-        post_count=st.post_count, last_seen_at=st.last_seen_at, avg_sentiment=avg,
+        **_story_fields(session, st),
         points=[StoryPointOut(bucket_start=p.bucket_start, mention_count=p.mention_count,
                               avg_sentiment=p.avg_sentiment, source_count=p.source_count)
                 for p in points],
         incidents=[IncidentOut(id=i.id, title=i.title, sentiment=i.sentiment,
                                post_count=i.post_count, last_seen_at=i.last_seen_at)
                    for i in incidents])
+
+
+@app.post("/stories/{story_id}/assess", response_model=StoryOut)
+def assess_story(story_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    """Run LLM fake-detection on one story (manual, opt-in). 503 if no LLM key."""
+    st = _owned_story(session, story_id, user)
+    from . import credibility
+    from .llm import LLMNotConfigured
+    try:
+        credibility.assess_credibility(session, st)
+    except LLMNotConfigured:
+        raise HTTPException(503, "LLM not configured")
+    session.commit()
+    return StoryOut(**_story_fields(session, st))
 
 
 @app.post("/stories/recompute")

@@ -111,6 +111,7 @@ export const getCityReports = () => request('/explore/cities');
 
 export const getStories = (brandId) => request(`/stories?brand_id=${brandId}`);
 export const getStory   = (id)      => request(`/stories/${id}`);
+export const assessStory = (id)     => request(`/stories/${id}/assess`, { method: 'POST' });
 
 export const getDigests   = (brandId) => request(`/brands/${brandId}/digests`);
 export const createDigest = (brandId) => request(`/brands/${brandId}/digest`, { method: 'POST' });

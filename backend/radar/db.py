@@ -60,7 +60,11 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "topic_id": "INTEGER",
     },
     "stories": {
-        "topic_id": "INTEGER",
+        "topic_id":         "INTEGER",
+        "source_count":     "INTEGER DEFAULT 0",
+        "verified":         "BOOLEAN DEFAULT 0",
+        "credibility":      "TEXT DEFAULT 'unrated'",
+        "credibility_note": "TEXT DEFAULT ''",
     },
     "reports": {
         "topic_id": "INTEGER",

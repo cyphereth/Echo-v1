@@ -1,0 +1,155 @@
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from datetime import datetime, timezone
+import pytest
+
+
+def _mem():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as _S
+    from radar.models import Base
+    eng = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(eng)
+    return _S(eng)
+
+
+def _story_with_sources(s, authors):
+    """A topic story with one incident and a mention per author."""
+    from radar.models import Story, Incident, Mention
+    now = datetime.now(timezone.utc)
+    st = Story(id=1, topic_id=1, title="Взрыв на заводе", status="active",
+               first_seen_at=now, last_seen_at=now, post_count=len(authors))
+    s.add(st); s.flush()
+    inc = Incident(id=1, topic_id=1, story_id=1, title="Взрыв на заводе",
+                   sentiment=0.0, post_count=len(authors), first_seen_at=now, last_seen_at=now)
+    s.add(inc); s.flush()
+    for i, a in enumerate(authors):
+        s.add(Mention(topic_id=1, incident_id=1, platform="telegram", post_id=f"p{i}",
+                      author=a, text="Сообщают о взрыве на заводе", created_at=now))
+    s.flush()
+    return st
+
+
+# ── cross-verification ──────────────────────────────────────────────────────────
+
+def test_recompute_verification_counts_distinct_sources():
+    import radar.stories as ST
+    s = _mem()
+    st = _story_with_sources(s, ["@a", "@a", "@b", "news.ru", ""])  # blank ignored, @a dedup
+    ST._recompute_verification(s, st.id)
+    assert st.source_count == 3
+    assert st.verified is True   # >= VERIFY_MIN_SOURCES (3)
+
+
+def test_recompute_verification_below_threshold_not_verified():
+    import radar.stories as ST
+    s = _mem()
+    st = _story_with_sources(s, ["@a", "@b"])   # only 2 distinct sources
+    ST._recompute_verification(s, st.id)
+    assert st.source_count == 2
+    assert st.verified is False
+
+
+# ── fake-detection (LLM) ────────────────────────────────────────────────────────
+
+def test_assess_credibility_parses_verdict(monkeypatch):
+    import radar.credibility as CR
+    s = _mem()
+    st = _story_with_sources(s, ["@a"])
+    seen = {}
+    def _fake(system, user, **k):
+        seen["user"] = user
+        return '{"verdict": "suspect", "note": "единственный источник, нет подтверждений"}'
+    monkeypatch.setattr(CR.llm, "complete", _fake)
+    CR.assess_credibility(s, st)
+    assert st.credibility == "suspect"
+    assert "источник" in st.credibility_note
+    assert "Взрыв" in seen["user"]   # story content fed to the model
+
+
+def test_assess_credibility_malformed_defaults_unrated(monkeypatch):
+    import radar.credibility as CR
+    s = _mem()
+    st = _story_with_sources(s, ["@a"])
+    monkeypatch.setattr(CR.llm, "complete", lambda system, user, **k: "не могу определить")
+    CR.assess_credibility(s, st)
+    assert st.credibility == "unrated"
+    assert st.credibility_note   # keeps the raw note
+
+
+def test_assess_credibility_raises_without_key(monkeypatch):
+    import radar.credibility as CR
+    s = _mem()
+    st = _story_with_sources(s, ["@a"])
+    def _boom(*a, **k):
+        raise CR.llm.LLMNotConfigured("no key")
+    monkeypatch.setattr(CR.llm, "complete", _boom)
+    with pytest.raises(CR.llm.LLMNotConfigured):
+        CR.assess_credibility(s, st)
+
+
+# ── API ─────────────────────────────────────────────────────────────────────────
+
+def _api(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path/'c.db'}")
+    import importlib
+    import radar.db as db; importlib.reload(db); db.init_db()
+    import radar.seed as seed; importlib.reload(seed)
+    import radar.api as api; importlib.reload(api)
+    from fastapi.testclient import TestClient
+    from radar.models import User
+    s = db.get_session()
+    seed.ensure_default_topics(s)
+    u = User(email="c@c.c", password_hash="x"); s.add(u); s.flush(); s.commit()
+    api.app.dependency_overrides[api.current_user] = lambda: u
+    return api, TestClient(api.app), s, u
+
+
+def _topic_story(s, topic_id=1):
+    from radar.models import Story, Incident, Mention
+    now = datetime.now(timezone.utc)
+    st = Story(topic_id=topic_id, title="Сюжет про экономику", status="active",
+               source_count=3, verified=True, first_seen_at=now, last_seen_at=now, post_count=3)
+    s.add(st); s.flush()
+    inc = Incident(topic_id=topic_id, story_id=st.id, title="Инцидент", sentiment=0.0,
+                   post_count=3, first_seen_at=now, last_seen_at=now)
+    s.add(inc); s.flush()
+    for i, a in enumerate(["@a", "@b", "@c"]):
+        s.add(Mention(topic_id=topic_id, incident_id=inc.id, platform="telegram",
+                      post_id=f"m{i}", author=a, text="Новость про экономику", created_at=now))
+    s.commit()
+    return st
+
+
+def test_storyout_has_credibility_fields(monkeypatch, tmp_path):
+    api, client, s, u = _api(monkeypatch, tmp_path)
+    _topic_story(s, topic_id=1)
+    body = client.get("/stories?topic_id=1").json()
+    assert len(body) == 1
+    row = body[0]
+    assert row["source_count"] == 3 and row["verified"] is True
+    assert row["credibility"] == "unrated"
+    api.app.dependency_overrides.clear()
+
+
+def test_get_topic_story_detail_ok(monkeypatch, tmp_path):
+    """Regression: story detail must work for topic stories (brand_id NULL)."""
+    api, client, s, u = _api(monkeypatch, tmp_path)
+    st = _topic_story(s, topic_id=1)
+    r = client.get(f"/stories/{st.id}")
+    assert r.status_code == 200, r.text
+    assert r.json()["verified"] is True
+    api.app.dependency_overrides.clear()
+
+
+def test_assess_endpoint_updates_credibility(monkeypatch, tmp_path):
+    api, client, s, u = _api(monkeypatch, tmp_path)
+    st = _topic_story(s, topic_id=1)
+    import radar.credibility as CR
+    monkeypatch.setattr(CR.llm, "complete",
+                        lambda system, user, **k: '{"verdict":"credible","note":"много источников"}')
+    r = client.post(f"/stories/{st.id}/assess")
+    assert r.status_code == 200, r.text
+    assert r.json()["credibility"] == "credible"
+    assert "источник" in r.json()["credibility_note"]
+    api.app.dependency_overrides.clear()

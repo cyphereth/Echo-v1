@@ -14,6 +14,7 @@ STORY_SIM       = float(os.getenv("STORY_STORY_SIM", "0.78"))
 INCIDENT_WINDOW = timedelta(hours=int(os.getenv("STORY_INCIDENT_WINDOW_H", "48")))
 STORY_WINDOW    = timedelta(days=int(os.getenv("STORY_STORY_WINDOW_D", "14")))
 BUCKET          = timedelta(hours=1)
+VERIFY_MIN_SOURCES = int(os.getenv("STORY_VERIFY_MIN_SOURCES", "3"))  # ≥N independent sources → verified
 
 
 def _tone_score(tone: str) -> float:
@@ -139,6 +140,23 @@ def _recompute_points(session: Session, story_id: int) -> None:
     session.flush()
 
 
+def _recompute_verification(session: Session, story_id: int) -> None:
+    """Set story.source_count = distinct non-blank authors of its mentions, and
+    story.verified = that count >= VERIFY_MIN_SOURCES. Independent corroboration
+    is the core trust signal: a story carried by many distinct channels/domains
+    is far likelier to be real than a single-source claim."""
+    story = session.get(Story, story_id)
+    if story is None:
+        return
+    rows = (session.query(Mention.author)
+            .join(Incident, Mention.incident_id == Incident.id)
+            .filter(Incident.story_id == story_id).all())
+    sources = {(a or "").strip() for (a,) in rows if (a or "").strip()}
+    story.source_count = len(sources)
+    story.verified = len(sources) >= VERIFY_MIN_SOURCES
+    session.flush()
+
+
 def update_stories(session: Session, scope) -> dict:
     """Cluster unprocessed Mentions for the given Scope into Incidents and Stories.
 
@@ -170,6 +188,7 @@ def update_stories(session: Session, scope) -> dict:
     from . import anomalies
     for sid in stories_touched:
         _recompute_points(session, sid)
+        _recompute_verification(session, sid)
         anomalies.detect_anomaly(session, sid)
     session.commit()
     return {"mentions": len(new), "incidents": len(incidents_touched),

@@ -10,8 +10,35 @@ function fmtHour(iso) {
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:00`;
 }
 
+const badge = (bg, color) => ({
+  display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px',
+  borderRadius: 999, fontSize: 11, fontWeight: 700, background: bg, color,
+  fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
+});
+
+function VerifiedBadge({ story, compact }) {
+  const n = story.source_count ?? 0;
+  if (story.verified) {
+    return <span style={badge('rgba(34,197,94,0.15)', '#16a34a')} title="Подтверждено независимыми источниками">
+      ✓ {n} {compact ? '' : 'источник(ов)'}</span>;
+  }
+  return <span style={badge('var(--surface-3)', 'var(--fg-3)')} title="Недостаточно независимых источников">
+    ± {n}</span>;
+}
+
+function CredibilityBadge({ story }) {
+  if (story.credibility === 'suspect') {
+    return <span style={badge('rgba(239,68,68,0.15)', '#ef4444')} title={story.credibility_note || ''}>⚠ требует проверки</span>;
+  }
+  if (story.credibility === 'credible') {
+    return <span style={badge('rgba(34,197,94,0.15)', '#16a34a')} title={story.credibility_note || ''}>✓ проверено</span>;
+  }
+  return null;
+}
+
 function StoryDetail({ id }) {
   const [data, setData] = useState(null);
+  const [assessing, setAssessing] = useState(false);
   useEffect(() => { api.getStory(id).then(setData).catch(() => setData(null)); }, [id]);
   if (!data) return <div className={styles.empty}>Загрузка…</div>;
   const chart = data.points.map((p) => ({
@@ -19,9 +46,31 @@ function StoryDetail({ id }) {
     mentions: p.mention_count,
     sentiment: p.avg_sentiment,
   }));
+  const assess = async () => {
+    setAssessing(true);
+    try {
+      const upd = await api.assessStory(id);
+      setData((d) => ({ ...d, credibility: upd.credibility, credibility_note: upd.credibility_note }));
+    } catch { /* 503 when LLM off — leave as-is */ }
+    finally { setAssessing(false); }
+  };
   return (
     <div className={styles.detail}>
       <h2>{data.title}</h2>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '4px 0 10px' }}>
+        <VerifiedBadge story={data} />
+        <CredibilityBadge story={data} />
+        <button
+          onClick={assess}
+          disabled={assessing}
+          style={{ ...badge('var(--brand)', '#fff'), border: 'none', cursor: assessing ? 'default' : 'pointer' }}
+        >
+          {assessing ? 'Анализ…' : '🔎 Оценить достоверность'}
+        </button>
+      </div>
+      {data.credibility_note && (
+        <div style={{ fontSize: 12, color: 'var(--fg-2)', marginBottom: 10 }}>{data.credibility_note}</div>
+      )}
       <div className={styles.meta}>
         {data.post_count} упоминаний · тональность {(data.avg_sentiment ?? 0).toFixed(2)}
         {data.is_anomaly && <span className={styles.anomaly}> ⚠ аномалия</span>}
@@ -72,7 +121,11 @@ export function StoriesScreen({ scope }) {
               {s.is_anomaly && <span className={styles.warn} title="Аномалия">⚠ </span>}
               {s.title}
             </div>
-            <div className={styles.sub}>{s.post_count} · {(s.avg_sentiment ?? 0).toFixed(2)}</div>
+            <div className={styles.sub} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>{s.post_count} · {(s.avg_sentiment ?? 0).toFixed(2)}</span>
+              <VerifiedBadge story={s} compact />
+              {s.credibility === 'suspect' && <span title={s.credibility_note || ''}>⚠</span>}
+            </div>
           </button>
         ))}
       </div>

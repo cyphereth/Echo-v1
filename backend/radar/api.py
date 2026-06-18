@@ -945,7 +945,9 @@ def inbox(brand_id: int | None = None, topic_id: int | None = None,
 
     mentions = [m for m in mentions if _fresh_enough(m)]
     pr  = [_mention_card(m) for m in mentions if m.lane == "pr"]
-    smm = [_mention_card(m) for m in mentions if m.lane in ("smm", "none")]
+    # Unlaned mentions (None) come from topic web collection, which skips the
+    # brand draft pipeline that assigns lanes — surface them in the main feed.
+    smm = [_mention_card(m) for m in mentions if m.lane in ("smm", "none", None)]
     return {"pr": pr, "smm": smm}
 
 

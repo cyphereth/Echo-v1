@@ -33,6 +33,23 @@ def test_news_topics_defaults_and_private(monkeypatch, tmp_path):
     api.app.dependency_overrides.clear()
 
 
+def test_inbox_shows_unlaned_topic_mentions(monkeypatch, tmp_path):
+    """Topic web mentions skip the brand draft pipeline, so they carry no lane.
+    The feed must still surface them (treated as smm)."""
+    from datetime import datetime, timezone
+    api, client, s, u = _client(monkeypatch, tmp_path)
+    tid = client.post("/news/topics", json={"name": "Рынок", "keywords": ["рубль"]}).json()["id"]
+    from radar.models import Mention
+    s.add(Mention(topic_id=tid, platform="web", post_id="w1", author="news.ru",
+                  text="свежая новость про рубль", source="niche", lane=None,
+                  is_spam=False, created_at=datetime.now(timezone.utc)))
+    s.commit()
+    body = client.get(f"/inbox?topic_id={tid}").json()
+    texts = {c["text"] for c in body["pr"] + body["smm"]}
+    assert "свежая новость про рубль" in texts
+    api.app.dependency_overrides.clear()
+
+
 def test_private_topic_not_readable_by_other_user(monkeypatch, tmp_path):
     api, client, s, u = _client(monkeypatch, tmp_path)
     tid = client.post("/news/topics", json={"name": "Секрет", "keywords": ["x"]}).json()["id"]

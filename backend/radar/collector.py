@@ -269,12 +269,19 @@ def collect_probe(session: Session, probe: Probe, provider: SearchProvider) -> i
                     new_watermark = post.post_id
                 if probe.watermark and post.post_id == probe.watermark:
                     found_watermark = True; break
-                # Relevance gate: brand-matching for brands; topic term-match for topics
-                # (mirrors collect_web). Empty topic terms → keep everything.
+                # Relevance gate. Brands: language + keyword match. Topics: a
+                # discovered channel is already on-topic, so trust it and only drop
+                # media-only/short posts; global search is unvetted noise, so it
+                # still needs a per-post topic term.
                 if scope.kind == "brand":
                     if not _matches(post, brand, probe): continue
-                elif topic_terms and not _term_hit(post.text, topic_terms):
-                    continue
+                else:
+                    clean = " ".join(w for w in (post.text or "").split()
+                                     if not w.startswith("#")).strip()
+                    if len(clean) < MIN_TEXT_LEN:
+                        continue
+                    if probe.kind == "global" and topic_terms and not _term_hit(post.text, topic_terms):
+                        continue
                 age = (_now().replace(tzinfo=None) - post.created_at.replace(tzinfo=None)).days
                 if age > 7: continue
                 # Cheap ad/spam rules (+ tiny-account floor for brands only).
@@ -559,9 +566,13 @@ def ensure_topic_global_probe(session: Session, topic: Topic) -> None:
                       Probe.kind == "global").first())
     if exists is not None:
         return
+    # Telegram global search matches the query as a literal phrase, so a long
+    # concatenation returns nothing — use the single strongest keyword. (Channel
+    # discovery + read is the primary path; global search is supplementary and
+    # grows more useful as the account follows more channels.)
     session.add(Probe(
         topic_id=topic.id, platform="telegram", kind="global",
-        query=_web_query_terms(topic.name, topic.keywords_list()),
+        query=(topic.keywords_list() or [topic.name])[0],
         source="niche", next_run_at=_now(), interval_sec=3600,
     ))
     session.commit()

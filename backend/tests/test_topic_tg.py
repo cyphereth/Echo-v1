@@ -66,7 +66,28 @@ def test_collect_probe_topic_stores_relevant_filters_offtopic():
     assert "Инфляция" in rows[0].text
 
 
-def test_collect_probe_topic_respects_watermark():
+def test_collect_probe_channel_trusts_source_skips_term_gate():
+    """A kind="channel" probe is an already-discovered on-topic source, so its
+    posts are NOT re-filtered by per-post keyword match (real news rarely repeats
+    the narrow niche terms). Empty/too-short posts are still skipped."""
+    import radar.collector as C
+    from radar.models import Topic, Probe, Mention
+    s = _mem()
+    s.add(Topic(id=1, name="Экономика", keywords='["инфляция"]', niche_keywords='["инфляция"]'))
+    s.flush()
+    probe = Probe(topic_id=1, platform="telegram", kind="channel", query="@banksta", source="niche")
+    s.add(probe); s.flush()
+    prov = _FakeTG([
+        _post("b/1", "JPMorgan и Goldman Sachs закрыли офисы для китайских сотрудников"),  # no term → still kept
+        _post("b/2", ""),  # empty → skipped
+    ])
+    n = C.collect_probe(s, probe, prov)
+    assert n == 1
+    rows = s.query(Mention).filter(Mention.topic_id == 1).all()
+    assert len(rows) == 1 and "JPMorgan" in rows[0].text
+
+
+def test_collect_probe_respects_watermark():
     import radar.collector as C
     from radar.models import Topic, Probe, Mention
     s = _mem()

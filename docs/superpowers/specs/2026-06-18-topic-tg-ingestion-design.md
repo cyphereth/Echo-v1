@@ -44,10 +44,14 @@ stays untouched. Topic probes are collected by a dedicated scheduler pass.
    `scope_for_probe`. Branch on `scope.kind`:
    - **brand**: unchanged — `_matches(post, brand, probe)`, competitor label,
      follower floor, `local_mode`. Brand behavior is byte-identical.
-   - **topic**: relevance via `_term_hit(post.text, [t.lower() for t in
-     scope.niche_keywords])` — the same morphology-aware gate `collect_web`
-     uses; empty terms → keep all. No competitor label, no follower floor.
-     `mention.source = probe.source` ("niche").
+   - **topic**: kind-aware relevance (learned from live testing). A
+     `kind="channel"` probe is an already-discovered on-topic source, so its
+     posts are **trusted** — only media-only/too-short posts (`< MIN_TEXT_LEN`)
+     are dropped; per-post keyword matching would throw away real news that
+     doesn't repeat the narrow niche terms (e.g. a @banksta post on JPMorgan).
+     A `kind="global"` probe is unvetted noise, so it still requires
+     `_term_hit(post.text, scope.niche_keywords)`. No competitor label, no
+     follower floor. `mention.source = probe.source` ("niche").
    Shared tail (age ≤ 7d, cheap ad/spam, `_upsert_mention(scope)`, snapshot,
    watermark) stays common.
 
@@ -111,3 +115,16 @@ existing topic-ownership model; no new authz.
   filters (same gates as web/brand). Tunable via env if noisy.
 - Telegram throttling → runs on the dedicated worker thread, watermarked,
   rotation via `next_run_at`.
+
+## Live-testing notes (2026-06-18)
+
+- A **fresh** Telegram account has weak global search (`messages.SearchGlobal`
+  mostly covers joined dialogs) — single keywords are hit-or-miss, a long
+  concatenated query returns nothing. So the global probe uses the single top
+  keyword, and **channel discovery + read is the primary path**.
+- `discover_channels` + `_read_channel` work well (10 real channels for
+  "экономика"; 20 posts each from @banksta/@rbc_news).
+- Burst testing flood-limits a new account fast; live collection belongs on the
+  backend's throttled scheduler cadence, not rapid manual scripts.
+- The Telethon **file session locks** (sqlite): stop the backend before running
+  `radar.tg_login` or any standalone provider script, and never run two at once.

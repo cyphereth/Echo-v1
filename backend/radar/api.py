@@ -11,9 +11,9 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from .db import init_db, get_session
+from .core.db import init_db, get_session
 from .models import Brand, Probe, Mention, DraftEdit, Comment, User, Story, Incident, StoryPoint, Report, Topic
-from .auth import hash_password, verify_password, create_token, decode_token
+from .core.auth import hash_password, verify_password, create_token, decode_token
 from .classify import classify
 from .drafts import generate_draft
 from .pipeline import classify_and_draft, recent_edits
@@ -37,7 +37,7 @@ def _get_tg_provider():
         return None
     if _tg_provider_singleton is None:
         try:
-            from .providers.telegram import TelegramProvider
+            from .core.providers.telegram import TelegramProvider
             _tg_provider_singleton = TelegramProvider()
         except Exception:
             log.exception("Telegram provider init failed (run `python -m radar.tg_auth`?)")
@@ -47,12 +47,12 @@ def _get_tg_provider():
 
 def _get_provider():
     if SOCIALCRAWL_TOKEN:
-        from .providers.socialcrawl import SocialCrawlProvider
+        from .core.providers.socialcrawl import SocialCrawlProvider
         return SocialCrawlProvider(SOCIALCRAWL_TOKEN)
     if TIKHUB_TOKEN:
-        from .providers.tikhub import TikHubProvider
+        from .core.providers.tikhub import TikHubProvider
         return TikHubProvider(TIKHUB_TOKEN)
-    from .providers.mock import MockProvider
+    from .core.providers.mock import MockProvider
     return MockProvider()
 
 app = FastAPI(title="Echo API", version="3.0.0")
@@ -86,7 +86,7 @@ def on_startup():
         from .scheduler import Scheduler
         web_provider = None
         if os.getenv("WEB_SEARCH_API_KEY"):
-            from .providers.web import WebSearchProvider
+            from .core.providers.web import WebSearchProvider
             web_provider = WebSearchProvider()
         _scheduler = Scheduler(_get_provider(), tick_sec=int(os.getenv("SCHEDULER_TICK_SEC", "60")),
                                tg_provider=_get_tg_provider(), web_provider=web_provider)
@@ -1399,7 +1399,7 @@ def explore_cities(user: User = Depends(current_user), session: Session = Depend
 def create_digest(brand_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
     brand = _owned_brand(session, brand_id, user)
     from .digests import build_daily_digest
-    from .llm import LLMNotConfigured
+    from .core.llm import LLMNotConfigured
     try:
         report = build_daily_digest(session, scope_for_brand(brand))
     except LLMNotConfigured:
@@ -1498,7 +1498,7 @@ def summarize_story_endpoint(story_id: int, user: User = Depends(current_user), 
     """LLM 'what happened' summary for one story (manual, opt-in). 503 if no LLM key."""
     st = _owned_story(session, story_id, user)
     from . import credibility
-    from .llm import LLMNotConfigured
+    from .core.llm import LLMNotConfigured
     try:
         credibility.summarize_story(session, st)
     except LLMNotConfigured:
@@ -1512,7 +1512,7 @@ def assess_story(story_id: int, user: User = Depends(current_user), session: Ses
     """Run LLM fake-detection on one story (manual, opt-in). 503 if no LLM key."""
     st = _owned_story(session, story_id, user)
     from . import credibility
-    from .llm import LLMNotConfigured
+    from .core.llm import LLMNotConfigured
     try:
         credibility.assess_credibility(session, st)
     except LLMNotConfigured:
@@ -1534,7 +1534,7 @@ def recompute_stories(brand_id: int, user: User = Depends(current_user), session
 def create_topic_digest(topic_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
     t = _owned_topic(session, topic_id, user)
     from .digests import build_daily_digest
-    from .llm import LLMNotConfigured
+    from .core.llm import LLMNotConfigured
     try:
         report = build_daily_digest(session, scope_for_topic(t))
     except LLMNotConfigured:

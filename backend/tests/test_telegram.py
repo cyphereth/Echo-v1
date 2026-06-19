@@ -1,8 +1,8 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from datetime import datetime, timezone
-from radar.providers.telegram import _parse_tg_message, _sum_reactions
-from radar.providers.base import Post
+from radar.core.providers.telegram import _parse_tg_message, _sum_reactions
+from radar.core.providers.base import Post
 
 
 class _Reaction:
@@ -52,7 +52,7 @@ def test_parse_tg_message_survives_empty_text():
 
 
 def test_search_keyword_calls_global(monkeypatch):
-    from radar.providers.telegram import TelegramProvider
+    from radar.core.providers.telegram import TelegramProvider
     calls = {}
     class FakeClient:
         def get_messages(self, entity, **kw):
@@ -66,7 +66,7 @@ def test_search_keyword_calls_global(monkeypatch):
 
 
 def test_search_channel_resolves_entity():
-    from radar.providers.telegram import TelegramProvider
+    from radar.core.providers.telegram import TelegramProvider
     class FakeEntity: participants_count = 100
     seen = {}
     class FakeClient:
@@ -81,7 +81,7 @@ def test_search_channel_resolves_entity():
 def test_global_search_floodwait_raises_runtime():
     import pytest
     from telethon.errors import FloodWaitError
-    from radar.providers.telegram import TelegramProvider
+    from radar.core.providers.telegram import TelegramProvider
     class FakeClient:
         def get_messages(self, entity, **kw):
             raise FloodWaitError(request=None)
@@ -92,7 +92,7 @@ def test_global_search_floodwait_raises_runtime():
 
 def test_channel_read_private_returns_empty():
     from telethon.errors import ChannelPrivateError
-    from radar.providers.telegram import TelegramProvider
+    from radar.core.providers.telegram import TelegramProvider
     class FakeClient:
         def get_entity(self, h):
             raise ChannelPrivateError(request=None)
@@ -160,7 +160,7 @@ def test_channel_probe_bypasses_keyword_filter():
     import json
     from datetime import datetime, timezone
     from radar.collector import _matches
-    from radar.providers.base import Post
+    from radar.core.providers.base import Post
     from radar.models import Brand
     b = Brand(); b.exclusions = json.dumps([]); b.market = "ru"
     class ChannelProbe: kind="channel"; source="niche"; label="@durov"; query="@durov"
@@ -175,8 +175,8 @@ def test_channel_probe_bypasses_keyword_filter():
 
 def test_parse_tg_comment_maps_fields():
     from datetime import datetime, timezone
-    from radar.providers.telegram import _parse_tg_comment
-    from radar.providers.base import Comment as C
+    from radar.core.providers.telegram import _parse_tg_comment
+    from radar.core.providers.base import Comment as C
     class S: username="vasya"; first_name="Вася"
     class M:
         id=55; message="а где заказать роллы?"; date=datetime(2026,6,1,tzinfo=timezone.utc)
@@ -187,14 +187,14 @@ def test_parse_tg_comment_maps_fields():
 
 
 def test_tg_fetch_comments_no_channel_returns_empty():
-    from radar.providers.telegram import TelegramProvider
+    from radar.core.providers.telegram import TelegramProvider
     p=TelegramProvider(client=object())
     assert p.fetch_comments("123", None, "telegram", channel=None) == []
 
 
 def test_tg_fetch_comments_reads_replies():
     from datetime import datetime, timezone
-    from radar.providers.telegram import TelegramProvider
+    from radar.core.providers.telegram import TelegramProvider
     class S: username=None; first_name="Аня"
     class M:
         id=7; message="закажу в тануки"; date=datetime(2026,6,2,tzinfo=timezone.utc)
@@ -213,7 +213,7 @@ def test_tg_fetch_comments_reads_replies():
 
 def test_search_chat_returns_posts_with_sender_and_composite_id():
     from datetime import datetime, timezone
-    from radar.providers.telegram import TelegramProvider
+    from radar.core.providers.telegram import TelegramProvider
     class Sender: username = "ivan"
     class Msg:
         id = 42; message = "посоветуйте где поесть в москве?"
@@ -233,7 +233,7 @@ def test_search_chat_returns_posts_with_sender_and_composite_id():
 
 def test_search_chat_unavailable_returns_empty():
     from telethon.errors import ChannelPrivateError
-    from radar.providers.telegram import TelegramProvider
+    from radar.core.providers.telegram import TelegramProvider
     class FakeClient:
         def get_entity(self, h): raise ChannelPrivateError(request=None)
         def get_messages(self, *a, **k): return []
@@ -269,7 +269,7 @@ def test_collect_chats_stores_topical_and_intent_messages_as_niche():
     from datetime import datetime, timezone
     from radar.models import Brand, Probe, Mention
     from radar.collector import collect_chats
-    from radar.providers.base import Post
+    from radar.core.providers.base import Post
 
     s = _mem_session_tg()
     b = Brand(name="Тануки", sphere="рестораны доставка еды",
@@ -307,7 +307,7 @@ def test_collect_chats_stores_topical_and_intent_messages_as_niche():
 # ── Graph-based discovery (recommendations + linked discussion groups) ──
 
 def test_channel_recommendations_returns_usernames():
-    from radar.providers.telegram import TelegramProvider
+    from radar.core.providers.telegram import TelegramProvider
     class Ch:
         def __init__(self, u): self.username = u
     class Rec:
@@ -321,7 +321,7 @@ def test_channel_recommendations_returns_usernames():
 
 
 def test_linked_chat_returns_username_megagroup():
-    from radar.providers.telegram import TelegramProvider
+    from radar.core.providers.telegram import TelegramProvider
     class Linked:
         id = 555; username = "restosnobonline"; megagroup = True
         title = "Restosnob Chat"; participants_count = 4000
@@ -339,7 +339,7 @@ def test_linked_chat_returns_username_megagroup():
 
 
 def test_linked_chat_none_when_no_discussion_group():
-    from radar.providers.telegram import TelegramProvider
+    from radar.core.providers.telegram import TelegramProvider
     class FullChat: linked_chat_id = None
     class Full:
         full_chat = FullChat(); chats = []
@@ -378,7 +378,7 @@ def test_ensure_chats_discovered_grows_graph_from_seed_channels():
 # ── Sphere-agnostic: works for any vertical the client picks, not just food ──
 
 def test_discover_channels_filters_username_and_sorts_by_size():
-    from radar.providers.telegram import TelegramProvider
+    from radar.core.providers.telegram import TelegramProvider
     class Ch:
         def __init__(self, u, n): self.username = u; self.participants_count = n; self.title = "t"
     class Found:
@@ -422,7 +422,7 @@ def test_collect_chats_captures_non_food_shopping_intent():
     from datetime import datetime, timezone
     from radar.models import Brand, Probe, Mention
     from radar.collector import collect_chats
-    from radar.providers.base import Post
+    from radar.core.providers.base import Post
 
     s = _mem_session_tg()
     b = Brand(name="ТехноМаг", sphere="электроника гаджеты",
@@ -454,7 +454,7 @@ def test_collect_chats_captures_non_food_shopping_intent():
 # ── Username-less linked discussion groups (addressed via the parent channel) ──
 
 def test_linked_chat_returns_id_when_group_has_no_username():
-    from radar.providers.telegram import TelegramProvider
+    from radar.core.providers.telegram import TelegramProvider
     class Linked:
         id = 777; username = None; megagroup = True
         title = "Кудаеда Talks"; participants_count = 9000
@@ -473,7 +473,7 @@ def test_linked_chat_returns_id_when_group_has_no_username():
 
 def test_search_linked_chat_resolves_group_via_parent_channel():
     from datetime import datetime, timezone
-    from radar.providers.telegram import TelegramProvider
+    from radar.core.providers.telegram import TelegramProvider
     class Sender: username = "vasya"
     class Msg:
         id = 9; message = "посоветуйте куда сходить?"; views = 0; forwards = 0
@@ -508,7 +508,7 @@ def test_collect_chats_handles_linked_kind_probes():
     from datetime import datetime, timezone
     from radar.models import Brand, Probe, Mention
     from radar.collector import collect_chats
-    from radar.providers.base import Post
+    from radar.core.providers.base import Post
 
     s = _mem_session_tg()
     b = Brand(name="Тануки", sphere="рестораны", niche_keywords=json.dumps(["ресторан"]),
@@ -598,7 +598,7 @@ def test_collect_chats_uses_and_advances_watermark():
     from datetime import datetime, timezone
     from radar.models import Brand, Probe, Mention
     from radar.collector import collect_chats
-    from radar.providers.base import Post
+    from radar.core.providers.base import Post
 
     s = _mem_session_tg()
     b = Brand(name="Тануки", sphere="рестораны", niche_keywords=json.dumps(["ресторан"]),

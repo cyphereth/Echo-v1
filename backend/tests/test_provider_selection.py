@@ -2,9 +2,9 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from radar import api
-from radar.providers.socialcrawl import SocialCrawlProvider
-from radar.providers.tikhub import TikHubProvider
-from radar.providers.mock import MockProvider
+from radar.core.providers.socialcrawl import SocialCrawlProvider
+from radar.core.providers.tikhub import TikHubProvider
+from radar.core.providers.mock import MockProvider
 
 # _get_provider() picks a provider from module-level token globals, in priority
 # order SocialCrawl → TikHub → Mock. These tests pin those globals via monkeypatch

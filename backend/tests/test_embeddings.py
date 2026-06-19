@@ -4,7 +4,7 @@ import numpy as np
 
 
 def test_embed_returns_matrix_shape_and_dtype(monkeypatch):
-    import radar.embeddings as E
+    import radar.core.embeddings as E
 
     class _FakeModel:
         def encode(self, texts, normalize_embeddings, convert_to_numpy):
@@ -18,6 +18,6 @@ def test_embed_returns_matrix_shape_and_dtype(monkeypatch):
 
 
 def test_embed_empty_returns_zero_rows():
-    import radar.embeddings as E
+    import radar.core.embeddings as E
     out = E.embed([])
     assert out.shape == (0, E.EMBED_DIM)

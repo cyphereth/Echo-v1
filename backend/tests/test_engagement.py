@@ -106,7 +106,7 @@ def test_fetch_skips_when_thread_already_engaged(monkeypatch):
     from datetime import datetime, timezone
     from radar import api
     from radar.models import Brand, Mention, Comment
-    from radar.providers.base import Comment as ProviderComment
+    from radar.core.providers.base import Comment as ProviderComment
     s = _mem_session()
     b = Brand(id=1, name="Tanuki", sphere="суши"); s.add(b)
     m = Mention(brand_id=1, platform="tiktok", post_id="p9", author="a",
@@ -128,8 +128,8 @@ def test_fetch_skips_when_thread_already_engaged(monkeypatch):
     import radar.drafts as d
     monkeypatch.setattr(d, "evaluate_opportunity",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("should skip")))
-    monkeypatch.setattr("radar.spam.classify_ads_batch", lambda texts, sphere="": [False] * len(texts))
-    monkeypatch.setattr("radar.spam.looks_like_ad_cheap", lambda *a, **k: False)
+    monkeypatch.setattr("radar.core.spam.classify_ads_batch", lambda texts, sphere="": [False] * len(texts))
+    monkeypatch.setattr("radar.core.spam.looks_like_ad_cheap", lambda *a, **k: False)
 
     api._fetch_and_store_comments(s, m)
     stored = s.query(Comment).filter_by(comment_id="new1").one()

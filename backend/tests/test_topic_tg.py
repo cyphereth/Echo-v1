@@ -13,7 +13,7 @@ def _mem():
 
 
 def _post(pid, text, author="@ch", created=None):
-    from radar.providers.base import Post
+    from radar.core.providers.base import Post
     return Post(post_id=pid, platform="telegram", author=author, followers=5000,
                 text=text, hashtags=[], created_at=created or datetime.now(timezone.utc),
                 likes=1, views=10, comments=0, shares=0)
@@ -42,7 +42,7 @@ class _FakeTG:
     """Minimal SearchProvider: one page of posts, no cursor."""
     def __init__(self, posts): self.posts = posts
     def search(self, query, kind, cursor=None, platform="telegram"):
-        from radar.providers.base import SearchPage
+        from radar.core.providers.base import SearchPage
         return SearchPage(posts=self.posts, next_cursor=None)
 
 
@@ -163,7 +163,7 @@ def test_run_topic_tg_pass_noop_without_provider(monkeypatch):
 # ── anti-flood hardening ────────────────────────────────────────────────────────
 
 def test_telegram_floodwait_is_runtimeerror():
-    from radar.providers.telegram import TelegramFloodWait
+    from radar.core.providers.telegram import TelegramFloodWait
     e = TelegramFloodWait(42)
     assert isinstance(e, RuntimeError)
     assert e.seconds == 42 and "42" in str(e)
@@ -200,7 +200,7 @@ def test_run_topic_tg_pass_caps_and_rotates_channels(monkeypatch):
 def test_run_topic_tg_pass_aborts_on_floodwait(monkeypatch):
     import radar.scheduler as SCH
     from radar.models import Topic, Probe
-    from radar.providers.telegram import TelegramFloodWait
+    from radar.core.providers.telegram import TelegramFloodWait
     s = _mem()
     s.add(Topic(id=1, name="Эк", auto_collect=True, keywords='["k"]', niche_keywords='["k"]'))
     s.flush()

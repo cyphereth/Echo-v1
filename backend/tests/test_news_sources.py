@@ -79,7 +79,7 @@ def test_classify_source_falls_back_to_term_hit_without_llm(monkeypatch):
     import radar.collector as C
     from radar.models import Topic
     s = _mem(); t = _topic(s)
-    import radar.llm as llm
+    import radar.core.llm as llm
     def _no_key(*a, **k):
         raise llm.LLMNotConfigured("no key")
     monkeypatch.setattr(C.llm, "complete", _no_key)

@@ -6,10 +6,10 @@ from urllib.parse import urlparse
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from .models import Brand, Mention, MentionSnapshot, Probe, Topic
-from .providers.base import Post, SearchProvider
-from . import llm
+from .core.providers.base import Post, SearchProvider
+from .core import llm
 from .scope import Scope, scope_for_brand, scope_for_topic, scope_for_probe
-from .spam import looks_like_ad_cheap
+from .core.spam import looks_like_ad_cheap
 
 log = logging.getLogger(__name__)
 

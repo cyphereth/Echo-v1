@@ -13,7 +13,7 @@ def _mem():
 
 
 def _post(post_id, created_at, text="нишевый пост"):
-    from radar.providers.base import Post
+    from radar.core.providers.base import Post
     return Post(post_id=post_id, platform="telegram", author="@ch", followers=0,
                 text=text, hashtags=[], created_at=created_at,
                 likes=0, views=0, comments=0, shares=0)
@@ -39,7 +39,7 @@ def test_inbox_hides_stale_niche_but_keeps_brand(monkeypatch, tmp_path):
     """The feed must drop stale niche posts but keep brand mentions regardless of age."""
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path/'n.db'}")
     import importlib
-    import radar.db as db; importlib.reload(db); db.init_db()
+    import radar.core.db as db; importlib.reload(db); db.init_db()
     import radar.api as api; importlib.reload(api)
     from fastapi.testclient import TestClient
     from radar.models import Brand, User, Mention

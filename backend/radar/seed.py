@@ -2,7 +2,7 @@
 from __future__ import annotations
 from sqlalchemy.orm import Session
 from .models import Brand, User
-from .auth import hash_password
+from .core.auth import hash_password
 
 DEMO_EMAIL    = "demo@echo.app"
 DEMO_PASSWORD = "demo12345"

@@ -21,7 +21,7 @@ def test_build_city_queries_shape():
 
 
 from datetime import datetime, timezone
-from radar.providers.base import Post
+from radar.core.providers.base import Post
 
 
 def _post(pid, text, likes=0, views=0, tags=None):
@@ -43,7 +43,7 @@ def test_aggregate_posts_dedup_rank_cap_truncate():
 
 def test_run_city_search_skips_failing_platform():
     from radar.explore import run_city_search
-    from radar.providers.base import SearchPage
+    from radar.core.providers.base import SearchPage
     class FakeProvider:
         def search(self, query, kind, cursor, platform):
             if platform == "instagram":

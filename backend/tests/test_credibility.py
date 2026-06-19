@@ -93,7 +93,7 @@ def test_assess_credibility_raises_without_key(monkeypatch):
 def _api(monkeypatch, tmp_path):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path/'c.db'}")
     import importlib
-    import radar.db as db; importlib.reload(db); db.init_db()
+    import radar.core.db as db; importlib.reload(db); db.init_db()
     import radar.seed as seed; importlib.reload(seed)
     import radar.api as api; importlib.reload(api)
     from fastapi.testclient import TestClient

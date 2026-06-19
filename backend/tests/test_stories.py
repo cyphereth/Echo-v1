@@ -9,7 +9,7 @@ def _engine_with_vec():
     """In-memory engine with all tables created (vec tables are plain SQLite)."""
     from sqlalchemy import create_engine
     from radar.models import Base
-    from radar import vec
+    from radar.core import vec
 
     eng = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(eng)
@@ -59,7 +59,7 @@ def _fake_embed(mapping):
 
 
 def test_store_and_knn_roundtrip():
-    from radar import vec
+    from radar.core import vec
     s = _session()
     conn = s.connection().connection  # raw DBAPI conn
     a = np.array([1.0, 0.0] + [0.0] * 382, dtype=np.float32)
@@ -96,7 +96,7 @@ def test_models_create_and_relate():
 def test_init_db_loads_vec_and_migrates(tmp_path, monkeypatch):
     db_file = tmp_path / "t.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_file}")
-    import importlib, radar.db as db
+    import importlib, radar.core.db as db
     importlib.reload(db)            # pick up env + re-register listeners
     db.init_db()
     with db.engine.connect() as c:

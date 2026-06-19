@@ -2,8 +2,8 @@ import sys, os
 from datetime import datetime, timezone
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from radar.providers.socialcrawl import _parse_post, _parse_comment
-from radar.providers.base import Post, Comment
+from radar.core.providers.socialcrawl import _parse_post, _parse_comment
+from radar.core.providers.base import Post, Comment
 
 # Real response shapes observed from socialcrawl.dev /v1/tiktok/search and
 # /v1/tiktok/post/comments (envelope already unwrapped to data.items[i]).

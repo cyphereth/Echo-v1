@@ -82,7 +82,7 @@ def classify_and_draft(session: Session, brand_id: int) -> dict:
     # kept unless they are an off-topic homonym (default-keep disambiguation). Niche and
     # competitor lanes, where broad terms catch random content, go through the sphere
     # noise judge.
-    from .spam import classify_ads_batch, disambiguate_brand_batch
+    from .core.spam import classify_ads_batch, disambiguate_brand_batch
     if unclassified:
         sphere = getattr(brand, "sphere", "") or ""
         brand_ms = [m for m in unclassified if m.source == "brand"]
@@ -122,7 +122,7 @@ def classify_and_draft(session: Session, brand_id: int) -> dict:
     # Local mode: a salon wants CLIENTS in the audience feed, not other masters.
     # Route service-providers in the niche lane over to the competitor lane.
     if getattr(brand, "local_mode", False):
-        from .spam import looks_like_provider_cheap, classify_providers_batch
+        from .core.spam import looks_like_provider_cheap, classify_providers_batch
         niche_ms = [m for m in unclassified if m.source == "niche"]
         if niche_ms:
             cheap = {id(m): looks_like_provider_cheap(m.text, m.author) for m in niche_ms}
@@ -190,7 +190,7 @@ def fetch_and_store_comments(session: Session, mention: Mention,
     existing      = {c.comment_id for c in mention.comment_rows}
 
     from .drafts import _is_opportunity_candidate, evaluate_opportunity
-    from .spam import looks_like_ad_cheap, classify_ads_batch
+    from .core.spam import looks_like_ad_cheap, classify_ads_batch
     from .engagement import thread_already_engaged, is_duplicate_reply
     engaged = thread_already_engaged(session, mention.id)
     sent_replies = [c.draft for c in mention.comment_rows

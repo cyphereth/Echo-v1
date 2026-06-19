@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 def test_generate_and_list_digests(monkeypatch, tmp_path):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path/'d.db'}")
     import importlib
-    import radar.db as db; importlib.reload(db); db.init_db()
+    import radar.core.db as db; importlib.reload(db); db.init_db()
     import radar.digests as D; importlib.reload(D)
     import radar.api as api; importlib.reload(api)
     from fastapi.testclient import TestClient

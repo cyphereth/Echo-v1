@@ -3,13 +3,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
 def test_web_search_noop_without_key(monkeypatch):
-    import radar.providers.web as W
+    import radar.core.providers.web as W
     monkeypatch.setattr(W, "WEB_SEARCH_API_KEY", "")
     assert W.WebSearchProvider().search("любая тема") == []
 
 
 def test_web_search_parses_results(monkeypatch):
-    import radar.providers.web as W
+    import radar.core.providers.web as W
     monkeypatch.setattr(W, "WEB_SEARCH_API_KEY", "tvly-test")
 
     class _Resp:
@@ -39,7 +39,7 @@ def test_web_search_parses_results(monkeypatch):
 
 
 def test_web_search_empty_on_http_error(monkeypatch):
-    import radar.providers.web as W
+    import radar.core.providers.web as W
     monkeypatch.setattr(W, "WEB_SEARCH_API_KEY", "tvly-test")
     def _boom(*a, **k): raise RuntimeError("network down")
     monkeypatch.setattr(W.httpx, "post", _boom)

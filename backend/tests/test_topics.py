@@ -15,7 +15,7 @@ def _mem_with_vec():
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session as _S
     from radar.models import Base
-    from radar import vec
+    from radar.core import vec
     eng = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(eng)
     with eng.begin() as conn:

@@ -22,7 +22,7 @@ def test_relax_brand_id_not_null_allows_topic_only_rows(monkeypatch, tmp_path):
     dbfile = tmp_path / "legacy.db"
     _legacy_db(str(dbfile))
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{dbfile}")
-    import radar.db as db; importlib.reload(db)
+    import radar.core.db as db; importlib.reload(db)
 
     db._relax_brand_id_not_null()
 
@@ -39,7 +39,7 @@ def test_relax_brand_id_not_null_is_idempotent(monkeypatch, tmp_path):
     dbfile = tmp_path / "legacy2.db"
     _legacy_db(str(dbfile))
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{dbfile}")
-    import radar.db as db; importlib.reload(db)
+    import radar.core.db as db; importlib.reload(db)
 
     db._relax_brand_id_not_null()
     db._relax_brand_id_not_null()  # second run must be a no-op, not a failure

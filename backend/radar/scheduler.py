@@ -1,7 +1,7 @@
 import logging, os, random, time, threading
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
-from .db import get_session
+from .core.db import get_session
 from .models import Brand, Probe
 
 log = logging.getLogger(__name__)
@@ -123,7 +123,7 @@ def _run_topic_tg_pass(session, tg_provider):
     import radar.stories as _stories
     from .models import Topic, Probe
     from .scope import scope_for_topic
-    from .providers.telegram import TelegramFloodWait
+    from .core.providers.telegram import TelegramFloodWait
     for t in session.query(Topic).filter(Topic.auto_collect.is_(True)).all():
         try:
             _collector.ensure_topic_channels_discovered(session, t, tg_provider)
@@ -164,7 +164,7 @@ def _run_topic_tg_pass(session, tg_provider):
 def _run_digest_pass(session):
     """Generate a daily digest for each auto-collect brand. Best-effort."""
     import radar.digests as _digests
-    from .llm import LLMNotConfigured
+    from .core.llm import LLMNotConfigured
     from .models import Brand
     from .scope import scope_for_brand
     brands = session.query(Brand).filter(Brand.auto_collect.is_(True)).all()

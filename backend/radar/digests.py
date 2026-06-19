@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from . import llm
+from .core import llm
 from .models import Story, StoryPoint, Report
 
 TOP_N  = int(os.getenv("DIGEST_TOP_N", "5"))

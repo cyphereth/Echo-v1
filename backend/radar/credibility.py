@@ -4,7 +4,7 @@ import re
 
 from sqlalchemy.orm import Session
 
-from . import llm
+from .core import llm
 from .models import Story, Incident, Mention
 
 VALID = {"credible", "suspect"}

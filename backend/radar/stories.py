@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 from sqlalchemy.orm import Session
 
-from . import embeddings, vec
+from .core import embeddings, vec
 from .models import Mention, Incident, Story, StoryPoint
 
 # Tunables (cosine SIMILARITY thresholds; distance = 1 - sim). Calibrate on real brands.

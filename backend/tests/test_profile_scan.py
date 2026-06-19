@@ -22,7 +22,7 @@ def test_parse_handle_empty():
 def test_profile_scan_with_mock(monkeypatch):
     """profile_scan returns a profile when provider is the mock (no real TikHub)."""
     from radar import api
-    from radar.providers.mock import MockProvider
+    from radar.core.providers.mock import MockProvider
     monkeypatch.setattr(api, "_get_provider", lambda: MockProvider())
 
     class FakeUser:
@@ -37,7 +37,7 @@ def test_profile_scan_with_mock(monkeypatch):
 # ── RU/CIS language filter ────────────────────────────────────────────────────
 
 def _mk_post(text, views=0):
-    from radar.providers.base import Post
+    from radar.core.providers.base import Post
     from datetime import datetime, timezone
     return Post(post_id="1", platform="tiktok", author="a", followers=0,
                 text=text, hashtags=[], created_at=datetime.now(timezone.utc),
@@ -99,41 +99,41 @@ def test_min_text_len_is_20():
 # ── Ad / spam cheap rules ─────────────────────────────────────────────────────
 
 def test_spam_seller_username():
-    from radar.spam import looks_like_ad_cheap
+    from radar.core.spam import looks_like_ad_cheap
     assert looks_like_ad_cheap("классная штука для дома и кухни каждый день", "wb_goldy", []) is True
 
 def test_spam_too_short():
-    from radar.spam import looks_like_ad_cheap
+    from radar.core.spam import looks_like_ad_cheap
     assert looks_like_ad_cheap("огонь", "user1", []) is True
 
 def test_spam_real_post_passes():
-    from radar.spam import looks_like_ad_cheap
+    from radar.core.spam import looks_like_ad_cheap
     assert looks_like_ad_cheap("заказал на озоне, доставили за два дня, всё отлично", "katya_msk", ["озон"]) is False
 
 def test_cheap_ignores_marketplace_phrase():
     # "промокод"/"артикул" are sphere-specific noise now judged by the AI, not the cheap layer
-    from radar.spam import looks_like_ad_cheap
+    from radar.core.spam import looks_like_ad_cheap
     assert looks_like_ad_cheap("заказал по промокоду в тануки, ролл огонь", "katya_msk", []) is False
 
 def test_cheap_allows_long_caption():
-    from radar.spam import looks_like_ad_cheap
+    from radar.core.spam import looks_like_ad_cheap
     long_caption = "Сегодня заехали в новый ресторан японской кухни, " * 5  # ~250 chars, normal
     assert looks_like_ad_cheap(long_caption, "foodie_anna", []) is False
 
 def test_cheap_allows_many_hashtags():
     # food/lifestyle posts routinely use >3 hashtags — not junk by itself
-    from radar.spam import looks_like_ad_cheap
+    from radar.core.spam import looks_like_ad_cheap
     assert looks_like_ad_cheap(
         "обалденные роллы в тануки сегодня", "user_masha",
         ["суши", "роллы", "японскаякухня", "вкусно", "доставка", "ужин"]) is False
 
 def test_cheap_allows_inline_hashtags():
-    from radar.spam import looks_like_ad_cheap
+    from radar.core.spam import looks_like_ad_cheap
     assert looks_like_ad_cheap("крутая подборка роллов #суши#роллы#еда#доставка#ужин", "user1", []) is False
 
 def test_classify_ads_batch_no_key():
-    from radar.spam import classify_ads_batch
-    import radar.spam as sp
+    from radar.core.spam import classify_ads_batch
+    import radar.core.spam as sp
     old = sp.LLM_API_KEY; sp.LLM_API_KEY = ""
     try:
         assert classify_ads_batch(["a", "b", "c"]) == [False, False, False]
@@ -143,7 +143,7 @@ def test_classify_ads_batch_no_key():
 
 def test_competitor_word_boundary_no_substring():
     from radar.collector import _matches
-    from radar.providers.base import Post
+    from radar.core.providers.base import Post
     from radar.models import Brand
     from datetime import datetime, timezone
     import json
@@ -182,7 +182,7 @@ def test_follower_floor_big_account_kept():
 
 def test_rebuild_probes_geo_and_category():
     import json
-    from radar import db
+    from radar.core import db
     from radar.models import Brand, Probe
     from radar.api import _rebuild_probes
     s = db.get_session()
@@ -208,7 +208,7 @@ def test_rebuild_probes_geo_and_category():
 
 def test_rebuild_probes_no_geo():
     import json
-    from radar import db
+    from radar.core import db
     from radar.models import Brand, Probe
     from radar.api import _rebuild_probes
     s = db.get_session()
@@ -224,7 +224,7 @@ def test_rebuild_probes_no_geo():
 
 def test_geo_probe_requires_city():
     from radar.collector import _matches
-    from radar.providers.base import Post
+    from radar.core.providers.base import Post
     from radar.models import Brand
     from datetime import datetime, timezone
     import json
@@ -248,7 +248,7 @@ def test_follower_floor_off_in_local_mode():
 
 def test_local_mode_audience_probes():
     import json
-    from radar import db
+    from radar.core import db
     from radar.models import Brand, Probe
     from radar.api import _rebuild_probes
     s = db.get_session()
@@ -265,7 +265,7 @@ def test_local_mode_audience_probes():
 
 def test_local_mode_off_no_audience_probes():
     import json
-    from radar import db
+    from radar.core import db
     from radar.models import Brand, Probe
     from radar.api import _rebuild_probes
     s = db.get_session()
@@ -281,35 +281,35 @@ def test_local_mode_off_no_audience_probes():
 
 
 def test_provider_by_handle():
-    from radar.spam import looks_like_provider_cheap
+    from radar.core.spam import looks_like_provider_cheap
     assert looks_like_provider_cheap("красивый дизайн сегодня", "aiva.nails") is True
     assert looks_like_provider_cheap("работаем для вас", "kazan_brows_studio") is True
 
 def test_provider_by_phrase():
-    from radar.spam import looks_like_provider_cheap
+    from radar.core.spam import looks_like_provider_cheap
     assert looks_like_provider_cheap("свободные окошки на завтра, запись в директ", "anna_k") is True
 
 def test_client_not_provider():
-    from radar.spam import looks_like_provider_cheap
+    from radar.core.spam import looks_like_provider_cheap
     assert looks_like_provider_cheap("когда лето чувствуется не только на улице", "lu_happy13") is False
 
 def test_tgk_not_provider_signal():
-    from radar.spam import looks_like_provider_cheap
+    from radar.core.spam import looks_like_provider_cheap
     # тгк link alone should not flag a regular person as provider
     assert looks_like_provider_cheap("мой тгк: мойканал, заходите", "vasya_petrov") is False
 
 def test_classify_providers_no_key():
-    import radar.spam as sp
+    import radar.core.spam as sp
     old = sp.LLM_API_KEY; sp.LLM_API_KEY = ""
     try:
-        from radar.spam import classify_providers_batch
+        from radar.core.spam import classify_providers_batch
         assert classify_providers_batch(["a","b"]) == [False, False]
     finally:
         sp.LLM_API_KEY = old
 
 
 def test_provider_handle_no_substring_collision():
-    from radar.spam import looks_like_provider_cheap
+    from radar.core.spam import looks_like_provider_cheap
     # "nail" inside the patronymic "Наилевна" must NOT flag a provider
     assert looks_like_provider_cheap("ценить каждый момент", "leilanailevna.ph") is False
     # but a real nail handle does
@@ -437,17 +437,17 @@ def test_suggest_with_retry_non_transient_raises_immediately():
 # ── sphere-aware ad classifier payload ────────────────────────────────────────
 
 def test_build_ads_payload_includes_sphere():
-    from radar.spam import _build_ads_classify_payload
+    from radar.core.spam import _build_ads_classify_payload
     p = _build_ads_classify_payload(["текст про роллы"], sphere="сеть японских ресторанов")
     assert "сеть японских ресторанов" in p["system"]
 
 def test_build_ads_payload_includes_texts():
-    from radar.spam import _build_ads_classify_payload
+    from radar.core.spam import _build_ads_classify_payload
     p = _build_ads_classify_payload(["уникальный_маркер_текста"], sphere="")
     assert "уникальный_маркер_текста" in p["messages"][0]["content"]
 
 def test_build_ads_payload_no_sphere_ok():
-    from radar.spam import _build_ads_classify_payload
+    from radar.core.spam import _build_ads_classify_payload
     p = _build_ads_classify_payload(["a", "b"], sphere="")
     assert p["model"] == "claude-haiku-4-5-20251001"
     assert isinstance(p["max_tokens"], int) and p["max_tokens"] > 0
@@ -476,9 +476,9 @@ def test_brand_lane_disambiguated_not_ad_judged(monkeypatch):
     """Brand-lane mentions go through disambiguation (off-topic homonyms hidden,
     real ones kept), NOT the ad/noise judge; niche lane still uses the noise judge."""
     from datetime import datetime, timezone
-    import radar.spam as spam
+    import radar.core.spam as spam
     import radar.pipeline as pipeline
-    from radar import db
+    from radar.core import db
     from radar.models import Brand, Mention
     # noise judge would hide everything if (wrongly) applied to the brand lane
     monkeypatch.setattr(spam, "classify_ads_batch", lambda texts, sphere="": [True] * len(texts))
@@ -515,7 +515,7 @@ def test_brand_lane_disambiguated_not_ad_judged(monkeypatch):
 # ── brand-lane disambiguation ─────────────────────────────────────────────────
 
 def test_build_disambiguate_payload_includes_brand_and_sphere():
-    from radar.spam import _build_disambiguate_payload
+    from radar.core.spam import _build_disambiguate_payload
     p = _build_disambiguate_payload(["пост про #tanuki в игре"], brand_name="Тануки",
                                     sphere="сеть японских ресторанов")
     blob = p["system"] + p["messages"][0]["content"]
@@ -524,16 +524,16 @@ def test_build_disambiguate_payload_includes_brand_and_sphere():
     assert "пост про #tanuki в игре" in blob
 
 def test_disambiguate_brand_batch_fail_open_no_key():
-    import radar.spam as sp
+    import radar.core.spam as sp
     old = sp.LLM_API_KEY; sp.LLM_API_KEY = ""
     try:
-        from radar.spam import disambiguate_brand_batch
+        from radar.core.spam import disambiguate_brand_batch
         assert disambiguate_brand_batch(["a", "b"], "Тануки", "еда") == [False, False]
     finally:
         sp.LLM_API_KEY = old
 
 def test_disambiguate_brand_batch_empty():
-    from radar.spam import disambiguate_brand_batch
+    from radar.core.spam import disambiguate_brand_batch
     assert disambiguate_brand_batch([], "Тануки", "еда") == []
 
 

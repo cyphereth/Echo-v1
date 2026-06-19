@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 def test_list_and_detail(monkeypatch, tmp_path):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path/'a.db'}")
     import importlib
-    import radar.db as db; importlib.reload(db); db.init_db()
+    import radar.core.db as db; importlib.reload(db); db.init_db()
     import radar.api as api; importlib.reload(api)
     from fastapi.testclient import TestClient
     from radar.models import Story, Incident, StoryPoint, Mention, Brand, User
@@ -48,7 +48,7 @@ def test_list_and_detail(monkeypatch, tmp_path):
 def test_list_sorts_anomalous_first(monkeypatch, tmp_path):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path/'b.db'}")
     import importlib
-    import radar.db as db; importlib.reload(db); db.init_db()
+    import radar.core.db as db; importlib.reload(db); db.init_db()
     import radar.api as api; importlib.reload(api)
     from fastapi.testclient import TestClient
     from radar.models import Story, Brand, User

@@ -128,7 +128,10 @@ def _relax_brand_id_not_null() -> None:
 
 
 def init_db() -> None:
+    import radar.news.models, radar.brand.models  # noqa: F401  register new tables
     Base.metadata.create_all(engine)
+    from .migrate_split import migrate_split
+    migrate_split(engine)
     _migrate()
     _relax_brand_id_not_null()
     from .vec import create_vec_tables

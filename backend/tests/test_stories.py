@@ -174,7 +174,7 @@ def test_recompute_points_buckets_by_hour(monkeypatch):
 
 
 def test_scheduler_calls_update_stories(monkeypatch):
-    import radar.scheduler as SCH
+    import radar.core.scheduler as SCH
     from radar.models import Brand
     from radar.scope import Scope
     calls = []

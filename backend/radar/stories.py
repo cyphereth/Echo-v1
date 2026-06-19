@@ -185,7 +185,7 @@ def update_stories(session: Session, scope) -> dict:
         incidents_touched.add(inc.id)
         stories_touched.add(st.id)
     session.flush()
-    from . import anomalies
+    from .core import anomalies
     for sid in stories_touched:
         _recompute_points(session, sid)
         _recompute_verification(session, sid)

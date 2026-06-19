@@ -83,7 +83,7 @@ def on_startup():
     # with auto_collect=True (default off), so no surprise API usage.
     global _scheduler
     if os.getenv("ENABLE_SCHEDULER", "1") == "1" and _scheduler is None:
-        from .scheduler import Scheduler
+        from .core.scheduler import Scheduler
         web_provider = None
         if os.getenv("WEB_SEARCH_API_KEY"):
             from .core.providers.web import WebSearchProvider

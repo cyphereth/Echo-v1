@@ -75,7 +75,7 @@ def test_build_daily_digest_none_when_no_stories(monkeypatch):
 
 
 def test_run_digest_pass_calls_builder_for_autocollect_brands(monkeypatch):
-    import radar.scheduler as SCH
+    import radar.core.scheduler as SCH
     from radar.models import Brand
     s = _mem()
     s.add(Brand(id=1, name="a", auto_collect=True))

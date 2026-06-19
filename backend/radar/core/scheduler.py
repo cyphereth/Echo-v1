@@ -1,8 +1,8 @@
 import logging, os, random, time, threading
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
-from .core.db import get_session
-from .models import Brand, Probe
+from .db import get_session
+from ..models import Brand, Probe
 
 log = logging.getLogger(__name__)
 INTERVAL_HOT    = 300
@@ -46,8 +46,8 @@ class TokenBucket:
 def _run_brand_pipeline(session, brand_id, provider, tg_provider):
     import radar.pipeline as _pipeline
     import radar.stories as _stories
-    from .models import Brand
-    from .scope import scope_for_brand
+    from ..models import Brand
+    from ..scope import scope_for_brand
     _pipeline.classify_and_draft(session, brand_id)
     _pipeline.fetch_new_comments(session, brand_id, provider, tg_provider)
     # Story clustering is additive and best-effort: it triggers the heavy
@@ -65,8 +65,8 @@ def _run_web_pass(session, web_provider):
     import radar.collector as _collector
     import radar.pipeline as _pipeline
     import radar.stories as _stories
-    from .models import Brand
-    from .scope import scope_for_brand
+    from ..models import Brand
+    from ..scope import scope_for_brand
     for b in session.query(Brand).filter(Brand.auto_collect.is_(True)).all():
         try:
             n = _collector.collect_web(session, scope_for_brand(b), web_provider)
@@ -89,8 +89,8 @@ def _run_topic_web_pass(session, web_provider):
     """
     import radar.collector as _collector
     import radar.stories as _stories
-    from .models import Topic
-    from .scope import scope_for_topic
+    from ..models import Topic
+    from ..scope import scope_for_topic
     for t in session.query(Topic).filter(Topic.auto_collect.is_(True)).all():
         scope = scope_for_topic(t)
         try:
@@ -121,9 +121,9 @@ def _run_topic_tg_pass(session, tg_provider):
         return
     import radar.collector as _collector
     import radar.stories as _stories
-    from .models import Topic, Probe
-    from .scope import scope_for_topic
-    from .core.providers.telegram import TelegramFloodWait
+    from ..models import Topic, Probe
+    from ..scope import scope_for_topic
+    from .providers.telegram import TelegramFloodWait
     for t in session.query(Topic).filter(Topic.auto_collect.is_(True)).all():
         try:
             _collector.ensure_topic_channels_discovered(session, t, tg_provider)
@@ -164,9 +164,9 @@ def _run_topic_tg_pass(session, tg_provider):
 def _run_digest_pass(session):
     """Generate a daily digest for each auto-collect brand. Best-effort."""
     import radar.digests as _digests
-    from .core.llm import LLMNotConfigured
-    from .models import Brand
-    from .scope import scope_for_brand
+    from .llm import LLMNotConfigured
+    from ..models import Brand
+    from ..scope import scope_for_brand
     brands = session.query(Brand).filter(Brand.auto_collect.is_(True)).all()
     for b in brands:
         try:
@@ -254,7 +254,7 @@ class Scheduler:
                     continue  # telegram probe but TG provider unavailable — skip
                 self._bucket.acquire()
                 try:
-                    from .collector import collect_probe
+                    from ..collector import collect_probe
                     count    = collect_probe(session, probe, prov)
                     interval = adaptive_interval(probe, count)
                     probe.next_run_at  = datetime.now(timezone.utc) + timedelta(seconds=interval)
@@ -339,7 +339,7 @@ class Scheduler:
     def _collect_chats_worker(self):
         session = get_session()
         try:
-            from .collector import ensure_chats_discovered, collect_chats
+            from ..collector import ensure_chats_discovered, collect_chats
             brands = session.query(Brand).filter(Brand.auto_collect.is_(True)).all()
             for b in brands:
                 ensure_chats_discovered(session, b, self._tg_provider)
@@ -363,7 +363,7 @@ class Scheduler:
                 b.id for b in
                 session.query(Brand.id).filter(Brand.auto_collect.is_(True))
             ]
-            from .hotwatch import hotwatch_tick
+            from ..hotwatch import hotwatch_tick
             n = hotwatch_tick(
                 session, self._provider,
                 brand_ids=brand_ids, acquire=self._bucket.acquire,

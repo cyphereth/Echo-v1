@@ -127,7 +127,7 @@ def test_ensure_topic_global_probe_idempotent():
 # ── scheduler topic TG pass ─────────────────────────────────────────────────────
 
 def test_run_topic_tg_pass_iterates_autocollect_topics(monkeypatch):
-    import radar.scheduler as SCH
+    import radar.core.scheduler as SCH
     from radar.models import Topic
     s = _mem()
     s.add(Topic(id=1, name="Экономика", kind="default", auto_collect=True,
@@ -147,7 +147,7 @@ def test_run_topic_tg_pass_iterates_autocollect_topics(monkeypatch):
 
 
 def test_run_topic_tg_pass_noop_without_provider(monkeypatch):
-    import radar.scheduler as SCH
+    import radar.core.scheduler as SCH
     from radar.models import Topic
     s = _mem()
     s.add(Topic(id=1, name="Экономика", auto_collect=True,
@@ -171,7 +171,7 @@ def test_telegram_floodwait_is_runtimeerror():
 
 def test_run_topic_tg_pass_caps_and_rotates_channels(monkeypatch):
     from datetime import datetime, timezone, timedelta
-    import radar.scheduler as SCH
+    import radar.core.scheduler as SCH
     from radar.models import Topic, Probe
     s = _mem()
     s.add(Topic(id=1, name="Эк", kind="default", auto_collect=True,
@@ -198,7 +198,7 @@ def test_run_topic_tg_pass_caps_and_rotates_channels(monkeypatch):
 
 
 def test_run_topic_tg_pass_aborts_on_floodwait(monkeypatch):
-    import radar.scheduler as SCH
+    import radar.core.scheduler as SCH
     from radar.models import Topic, Probe
     from radar.core.providers.telegram import TelegramFloodWait
     s = _mem()

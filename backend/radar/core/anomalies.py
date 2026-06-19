@@ -3,7 +3,7 @@ import os
 
 from sqlalchemy.orm import Session
 
-from .models import Story, StoryPoint
+from ..models import Story, StoryPoint
 
 # Tunables (env, calibrate on real brands).
 MIN_BUCKETS   = int(os.getenv("ANOMALY_MIN_BUCKETS", "3"))      # baseline buckets required

@@ -86,7 +86,7 @@ def test_collect_web_stores_relevant_dedup(monkeypatch):
 
 
 def test_run_web_pass_collects_for_autocollect_brands(monkeypatch):
-    import radar.scheduler as SCH
+    import radar.core.scheduler as SCH
     from radar.models import Brand
     s = _mem()
     s.add(Brand(id=1, name="a", auto_collect=True))
@@ -100,7 +100,7 @@ def test_run_web_pass_collects_for_autocollect_brands(monkeypatch):
 
 
 def test_run_topic_web_pass_collects_for_autocollect_topics(monkeypatch):
-    import radar.scheduler as SCH
+    import radar.core.scheduler as SCH
     from radar.models import Topic
     s = _mem()
     s.add(Topic(id=1, name="Экономика", kind="default", auto_collect=True))
@@ -114,7 +114,7 @@ def test_run_topic_web_pass_collects_for_autocollect_topics(monkeypatch):
 
 
 def test_run_topic_web_pass_clusters_when_collected(monkeypatch):
-    import radar.scheduler as SCH
+    import radar.core.scheduler as SCH
     from radar.models import Topic
     s = _mem()
     s.add(Topic(id=1, name="Экономика", kind="default", auto_collect=True))

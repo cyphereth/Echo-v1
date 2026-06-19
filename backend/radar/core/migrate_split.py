@@ -36,7 +36,7 @@ def _cols(conn, table: str) -> set[str]:
 def _copy(conn, src: str, dst: str, where: str):
     src_cols = _cols(conn, src)
     dst_cols = _cols(conn, dst)
-    shared = [c for c in src_cols if c in dst_cols]
+    shared = sorted(c for c in src_cols if c in dst_cols)
     cols = ", ".join(shared)
     conn.execute(text(f"INSERT INTO {dst} ({cols}) SELECT {cols} FROM {src} WHERE {where}"))
 
@@ -47,7 +47,7 @@ def migrate_split(engine) -> None:
     if "mentions" not in existing or "news_mentions" not in existing:
         return  # nothing to migrate (fresh DB built straight from new models)
     with engine.begin() as conn:
-        # idempotency guard: if any destination already has rows, assume done.
+        # news_mentions and brand_mentions are the canonical sentinels: if either has rows, migration already ran.
         already = conn.execute(text("SELECT COUNT(*) FROM news_mentions")).scalar() \
             or conn.execute(text("SELECT COUNT(*) FROM brand_mentions")).scalar()
         if already:
@@ -91,4 +91,18 @@ def migrate_split(engine) -> None:
                 raise RuntimeError(
                     f"migrate_split count mismatch for brand child {src}: "
                     f"old={old_b} new={new_b}")
+        # verify counts for story_points
+        if "story_points" in existing:
+            old_n = conn.execute(text(
+                "SELECT COUNT(*) FROM story_points WHERE story_id IN "
+                "(SELECT id FROM stories WHERE topic_id IS NOT NULL)")).scalar()
+            old_b = conn.execute(text(
+                "SELECT COUNT(*) FROM story_points WHERE story_id IN "
+                "(SELECT id FROM stories WHERE brand_id IS NOT NULL)")).scalar()
+            new_n = conn.execute(text("SELECT COUNT(*) FROM news_story_points")).scalar()
+            new_b = conn.execute(text("SELECT COUNT(*) FROM brand_story_points")).scalar()
+            if (old_n, old_b) != (new_n, new_b):
+                raise RuntimeError(
+                    f"migrate_split count mismatch for story_points: "
+                    f"old(news={old_n},brand={old_b}) new(news={new_n},brand={new_b})")
         log.info("migrate_split: domain tables populated from legacy tables")

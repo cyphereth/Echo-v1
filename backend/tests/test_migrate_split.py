@@ -67,3 +67,21 @@ def test_brand_child_tables_are_copied():
     migrate_split(eng)
     with Session(eng) as s:
         assert s.query(BrandComment).count() == 1
+
+
+def test_story_points_routing():
+    """News-owned story + story_point routes to news_story_points after migrate_split."""
+    from sqlalchemy.orm import Session
+    from radar.models import Topic, Story, StoryPoint
+    from radar.news.models import NewsStoryPoint
+    from radar.core.migrate_split import migrate_split
+    eng = _engine_with_old_and_new()
+    now = datetime.now(timezone.utc)
+    with Session(eng) as s:
+        s.add(Topic(id=1, name="T"))
+        s.add(Story(id=1, topic_id=1, title="s", first_seen_at=now, last_seen_at=now))
+        s.add(StoryPoint(story_id=1, bucket_start=now))
+        s.commit()
+    migrate_split(eng)
+    with Session(eng) as s:
+        assert s.query(NewsStoryPoint).count() == 1

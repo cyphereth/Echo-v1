@@ -6,6 +6,8 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from .core import embeddings, vec
+from .core.clustering import cluster_owner
+from .core.domain import DomainModels
 from .models import Mention, Incident, Story, StoryPoint
 
 # Tunables (cosine SIMILARITY thresholds; distance = 1 - sim). Calibrate on real brands.
@@ -162,34 +164,54 @@ def update_stories(session: Session, scope) -> dict:
 
     ``scope`` is a :class:`radar.scope.Scope` (brand or topic).
     """
-    conn = _raw(session)
+    # Count unprocessed mentions before clustering so we can return accurate stats.
     owner_col = getattr(Mention, scope.kind + "_id")
-    new = (session.query(Mention)
-           .filter(owner_col == scope.id,
-                   Mention.incident_id.is_(None),
-                   Mention.is_spam.is_(False))
-           .order_by(Mention.created_at).all())
-    if not new:
+    new_count = (session.query(Mention)
+                 .filter(owner_col == scope.id,
+                         Mention.incident_id.is_(None),
+                         Mention.is_spam.is_(False))
+                 .count())
+    if new_count == 0:
         return {"mentions": 0, "incidents": 0, "stories": 0}
-    vecs = embeddings.embed([m.text or "" for m in new])
-    incidents_touched = set()
-    stories_touched = set()
-    for m, v in zip(new, vecs):
-        v = _normalize(v)
-        vec.store(conn, "mention_vec", m.id, v)
-        inc = _attach_to_incident(session, conn, scope, m, v)
-        m.incident_id = inc.id
-        cen = _centroid(conn, "incident_vec", inc.id)
-        st = _attach_to_story(session, conn, scope, inc, cen)
-        inc.story_id = st.id
-        incidents_touched.add(inc.id)
-        stories_touched.add(st.id)
-    session.flush()
+
+    # Build DomainModels bundle for the news/brand domain (global ORM classes).
+    domain = DomainModels(
+        owner_field=f"{scope.kind}_id",
+        Mention=Mention,
+        Incident=Incident,
+        Story=Story,
+        StoryPoint=StoryPoint,
+    )
+    # Delegate clustering to the engine; embed is adapted from batch to per-text.
+    cluster_owner(
+        session,
+        owner_id=scope.id,
+        models=domain,
+        embed=lambda t: embeddings.embed([t])[0],
+    )
+
+    # Gather touched stories/incidents for post-clustering steps.
+    inc_owner_col = getattr(Incident, scope.kind + "_id")
+    stories_touched = set(
+        sid for (sid,) in
+        session.query(Incident.story_id)
+               .filter(inc_owner_col == scope.id,
+                       Incident.story_id.isnot(None))
+               .distinct()
+    )
+    incidents_touched = set(
+        iid for (iid,) in
+        session.query(Mention.incident_id)
+               .filter(owner_col == scope.id,
+                       Mention.incident_id.isnot(None))
+               .distinct()
+    )
+
     from .core import anomalies
     for sid in stories_touched:
         _recompute_points(session, sid)
         _recompute_verification(session, sid)
         anomalies.detect_anomaly(session, sid)
     session.commit()
-    return {"mentions": len(new), "incidents": len(incidents_touched),
+    return {"mentions": new_count, "incidents": len(incidents_touched),
             "stories": len(stories_touched)}

@@ -112,7 +112,7 @@ class BrandEngagementLog(Base):
     """Audit trail: every operator decision on a brand reply (approve/post/skip)."""
     __tablename__ = "brand_engagement_log"
     id:         Mapped[int]           = mapped_column(Integer, primary_key=True, autoincrement=True)
-    brand_id:   Mapped[Optional[int]] = mapped_column(ForeignKey("brands.id"))
+    brand_id:   Mapped[int]           = mapped_column(ForeignKey("brands.id"), nullable=False)
     mention_id: Mapped[int]           = mapped_column(ForeignKey("brand_mentions.id"))
     comment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("brand_comments.id"))
     action:     Mapped[str]           = mapped_column(Text)   # approved | posted | skipped | rejected

@@ -57,6 +57,7 @@ def _aggregate(session: Session, stories: list[NewsStory]) -> str:
             .order_by(NewsStoryPoint.bucket_start)
             .all()
         )
+        # NOTE: NewsStoryPoint has no avg_sentiment column — sentiment intentionally omitted here.
         flag = " [АНОМАЛИЯ]" if st.is_anomaly else ""
         lines.append(
             f"- Сюжет «{st.title}»{flag}: {st.post_count} упоминаний, "

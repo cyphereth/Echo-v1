@@ -75,4 +75,4 @@ def _recompute_verification(session: Session, topic_id: int) -> None:
         sources = {(a or "").strip() for (a,) in rows if (a or "").strip()}
         st.source_count = len(sources)
         st.verified = len(sources) >= STORY_VERIFY_MIN_SOURCES
-    session.commit()
+    session.flush()

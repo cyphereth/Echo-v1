@@ -160,12 +160,14 @@ def collect_probe(session: Session, probe: NewsProbe, provider) -> int:
                     created_at=post.created_at,
                     source=source_label,
                 )
+                sp = session.begin_nested()
                 try:
                     session.add(mention)
                     session.flush()
+                    sp.commit()
                     count += 1
                 except IntegrityError:
-                    session.rollback()
+                    sp.rollback()
                     # Post already stored — skip, but keep going.
 
             next_cursor = getattr(page, "next_cursor", None) or getattr(page, "cursor", None)

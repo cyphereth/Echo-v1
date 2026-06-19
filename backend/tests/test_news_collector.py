@@ -75,3 +75,54 @@ def test_dedup_on_platform_post_id():
     n2 = collector.collect_probe(s, p, provider)
     assert n2 == 0  # already stored, not counted again
     assert s.query(NewsMention).count() == 1
+
+
+def test_mixed_page_new_post_survives_duplicate():
+    """A page with a new post followed by a duplicate must persist the new post.
+
+    Before the savepoint fix, session.rollback() on the duplicate discarded
+    the new post added earlier in the same transaction — data loss.
+    """
+    from radar.news.models import NewsTopic, NewsProbe, NewsMention
+    from radar.news import collector
+    s = _mem()
+    t = NewsTopic(name="Экономика", keywords='["инфляция"]', niche_keywords='["инфляция"]')
+    s.add(t); s.flush()
+    p = NewsProbe(topic_id=t.id, platform="telegram", kind="channel", query="@rbc_news")
+    s.add(p); s.commit()
+
+    # Pre-insert the duplicate post so its (platform, post_id) already exists.
+    existing = NewsMention(
+        topic_id=t.id,
+        platform="telegram",
+        post_id="p_dup",
+        author="@ch",
+        followers=0,
+        text="инфляция уже существует в базе данных",
+        hashtags="[]",
+        created_at=datetime.now(timezone.utc),
+        source="channel",
+    )
+    s.add(existing)
+    s.commit()
+
+    # Provider returns one NEW post followed by the pre-existing DUPLICATE on the same page.
+    posts = [
+        SimpleNamespace(post_id="p_new", author="@ch",
+                        text="инфляция продолжает расти в стране", followers=0,
+                        created_at=datetime.now(timezone.utc), hashtags=[]),
+        SimpleNamespace(post_id="p_dup", author="@ch",
+                        text="инфляция уже существует в базе данных", followers=0,
+                        created_at=datetime.now(timezone.utc), hashtags=[]),
+    ]
+    provider = SimpleNamespace(search=lambda q, kind, cursor: SimpleNamespace(posts=posts, cursor=None))
+    n = collector.collect_probe(s, p, provider)
+
+    # Only p_new should have been inserted (p_dup was already present).
+    assert n == 1, f"expected 1 new insert, got {n}"
+    # p_new must exist in the DB — it must not have been lost by the duplicate's rollback.
+    assert s.query(NewsMention).filter_by(post_id="p_new").count() == 1, "p_new was not persisted"
+    # p_dup must still be exactly 1 row (no second insert).
+    assert s.query(NewsMention).filter_by(post_id="p_dup").count() == 1, "p_dup was duplicated"
+    # Total: the pre-existing row + the new row.
+    assert s.query(NewsMention).count() == 2

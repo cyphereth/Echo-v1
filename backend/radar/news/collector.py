@@ -186,3 +186,81 @@ def collect_probe(session: Session, probe: NewsProbe, provider) -> int:
         raise
 
     return count
+
+
+# ── Web collection ────────────────────────────────────────────────────────────
+
+import hashlib
+from urllib.parse import urlparse
+
+
+def _domain(url: str) -> str:
+    try:
+        return urlparse(url).netloc or "web"
+    except Exception:
+        return "web"
+
+
+def _web_published(value) -> datetime:
+    if value:
+        for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(value[: len(fmt) + 2], fmt).replace(
+                    tzinfo=timezone.utc
+                )
+            except (ValueError, TypeError):
+                continue
+    return _now()
+
+
+def collect_web(session: Session, topic_id: int, provider) -> int:
+    """Search the web for a NewsTopic's keywords and store relevant results as
+    NewsMention rows with platform="web".
+
+    Dedup is by (platform, post_id) where post_id = sha1(url).
+    Returns the count of newly stored mentions.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    topic = session.get(NewsTopic, topic_id)
+    if topic is None:
+        return 0
+
+    keywords = topic.keywords_list()
+    name = topic.name
+    # Build query: topic name + first 5 keywords
+    parts = [name] + keywords[:5]
+    query = " ".join(p for p in parts if p).strip() or name
+
+    results = provider.search(query)
+    niche_terms = [t.lower() for t in topic.niche_keywords_list() if t]
+    n = 0
+    for r in results:
+        url = r.get("url")
+        if not url:
+            continue
+        text = f"{r.get('title', '')}. {r.get('content', '')}".strip()
+        if niche_terms and not _term_hit(text, niche_terms):
+            continue  # off-topic
+        post_id = hashlib.sha1(url.encode()).hexdigest()[:16]
+        mention = NewsMention(
+            topic_id=topic_id,
+            platform="web",
+            post_id=post_id,
+            author=_domain(url),
+            followers=0,
+            text=text,
+            hashtags="[]",
+            created_at=_web_published(r.get("published")),
+            source="global",
+        )
+        sp = session.begin_nested()
+        try:
+            session.add(mention)
+            session.flush()
+            sp.commit()
+            n += 1
+        except IntegrityError:
+            sp.rollback()
+    session.commit()
+    return n

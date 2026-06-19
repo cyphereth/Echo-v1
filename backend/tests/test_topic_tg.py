@@ -125,36 +125,28 @@ def test_ensure_topic_global_probe_idempotent():
 
 
 # ── scheduler topic TG pass ─────────────────────────────────────────────────────
-
-def test_run_topic_tg_pass_iterates_autocollect_topics(monkeypatch):
-    import radar.core.scheduler as SCH
-    from radar.models import Topic
-    s = _mem()
-    s.add(Topic(id=1, name="Экономика", kind="default", auto_collect=True,
-                keywords='["инфляция"]', niche_keywords='["инфляция"]'))
-    s.add(Topic(id=2, name="Приват", kind="search", auto_collect=False,
-                keywords='["x"]', niche_keywords='["x"]'))
-    s.flush(); s.commit()
-    monkeypatch.setattr("radar.collector.ensure_topic_channels_discovered",
-                        lambda sess, t, prov, **k: 0)
-    monkeypatch.setattr("radar.collector.ensure_topic_global_probe", lambda sess, t: None)
-    monkeypatch.setattr("radar.collector.collect_probe", lambda sess, probe, prov: 0)
-    clustered = []
-    monkeypatch.setattr("radar.stories.update_stories",
-                        lambda sess, scope: clustered.append(scope.id) or {})
-    SCH._run_topic_tg_pass(s, tg_provider=object())
-    assert clustered == [1]
-
+# NOTE: test_run_topic_tg_pass_iterates_autocollect_topics,
+# test_run_topic_tg_pass_caps_and_rotates_channels, and
+# test_run_topic_tg_pass_aborts_on_floodwait are ported to test_news_passes.py
+# (which tests radar.news.passes.run_topic_tg_pass against NewsTopic models).
 
 def test_run_topic_tg_pass_noop_without_provider(monkeypatch):
+    """Scheduler _run_topic_tg_pass is a no-op when no TG provider configured."""
     import radar.core.scheduler as SCH
-    from radar.models import Topic
-    s = _mem()
-    s.add(Topic(id=1, name="Экономика", auto_collect=True,
-                keywords='["инфляция"]', niche_keywords='["инфляция"]'))
+    from radar.news.models import NewsTopic
+    from radar.news.models import Base as NewsBase
+    from radar.models import Base
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as _S
+    eng = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(eng)
+    NewsBase.metadata.create_all(eng)
+    s = _S(eng)
+    s.add(NewsTopic(id=1, name="Экономика", auto_collect=True,
+                    keywords='["инфляция"]', niche_keywords='["инфляция"]'))
     s.flush(); s.commit()
     called = []
-    monkeypatch.setattr("radar.collector.ensure_topic_global_probe",
+    monkeypatch.setattr("radar.news.passes.ensure_topic_global_probe",
                         lambda sess, t: called.append(t.id))
     SCH._run_topic_tg_pass(s, tg_provider=None)
     assert called == []
@@ -167,54 +159,3 @@ def test_telegram_floodwait_is_runtimeerror():
     e = TelegramFloodWait(42)
     assert isinstance(e, RuntimeError)
     assert e.seconds == 42 and "42" in str(e)
-
-
-def test_run_topic_tg_pass_caps_and_rotates_channels(monkeypatch):
-    from datetime import datetime, timezone, timedelta
-    import radar.core.scheduler as SCH
-    from radar.models import Topic, Probe
-    s = _mem()
-    s.add(Topic(id=1, name="Эк", kind="default", auto_collect=True,
-                keywords='["k"]', niche_keywords='["k"]'))
-    s.flush()
-    now = datetime.now(timezone.utc)
-    for i in range(5):  # c0 is least-recently-run
-        s.add(Probe(topic_id=1, platform="telegram", kind="channel", query=f"@c{i}",
-                    source="niche", next_run_at=now + timedelta(seconds=i), interval_sec=3600))
-    s.commit()
-    monkeypatch.setattr("radar.collector.ensure_topic_channels_discovered", lambda *a, **k: 0)
-    monkeypatch.setattr("radar.collector.ensure_topic_global_probe", lambda *a, **k: None)
-    monkeypatch.setattr("radar.stories.update_stories", lambda *a, **k: {})
-    monkeypatch.setattr(SCH, "MAX_TOPIC_CHANNELS_PER_RUN", 2)
-    read = []
-    monkeypatch.setattr("radar.collector.collect_probe",
-                        lambda sess, probe, prov: read.append(probe.query) or 0)
-    SCH._run_topic_tg_pass(s, tg_provider=object())
-    assert read == ["@c0", "@c1"]  # only the 2 least-recently-run this pass
-    # and they got pushed to the back of the rotation (past the untouched ones)
-    c0 = s.query(Probe).filter_by(query="@c0").one()   # collected → next_run_at advanced
-    c4 = s.query(Probe).filter_by(query="@c4").one()   # untouched this pass
-    assert c0.next_run_at > c4.next_run_at
-
-
-def test_run_topic_tg_pass_aborts_on_floodwait(monkeypatch):
-    import radar.core.scheduler as SCH
-    from radar.models import Topic, Probe
-    from radar.core.providers.telegram import TelegramFloodWait
-    s = _mem()
-    s.add(Topic(id=1, name="Эк", auto_collect=True, keywords='["k"]', niche_keywords='["k"]'))
-    s.flush()
-    for i in range(3):
-        s.add(Probe(topic_id=1, platform="telegram", kind="channel", query=f"@c{i}", source="niche"))
-    s.commit()
-    monkeypatch.setattr("radar.collector.ensure_topic_channels_discovered", lambda *a, **k: 0)
-    monkeypatch.setattr("radar.collector.ensure_topic_global_probe", lambda *a, **k: None)
-    monkeypatch.setattr("radar.stories.update_stories", lambda *a, **k: {})
-    monkeypatch.setattr(SCH, "MAX_TOPIC_CHANNELS_PER_RUN", 10)
-    calls = []
-    def boom(sess, probe, prov):
-        calls.append(probe.query)
-        raise TelegramFloodWait(30)
-    monkeypatch.setattr("radar.collector.collect_probe", boom)
-    SCH._run_topic_tg_pass(s, tg_provider=object())
-    assert len(calls) == 1  # aborted after the first flood, didn't hammer the rest

@@ -84,25 +84,11 @@ def _run_web_pass(session, web_provider):
 def _run_topic_web_pass(session, web_provider):
     """Search the web per auto-collect topic and cluster results into stories.
 
-    News-mode counterpart of :func:`_run_web_pass`: topics have no brand and no
-    reply-drafting pipeline, so we only collect + cluster (no classify_and_draft).
+    Delegates to radar.news.passes.run_topic_web_pass which operates on the news
+    domain models (NewsTopic / NewsMention / NewsStory).
     """
-    import radar.collector as _collector
-    import radar.stories as _stories
-    from ..models import Topic
-    from ..scope import scope_for_topic
-    for t in session.query(Topic).filter(Topic.auto_collect.is_(True)).all():
-        scope = scope_for_topic(t)
-        try:
-            n = _collector.collect_web(session, scope, web_provider)
-        except Exception:
-            log.exception("collect_web failed for topic %s", t.id)
-            continue
-        if n:
-            try:
-                _stories.update_stories(session, scope)
-            except Exception:
-                log.exception("topic web pipeline failed for topic %s", t.id)
+    from ..news.passes import run_topic_web_pass
+    run_topic_web_pass(session, web_provider)
 
 
 # Per-pass cap on channel reads per topic — least-recently-run first, rest rotate
@@ -113,52 +99,14 @@ MAX_TOPIC_CHANNELS_PER_RUN = int(os.getenv("MAX_TOPIC_CHANNELS_PER_RUN", "8"))
 
 def _run_topic_tg_pass(session, tg_provider):
     """Discover + collect Telegram for each auto-collect topic, then cluster into
-    stories. Global search + public-channel reads only (no joining). Best-effort.
+    stories. Delegates to radar.news.passes.run_topic_tg_pass which operates on
+    the news domain models (NewsTopic / NewsProbe / NewsStory).
 
     Flood control: no discovery fan-out, channel reads capped + rotated per pass,
-    and a flood-wait aborts the whole cycle (don't keep hammering a limited account)."""
-    if tg_provider is None:
-        return
-    import radar.collector as _collector
-    import radar.stories as _stories
-    from ..models import Topic, Probe
-    from ..scope import scope_for_topic
-    from .providers.telegram import TelegramFloodWait
-    for t in session.query(Topic).filter(Topic.auto_collect.is_(True)).all():
-        try:
-            _collector.ensure_topic_channels_discovered(session, t, tg_provider)
-            _collector.ensure_topic_global_probe(session, t)
-        except TelegramFloodWait as e:
-            log.warning("topic TG pass: flood wait %ss during discovery — aborting cycle", e.seconds)
-            return
-        except Exception:
-            log.exception("topic TG discovery failed for topic %s", t.id)
-        # One global probe (cheap) + the least-recently-run channel probes, capped.
-        gprobes = (session.query(Probe)
-                   .filter(Probe.topic_id == t.id, Probe.platform == "telegram",
-                           Probe.kind == "global").all())
-        cprobes = (session.query(Probe)
-                   .filter(Probe.topic_id == t.id, Probe.platform == "telegram",
-                           Probe.kind == "channel")
-                   .order_by(Probe.next_run_at.asc())
-                   .limit(MAX_TOPIC_CHANNELS_PER_RUN).all())
-        for probe in gprobes + cprobes:
-            try:
-                _collector.collect_probe(session, probe, tg_provider)
-            except TelegramFloodWait as e:
-                log.warning("topic TG pass: flood wait %ss — aborting cycle", e.seconds)
-                return
-            except Exception:
-                log.exception("collect_probe failed for topic probe %s", probe.id)
-            # Push to the back of the rotation regardless of outcome.
-            probe.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=probe.interval_sec or 3600)
-        session.commit()
-        # update_stories returns early when there are no new mentions, so calling
-        # it unconditionally is cheap and keeps the pass simple.
-        try:
-            _stories.update_stories(session, scope_for_topic(t))
-        except Exception:
-            log.exception("topic TG clustering failed for topic %s", t.id)
+    and a flood-wait aborts the whole cycle (don't keep hammering a limited account).
+    """
+    from ..news.passes import run_topic_tg_pass
+    run_topic_tg_pass(session, tg_provider)
 
 
 def _run_digest_pass(session):

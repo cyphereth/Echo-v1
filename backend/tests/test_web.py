@@ -100,28 +100,49 @@ def test_run_web_pass_collects_for_autocollect_brands(monkeypatch):
 
 
 def test_run_topic_web_pass_collects_for_autocollect_topics(monkeypatch):
+    """Ported to patch radar.news.passes (scheduler now delegates to news.passes)."""
     import radar.core.scheduler as SCH
-    from radar.models import Topic
-    s = _mem()
-    s.add(Topic(id=1, name="Экономика", kind="default", auto_collect=True))
-    s.add(Topic(id=2, name="Приват", kind="search", auto_collect=False))  # excluded
+    from radar.news.models import NewsTopic
+    from radar.models import Base
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as _S
+    from radar.news.models import Base as NewsBase
+    eng = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(eng)
+    NewsBase.metadata.create_all(eng)
+    s = _S(eng)
+    s.add(NewsTopic(id=1, name="Экономика", kind="default", auto_collect=True,
+                    keywords='["экономика"]', niche_keywords='["экономика"]'))
+    s.add(NewsTopic(id=2, name="Приват", kind="search", auto_collect=False,
+                    keywords='["x"]', niche_keywords='["x"]'))
     s.commit()
-    scopes = []
-    monkeypatch.setattr("radar.collector.collect_web",
-                        lambda sess, scope, prov: scopes.append((scope.kind, scope.id)) or 0)
+    collected = []
+    monkeypatch.setattr("radar.news.passes.collect_web",
+                        lambda sess, topic_id, prov: collected.append(topic_id) or 0)
+    monkeypatch.setattr("radar.news.passes.update_stories", lambda *a, **k: {})
     SCH._run_topic_web_pass(s, web_provider=object())
-    assert scopes == [("topic", 1)]
+    assert collected == [1]
 
 
 def test_run_topic_web_pass_clusters_when_collected(monkeypatch):
+    """Ported to patch radar.news.passes (scheduler now delegates to news.passes)."""
     import radar.core.scheduler as SCH
-    from radar.models import Topic
-    s = _mem()
-    s.add(Topic(id=1, name="Экономика", kind="default", auto_collect=True))
+    from radar.news.models import NewsTopic
+    from radar.models import Base
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as _S
+    from radar.news.models import Base as NewsBase
+    eng = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(eng)
+    NewsBase.metadata.create_all(eng)
+    s = _S(eng)
+    s.add(NewsTopic(id=1, name="Экономика", kind="default", auto_collect=True,
+                    keywords='["экономика"]', niche_keywords='["экономика"]'))
     s.commit()
-    monkeypatch.setattr("radar.collector.collect_web", lambda sess, scope, prov: 3)
+    monkeypatch.setattr("radar.news.passes.collect_web",
+                        lambda sess, topic_id, prov: 3)
     clustered = []
-    monkeypatch.setattr("radar.stories.update_stories",
-                        lambda sess, scope: clustered.append(scope.id) or {})
+    monkeypatch.setattr("radar.news.passes.update_stories",
+                        lambda sess, topic_id: clustered.append(topic_id) or {})
     SCH._run_topic_web_pass(s, web_provider=object())
     assert clustered == [1]

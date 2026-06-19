@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from .core.db import init_db, get_session
 from .models import Brand, Probe, Mention, DraftEdit, Comment, User, Story, Incident, StoryPoint, Report, Topic
 from .core.auth import hash_password, verify_password, create_token, decode_token
+from .news.api import router as news_router
 from .classify import classify
 from .drafts import generate_draft
 from .pipeline import classify_and_draft, recent_edits
@@ -64,6 +65,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+app.include_router(news_router)
 
 _scheduler = None
 
@@ -238,32 +241,6 @@ def login(body: AuthBody, session: Session = Depends(db)):
 @app.get("/auth/me")
 def auth_me(user: User = Depends(current_user)):
     return _user_card(user)
-
-
-# ── News / Topics ─────────────────────────────────────────────────────────────
-
-@app.get("/news/topics", response_model=list[TopicOut])
-def news_topics(user: User = Depends(current_user), session: Session = Depends(db)):
-    from sqlalchemy import or_
-    rows = (session.query(Topic)
-            .filter(or_(Topic.user_id.is_(None), Topic.user_id == user.id))
-            .order_by(Topic.kind.desc(), Topic.created_at.desc()).all())
-    return [TopicOut(id=t.id, name=t.name, kind=t.kind, keywords=t.keywords_list(),
-                     auto_collect=t.auto_collect) for t in rows]
-
-
-@app.post("/news/topics", response_model=TopicOut)
-def create_news_topic(body: TopicCreate, user: User = Depends(current_user), session: Session = Depends(db)):
-    import json as _j
-    name = body.name.strip()
-    if not name:
-        raise HTTPException(400, "name required")
-    kws = body.keywords or [name]
-    t = Topic(user_id=user.id, kind="search", name=name,
-              keywords=_j.dumps(kws, ensure_ascii=False),
-              niche_keywords=_j.dumps(kws, ensure_ascii=False), auto_collect=True)
-    session.add(t); session.commit()
-    return TopicOut(id=t.id, name=t.name, kind=t.kind, keywords=t.keywords_list(), auto_collect=t.auto_collect)
 
 
 # ── Serialization ─────────────────────────────────────────────────────────────
@@ -1528,93 +1505,4 @@ def recompute_stories(brand_id: int, user: User = Depends(current_user), session
     return update_stories(session, scope_for_brand(brand))
 
 
-# ── Topic digests ─────────────────────────────────────────────────────────────
-
-@app.post("/topics/{topic_id}/digest", response_model=ReportOut)
-def create_topic_digest(topic_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
-    t = _owned_topic(session, topic_id, user)
-    from .digests import build_daily_digest
-    from .core.llm import LLMNotConfigured
-    try:
-        report = build_daily_digest(session, scope_for_topic(t))
-    except LLMNotConfigured:
-        raise HTTPException(503, "Digest generation unavailable — set LLM_API_KEY in backend/.env")
-    if report is None:
-        raise HTTPException(404, "No active stories to summarize")
-    session.commit()
-    return ReportOut(id=report.id, kind=report.kind, body=report.body,
-                     created_at=report.created_at, story_id=report.story_id)
-
-
-@app.get("/topics/{topic_id}/digests", response_model=list[ReportOut])
-def list_topic_digests(topic_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
-    _owned_topic(session, topic_id, user)
-    rows = (session.query(Report).filter(Report.topic_id == topic_id, Report.kind == "digest")
-            .order_by(Report.created_at.desc()).limit(50).all())
-    return [ReportOut(id=r.id, kind=r.kind, body=r.body, created_at=r.created_at, story_id=r.story_id) for r in rows]
-
-
-# ── Topic sources panel ───────────────────────────────────────────────────────
-
-class SourceOut(BaseModel):
-    id: int | None = None          # probe id (None for read-only web domains)
-    kind: str                       # channel | global | web
-    handle: str
-    title: str = ""
-    mention_count: int = 0
-
-class SourceAdd(BaseModel):
-    handle: str
-
-
-@app.get("/topics/{topic_id}/sources", response_model=list[SourceOut])
-def list_topic_sources(topic_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
-    _owned_topic(session, topic_id, user)
-    out: list[SourceOut] = []
-    probes = (session.query(Probe)
-              .filter(Probe.topic_id == topic_id, Probe.platform == "telegram",
-                      Probe.kind.in_(("channel", "global"))).all())
-    for p in probes:
-        cnt = (session.query(func.count(Mention.id))
-               .filter(Mention.topic_id == topic_id, Mention.author == p.query).scalar() or 0)
-        out.append(SourceOut(id=p.id, kind=p.kind, handle=p.query, title=p.label or "", mention_count=cnt))
-    web = (session.query(Mention.author, func.count(Mention.id))
-           .filter(Mention.topic_id == topic_id, Mention.platform == "web")
-           .group_by(Mention.author).all())
-    for author, cnt in web:
-        out.append(SourceOut(id=None, kind="web", handle=author or "?", mention_count=cnt))
-    out.sort(key=lambda x: x.mention_count, reverse=True)
-    return out
-
-
-@app.post("/topics/{topic_id}/sources", response_model=SourceOut)
-def add_topic_source(topic_id: int, body: SourceAdd, user: User = Depends(current_user), session: Session = Depends(db)):
-    _owned_topic(session, topic_id, user)
-    handle = body.handle.strip()
-    if not handle:
-        raise HTTPException(400, "handle required")
-    if not handle.startswith("@"):
-        handle = "@" + handle
-    exists = (session.query(Probe)
-              .filter(Probe.topic_id == topic_id, Probe.platform == "telegram",
-                      Probe.query == handle).first())
-    if exists:
-        raise HTTPException(409, "source already exists")
-    p = Probe(topic_id=topic_id, platform="telegram", kind="channel", query=handle,
-              source="niche", label="manual",
-              next_run_at=datetime.now(timezone.utc), interval_sec=3600)
-    session.add(p); session.commit()
-    return SourceOut(id=p.id, kind="channel", handle=handle, title="manual", mention_count=0)
-
-
-@app.delete("/topics/{topic_id}/sources/{probe_id}")
-def delete_topic_source(topic_id: int, probe_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
-    _owned_topic(session, topic_id, user)
-    p = session.get(Probe, probe_id)
-    if p is None or p.topic_id != topic_id:
-        raise HTTPException(404, "source not found")
-    (session.query(Mention)
-     .filter(Mention.topic_id == topic_id, Mention.author == p.query)
-     .delete(synchronize_session=False))
-    session.delete(p); session.commit()
-    return {"ok": True}
+# ── (topic sources and digests endpoints moved to radar.news.api router) ──────

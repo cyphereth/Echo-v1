@@ -2,7 +2,6 @@ from __future__ import annotations
 import os
 from datetime import datetime, timedelta, timezone
 
-import numpy as np
 from sqlalchemy.orm import Session
 
 from .core import embeddings, vec
@@ -25,92 +24,6 @@ def _tone_score(tone: str) -> float:
 
 def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
-
-def _raw(session: Session):
-    return session.connection().connection  # DBAPI conn for vec ops
-
-
-def _normalize(v: np.ndarray) -> np.ndarray:
-    n = np.linalg.norm(v)
-    return v if n == 0 else (v / n).astype(np.float32)
-
-
-def _centroid(conn, table, row_id) -> np.ndarray:
-    row = conn.execute(
-        f"SELECT embedding FROM {table} WHERE id = ?", (row_id,)
-    ).fetchone()
-    return np.frombuffer(row[0], dtype=np.float32).copy()
-
-
-def _title(text: str) -> str:
-    t = (text or "").strip().replace("\n", " ")
-    return (t[:80] + "…") if len(t) > 80 else (t or "(без текста)")
-
-
-def _attach_to_incident(session, conn, scope, m, v) -> Incident:
-    created = _aware(m.created_at)
-    owner_id = getattr(m, scope.kind + "_id")
-    for inc_id, dist in vec.knn(conn, "incident_vec", v, k=5):
-        if (1.0 - dist) < INCIDENT_SIM:
-            break  # sorted by distance; nothing closer qualifies
-        inc = session.get(Incident, inc_id)
-        if inc is None or getattr(inc, scope.kind + "_id") != owner_id:
-            continue
-        if abs(_aware(inc.last_seen_at) - created) > INCIDENT_WINDOW:
-            continue
-        old = _centroid(conn, "incident_vec", inc_id)
-        n = inc.post_count
-        merged = _normalize((old * n + v) / (n + 1))
-        vec.store(conn, "incident_vec", inc_id, merged)
-        inc.post_count = n + 1
-        inc.sentiment = (inc.sentiment * n + _tone_score(m.tone)) / (n + 1)
-        inc.first_seen_at = min(_aware(inc.first_seen_at), created)
-        inc.last_seen_at = max(_aware(inc.last_seen_at), created)
-        session.flush()
-        return inc
-    inc = Incident(**scope.owner_kwargs(), title=_title(m.text),
-                   sentiment=_tone_score(m.tone), post_count=1,
-                   first_seen_at=created, last_seen_at=created)
-    session.add(inc); session.flush()
-    vec.store(conn, "incident_vec", inc.id, v)
-    return inc
-
-
-def _attach_to_story(session, conn, scope, inc, centroid) -> Story:
-    if inc.story_id is not None:
-        st = session.get(Story, inc.story_id)
-        _bump_story(conn, st, inc, centroid)
-        return st
-    owner_id = getattr(inc, scope.kind + "_id")
-    for st_id, dist in vec.knn(conn, "story_vec", centroid, k=5):
-        if (1.0 - dist) < STORY_SIM:
-            break
-        st = session.get(Story, st_id)
-        if st is None or getattr(st, scope.kind + "_id") != owner_id:
-            continue
-        if abs(_aware(st.last_seen_at) - _aware(inc.last_seen_at)) > STORY_WINDOW:
-            continue
-        _bump_story(conn, st, inc, centroid)
-        return st
-    st = Story(**scope.owner_kwargs(), title=inc.title,
-               first_seen_at=inc.first_seen_at, last_seen_at=inc.last_seen_at,
-               post_count=0)
-    session.add(st); session.flush()
-    vec.store(conn, "story_vec", st.id, centroid)
-    _bump_story(conn, st, inc, centroid)
-    return st
-
-
-def _bump_story(conn, st, inc, centroid) -> None:
-    # story centroid = running mean of member-incident centroids (approx by post_count)
-    old = _centroid(conn, "story_vec", st.id)
-    w = max(st.post_count, 1)
-    merged = _normalize((old * w + centroid) / (w + 1))
-    vec.store(conn, "story_vec", st.id, merged)
-    st.first_seen_at = min(_aware(st.first_seen_at), _aware(inc.first_seen_at))
-    st.last_seen_at = max(_aware(st.last_seen_at), _aware(inc.last_seen_at))
-    st.post_count = (st.post_count or 0) + 1
 
 
 def _bucket(dt: datetime) -> datetime:
@@ -164,14 +77,19 @@ def update_stories(session: Session, scope) -> dict:
 
     ``scope`` is a :class:`radar.scope.Scope` (brand or topic).
     """
-    # Count unprocessed mentions before clustering so we can return accurate stats.
     owner_col = getattr(Mention, scope.kind + "_id")
-    new_count = (session.query(Mention)
-                 .filter(owner_col == scope.id,
-                         Mention.incident_id.is_(None),
-                         Mention.is_spam.is_(False))
-                 .count())
-    if new_count == 0:
+
+    # Snapshot the unprocessed mention IDs BEFORE clustering so post-clustering
+    # steps and returned counts are scoped to THIS batch only — not all-time history.
+    pending_ids = [
+        mid for (mid,) in
+        session.query(Mention.id)
+               .filter(owner_col == scope.id,
+                       Mention.incident_id.is_(None),
+                       Mention.is_spam.is_(False))
+               .all()
+    ]
+    if not pending_ids:
         return {"mentions": 0, "incidents": 0, "stories": 0}
 
     # Build DomainModels bundle for the news/brand domain (global ORM classes).
@@ -190,22 +108,20 @@ def update_stories(session: Session, scope) -> dict:
         embed=lambda t: embeddings.embed([t])[0],
     )
 
-    # Gather touched stories/incidents for post-clustering steps.
+    # Derive touched sets from the mentions processed in THIS batch only.
+    rows = (session.query(Mention.incident_id)
+                   .filter(Mention.id.in_(pending_ids),
+                           Mention.incident_id.isnot(None))
+                   .all())
+    incidents_touched = {iid for (iid,) in rows}
     inc_owner_col = getattr(Incident, scope.kind + "_id")
     stories_touched = set(
         sid for (sid,) in
         session.query(Incident.story_id)
-               .filter(inc_owner_col == scope.id,
+               .filter(Incident.id.in_(incidents_touched),
                        Incident.story_id.isnot(None))
                .distinct()
-    )
-    incidents_touched = set(
-        iid for (iid,) in
-        session.query(Mention.incident_id)
-               .filter(owner_col == scope.id,
-                       Mention.incident_id.isnot(None))
-               .distinct()
-    )
+    ) if incidents_touched else set()
 
     from .core import anomalies
     for sid in stories_touched:
@@ -213,5 +129,5 @@ def update_stories(session: Session, scope) -> dict:
         _recompute_verification(session, sid)
         anomalies.detect_anomaly(session, sid)
     session.commit()
-    return {"mentions": new_count, "incidents": len(incidents_touched),
+    return {"mentions": len(pending_ids), "incidents": len(incidents_touched),
             "stories": len(stories_touched)}

@@ -37,21 +37,21 @@ def test_news_topics_defaults_and_private(monkeypatch, tmp_path):
 def test_inbox_shows_unlaned_topic_mentions(monkeypatch, tmp_path):
     """Topic web mentions skip the brand draft pipeline, so they carry no lane.
     The feed must still surface them (treated as smm).
-    Uses legacy Topic + Mention models since /inbox is served from radar/api.py."""
+    Uses NewsTopic + NewsMention models since /news/inbox is served from radar.news.api."""
     from datetime import datetime, timezone
     import json as _j
     api, client, s, u = _client(monkeypatch, tmp_path)
-    # Use legacy Topic model (inbox endpoint queries legacy Mention/Topic)
-    from radar.models import Topic, Mention
-    t = Topic(user_id=u.id, kind="search", name="Рынок",
-              keywords=_j.dumps(["рубль"], ensure_ascii=False),
-              niche_keywords=_j.dumps(["рубль"], ensure_ascii=False), auto_collect=True)
+    # Use news-domain NewsTopic + NewsMention (news router serves /news/inbox)
+    from radar.news.models import NewsTopic, NewsMention
+    t = NewsTopic(user_id=u.id, kind="search", name="Рынок",
+                  keywords=_j.dumps(["рубль"], ensure_ascii=False),
+                  niche_keywords=_j.dumps(["рубль"], ensure_ascii=False), auto_collect=True)
     s.add(t); s.flush()
-    s.add(Mention(topic_id=t.id, platform="web", post_id="w1", author="news.ru",
-                  text="свежая новость про рубль", source="niche", lane=None,
-                  is_spam=False, created_at=datetime.now(timezone.utc)))
+    s.add(NewsMention(topic_id=t.id, platform="web", post_id="w1", author="news.ru",
+                      text="свежая новость про рубль", source="niche",
+                      created_at=datetime.now(timezone.utc)))
     s.commit()
-    body = client.get(f"/inbox?topic_id={t.id}").json()
+    body = client.get(f"/news/inbox?topic_id={t.id}").json()
     texts = {c["text"] for c in body["pr"] + body["smm"]}
     assert "свежая новость про рубль" in texts
     api.app.dependency_overrides.clear()

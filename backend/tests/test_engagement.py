@@ -104,18 +104,25 @@ def test_fetch_skips_when_thread_already_engaged(monkeypatch):
     """If a brand reply already went out under a mention, no new opportunity
     draft is generated for further comments in that same thread."""
     from datetime import datetime, timezone
-    from radar import api
-    from radar.models import Brand, Mention, Comment
+    import radar.brand.api as api
+    from radar.brand.models import Brand, BrandMention, BrandComment
+    import radar.brand.models  # register brand tables
+    from radar.models import Base
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    eng = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(eng)
+    s = Session(eng)
     from radar.core.providers.base import Comment as ProviderComment
-    s = _mem_session()
-    b = Brand(id=1, name="Tanuki", sphere="суши"); s.add(b)
-    m = Mention(brand_id=1, platform="tiktok", post_id="p9", author="a",
-                text="t", source="competitor", competitor="Якитория",
-                created_at=datetime.now(timezone.utc))
+    b = Brand(name="Tanuki", sphere="суши"); s.add(b); s.flush()
+    m = BrandMention(brand_id=b.id, platform="tiktok", post_id="p9", author="a",
+                     text="t", source="competitor", competitor="Якитория",
+                     created_at=datetime.now(timezone.utc),
+                     first_seen=datetime.now(timezone.utc))
     s.add(m); s.flush()
     # An already-sent reply in this thread:
-    s.add(Comment(mention_id=m.id, comment_id="old", text="x",
-                  status="sent", created_at=datetime.now(timezone.utc)))
+    s.add(BrandComment(mention_id=m.id, comment_id="old", text="x",
+                       status="sent", created_at=datetime.now(timezone.utc)))
     s.commit()
 
     # Provider returns a fresh comment that WOULD be an opportunity.
@@ -125,28 +132,35 @@ def test_fetch_skips_when_thread_already_engaged(monkeypatch):
     monkeypatch.setattr(api, "_get_provider",
                         lambda: type("P", (), {"fetch_comments": lambda self, *a, **k: [fc]})())
     # If evaluate_opportunity is called, fail loudly — it must be skipped.
-    import radar.drafts as d
+    import radar.brand.drafts as d
     monkeypatch.setattr(d, "evaluate_opportunity",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("should skip")))
     monkeypatch.setattr("radar.core.spam.classify_ads_batch", lambda texts, sphere="": [False] * len(texts))
     monkeypatch.setattr("radar.core.spam.looks_like_ad_cheap", lambda *a, **k: False)
 
-    api._fetch_and_store_comments(s, m)
-    stored = s.query(Comment).filter_by(comment_id="new1").one()
+    api._fetch_and_store_comments_for_mention(s, m)
+    stored = s.query(BrandComment).filter_by(comment_id="new1").one()
     assert stored.is_opportunity is False and stored.draft is None
 
 
 def test_comment_action_posted_logs_and_sets_status(monkeypatch):
     from datetime import datetime, timezone
-    from radar import api
-    from radar.models import Brand, Mention, Comment, EngagementLog
-    s = _mem_session()
-    s.add(Brand(id=1, name="Tanuki"))
-    m = Mention(brand_id=1, platform="tiktok", post_id="p", author="a",
-                text="t", created_at=datetime.now(timezone.utc))
+    import radar.brand.api as api
+    from radar.brand.models import Brand, BrandMention, BrandComment
+    import radar.brand.models  # register brand tables
+    from radar.models import Base, EngagementLog
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    eng = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(eng)
+    s = Session(eng)
+    b = Brand(name="Tanuki"); s.add(b); s.flush()
+    m = BrandMention(brand_id=b.id, platform="tiktok", post_id="p", author="a",
+                     text="t", created_at=datetime.now(timezone.utc),
+                     first_seen=datetime.now(timezone.utc))
     s.add(m); s.flush()
-    c = Comment(mention_id=m.id, comment_id="c", text="q", draft="ответ",
-                status="pending", created_at=datetime.now(timezone.utc))
+    c = BrandComment(mention_id=m.id, comment_id="c", text="q", draft="ответ",
+                     status="pending", created_at=datetime.now(timezone.utc))
     s.add(c); s.commit()
 
     monkeypatch.setattr(api, "_owned_mention", lambda session, mid, user: m)
@@ -155,31 +169,40 @@ def test_comment_action_posted_logs_and_sets_status(monkeypatch):
     class U: id = 1; email = "ops@x.com"
     api.comment_action(c.id, body, user=U(), session=s)
 
-    assert s.get(Comment, c.id).status == "posted"
-    log = s.query(EngagementLog).filter_by(action="posted").one()
+    assert s.get(BrandComment, c.id).status == "posted"
+    # engagement is logged via brand.engagement to BrandEngagementLog
+    from radar.brand.models import BrandEngagementLog
+    log = s.query(BrandEngagementLog).filter_by(action="posted").one()
     assert log.actor == "ops@x.com" and log.comment_id == c.id
 
 
 def test_analytics_sent_stat_includes_posted_comments(monkeypatch):
     """Analytics 'Ответов отправлено' must count both sent AND posted comments."""
     from datetime import datetime, timezone
-    from radar import api
-    from radar.models import Brand, Mention, Comment
-    s = _mem_session()
-    s.add(Brand(id=1, name="Tanuki", sphere="суши"))
-    m = Mention(brand_id=1, platform="tiktok", post_id="pa", author="a",
-                text="t", created_at=datetime.now(timezone.utc))
+    import radar.brand.api as api
+    from radar.brand.models import Brand, BrandMention, BrandComment
+    import radar.brand.models  # register brand tables
+    from radar.models import Base
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    eng = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(eng)
+    s = Session(eng)
+    b = Brand(name="Tanuki", sphere="суши"); s.add(b); s.flush()
+    m = BrandMention(brand_id=b.id, platform="tiktok", post_id="pa", author="a",
+                     text="t", created_at=datetime.now(timezone.utc),
+                     first_seen=datetime.now(timezone.utc))
     s.add(m); s.flush()
-    s.add(Comment(mention_id=m.id, comment_id="c_sent", text="x",
-                  status="sent", created_at=datetime.now(timezone.utc)))
-    s.add(Comment(mention_id=m.id, comment_id="c_posted", text="y",
-                  status="posted", created_at=datetime.now(timezone.utc)))
+    s.add(BrandComment(mention_id=m.id, comment_id="c_sent", text="x",
+                       status="sent", created_at=datetime.now(timezone.utc)))
+    s.add(BrandComment(mention_id=m.id, comment_id="c_posted", text="y",
+                       status="posted", created_at=datetime.now(timezone.utc)))
     s.commit()
 
     monkeypatch.setattr(api, "_owned_brand", lambda session, brand_id, user: None)
 
     class U: id = 1; email = "ops@x.com"
-    result = api.analytics(brand_id=1, user=U(), session=s)
+    result = api.analytics(brand_id=b.id, user=U(), session=s)
 
     sent_stat = next(item for item in result["stats"] if item["key"] == "sent")
     # Both sent + posted comments must be counted: value should be "2"

@@ -84,7 +84,8 @@ def test_run_digest_pass_calls_builder_for_autocollect_brands(monkeypatch):
     s.commit()
 
     called = []
-    monkeypatch.setattr("radar.digests.build_daily_digest",
-                        lambda sess, scope: called.append(scope.id) or None)
+    # scheduler now delegates to radar.brand.digests.build_brand_digest(sess, brand_id)
+    monkeypatch.setattr("radar.brand.digests.build_brand_digest",
+                        lambda sess, brand_id: called.append(brand_id) or None)
     SCH._run_digest_pass(s)
     assert sorted(called) == [1, 3]

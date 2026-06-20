@@ -121,25 +121,28 @@ def test_brand_tg_channels_default_empty():
 
 
 def test_get_tg_provider_none_without_credentials(monkeypatch):
-    from radar import api
-    monkeypatch.setattr(api, "TELEGRAM_API_ID", "")
-    api._tg_provider_singleton = None
-    assert api._get_tg_provider() is None
+    import radar.brand.api as brand_api
+    monkeypatch.setattr(brand_api, "TELEGRAM_API_ID", "")
+    brand_api._tg_provider_singleton = None
+    assert brand_api._get_tg_provider() is None
 
 def test_post_url_telegram():
-    from radar import api
-    from radar.models import Mention
-    m = Mention(platform="telegram", author="@yakitoriya", post_id="123",
-                brand_id=1, created_at=None)
-    assert api._post_url(m) == "https://t.me/yakitoriya/123"
+    import radar.brand.api as brand_api
+    from datetime import datetime, timezone
+    from radar.brand.models import BrandMention
+    m = BrandMention(platform="telegram", author="@yakitoriya", post_id="123",
+                     brand_id=1, created_at=datetime.now(timezone.utc),
+                     first_seen=datetime.now(timezone.utc), text="x", source="brand")
+    assert brand_api._post_url(m) == "https://t.me/yakitoriya/123"
 
 def test_rebuild_probes_adds_tg_channel_probes(monkeypatch):
     import json
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session as _S
-    from radar import api
-    from radar.models import Base, Brand, Probe
-    monkeypatch.setattr(api, "TELEGRAM_API_ID", "123")  # enable TG probes
+    import radar.brand.api as brand_api
+    from radar.models import Base, Brand
+    from radar.brand.models import BrandProbe
+    monkeypatch.setattr(brand_api, "TELEGRAM_API_ID", "123")  # enable TG probes
     eng = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(eng)
     s = _S(eng)
@@ -147,8 +150,8 @@ def test_rebuild_probes_adds_tg_channel_probes(monkeypatch):
               competitors="[]", niche_keywords="[]", category_terms="[]",
               audience_terms="[]", tg_channels=json.dumps(["@yakitoriya"]))
     s.add(b); s.flush()
-    api._rebuild_probes(s, b)
-    tg = s.query(Probe).filter_by(brand_id=b.id, platform="telegram").all()
+    brand_api._rebuild_probes(s, b)
+    tg = s.query(BrandProbe).filter_by(brand_id=b.id, platform="telegram").all()
     # Telegram gets ONLY channel probes — no keyword probes (no global search).
     assert any(p.kind == "channel" and p.query == "@yakitoriya" for p in tg)
     assert all(p.kind == "channel" for p in tg)
@@ -243,14 +246,14 @@ def test_search_chat_unavailable_returns_empty():
 
 def test_post_url_telegram_chat_uses_composite_path():
     from types import SimpleNamespace
-    from radar.api import _post_url
+    from radar.brand.api import _post_url
     m = SimpleNamespace(platform="telegram", author="@ivan", post_id="foodmsk/42")
     assert _post_url(m) == "https://t.me/foodmsk/42"
 
 
 def test_post_url_telegram_channel_unchanged():
     from types import SimpleNamespace
-    from radar.api import _post_url
+    from radar.brand.api import _post_url
     m = SimpleNamespace(platform="telegram", author="@sysoevfm", post_id="123")
     assert _post_url(m) == "https://t.me/sysoevfm/123"
 
@@ -498,7 +501,7 @@ def test_search_linked_chat_resolves_group_via_parent_channel():
 
 def test_post_url_telegram_internal_id_chat():
     from types import SimpleNamespace
-    from radar.api import _post_url
+    from radar.brand.api import _post_url
     m = SimpleNamespace(platform="telegram", author="@vasya", post_id="777/9")
     assert _post_url(m) == "https://t.me/c/777/9"     # numeric namespace -> private-group link
 
@@ -570,9 +573,10 @@ def test_rebuild_probes_preserves_discovered_chat_probes(monkeypatch):
     import json
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session as _S
-    from radar import api
-    from radar.models import Base, Brand, Probe
-    monkeypatch.setattr(api, "TELEGRAM_API_ID", "123")
+    import radar.brand.api as brand_api
+    from radar.models import Base, Brand
+    from radar.brand.models import BrandProbe
+    monkeypatch.setattr(brand_api, "TELEGRAM_API_ID", "123")
     eng = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(eng)
     s = _S(eng)
@@ -580,14 +584,14 @@ def test_rebuild_probes_preserves_discovered_chat_probes(monkeypatch):
               niche_keywords="[]", category_terms="[]", audience_terms="[]",
               tg_channels=json.dumps(["@yakitoriya"]))
     s.add(b); s.flush()
-    # Pretend discovery already ran and created chat probes.
-    s.add(Probe(brand_id=b.id, platform="telegram", kind="chat", query="@foodchat", source="niche"))
-    s.add(Probe(brand_id=b.id, platform="telegram", kind="chat_linked", query="@kudaeda", source="niche"))
+    # Pretend discovery already ran and created chat probes (BrandProbe now).
+    s.add(BrandProbe(brand_id=b.id, platform="telegram", kind="chat", query="@foodchat", source="niche"))
+    s.add(BrandProbe(brand_id=b.id, platform="telegram", kind="chat_linked", query="@kudaeda", source="niche"))
     s.commit()
 
-    api._rebuild_probes(s, b)   # config rebuild
+    brand_api._rebuild_probes(s, b)   # config rebuild
 
-    surviving = {(p.kind, p.query) for p in s.query(Probe).filter_by(brand_id=b.id).all()}
+    surviving = {(p.kind, p.query) for p in s.query(BrandProbe).filter_by(brand_id=b.id).all()}
     assert ("chat", "@foodchat") in surviving          # discovered chat preserved
     assert ("chat_linked", "@kudaeda") in surviving    # username-less chat preserved
     assert any(k == "keyword" for k, _ in surviving)   # config probes still rebuilt

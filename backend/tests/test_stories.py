@@ -176,12 +176,12 @@ def test_recompute_points_buckets_by_hour(monkeypatch):
 def test_scheduler_calls_update_stories(monkeypatch):
     import radar.core.scheduler as SCH
     from radar.models import Brand
-    from radar.scope import Scope
     calls = []
-    monkeypatch.setattr("radar.stories.update_stories",
-                        lambda sess, scope: calls.append(scope) or {})
-    monkeypatch.setattr("radar.pipeline.classify_and_draft", lambda sess, bid: {})
-    monkeypatch.setattr("radar.pipeline.fetch_new_comments",
+    # brand/passes.py delegates to radar.brand.stories / radar.brand.pipeline
+    monkeypatch.setattr("radar.brand.stories.update_stories",
+                        lambda sess, brand_id: calls.append(brand_id) or {})
+    monkeypatch.setattr("radar.brand.pipeline.classify_and_draft", lambda sess, bid: {})
+    monkeypatch.setattr("radar.brand.pipeline.fetch_new_comments",
                         lambda sess, bid, p, t: 0)
     # Provide a real session with brand 7 so scope_for_brand can build a scope.
     s = _session()
@@ -189,7 +189,7 @@ def test_scheduler_calls_update_stories(monkeypatch):
     s.commit()
     # exercise the per-brand post-collect block in isolation
     SCH._run_brand_pipeline(session=s, brand_id=7, provider=None, tg_provider=None)
-    assert len(calls) == 1 and isinstance(calls[0], Scope) and calls[0].id == 7
+    assert len(calls) == 1 and calls[0] == 7
 
 
 def test_update_stories_flags_anomaly(monkeypatch):

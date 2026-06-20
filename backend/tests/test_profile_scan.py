@@ -1,6 +1,6 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from radar.api import _parse_handle
+from radar.brand.api import _parse_handle
 
 
 def test_parse_handle_at_username():
@@ -21,14 +21,14 @@ def test_parse_handle_empty():
 
 def test_profile_scan_with_mock(monkeypatch):
     """profile_scan returns a profile when provider is the mock (no real TikHub)."""
-    from radar import api
+    import radar.brand.api as brand_api
     from radar.core.providers.mock import MockProvider
-    monkeypatch.setattr(api, "_get_provider", lambda: MockProvider())
+    monkeypatch.setattr(brand_api, "_get_provider", lambda: MockProvider())
 
     class FakeUser:
         id = 1
-    body = api.ScanBody(tiktok="@testbrand", instagram="")
-    result = api.profile_scan(body, user=FakeUser())
+    body = brand_api.ScanBody(tiktok="@testbrand", instagram="")
+    result = brand_api.profile_scan(body, user=FakeUser())
     assert result["scanned"]["tiktok"] is True
     assert result["name"]
     assert "audience_sentiment" in result
@@ -183,8 +183,9 @@ def test_follower_floor_big_account_kept():
 def test_rebuild_probes_geo_and_category():
     import json
     from radar.core import db
-    from radar.models import Brand, Probe
-    from radar.api import _rebuild_probes
+    from radar.models import Brand
+    from radar.brand.models import BrandProbe
+    from radar.brand.api import _rebuild_probes
     s = db.get_session()
     b = Brand(name="TestSalon", user_id=1,
               keywords=json.dumps(["мой салон"]),
@@ -194,7 +195,7 @@ def test_rebuild_probes_geo_and_category():
               geo="Москва")
     s.add(b); s.flush()
     _rebuild_probes(s, b)
-    probes = s.query(Probe).filter_by(brand_id=b.id).all()
+    probes = s.query(BrandProbe).filter_by(brand_id=b.id).all()
     q = {(p.source, p.query) for p in probes}
     # brand & named competitor: no city
     assert ("brand", "мой салон") in q
@@ -203,23 +204,24 @@ def test_rebuild_probes_geo_and_category():
     assert ("competitor", "салон красоты Москва") in q
     assert ("niche", "маникюр Москва") in q
     # cleanup
-    s.query(Probe).filter_by(brand_id=b.id).delete()
+    s.query(BrandProbe).filter_by(brand_id=b.id).delete()
     s.delete(b); s.commit()
 
 def test_rebuild_probes_no_geo():
     import json
     from radar.core import db
-    from radar.models import Brand, Probe
-    from radar.api import _rebuild_probes
+    from radar.models import Brand
+    from radar.brand.models import BrandProbe
+    from radar.brand.api import _rebuild_probes
     s = db.get_session()
     b = Brand(name="Fed", user_id=1, keywords=json.dumps(["бренд"]),
               competitors=json.dumps([]), niche_keywords=json.dumps(["тема"]),
               category_terms=json.dumps([]), geo="")
     s.add(b); s.flush()
     _rebuild_probes(s, b)
-    q = {(p.source, p.query) for p in s.query(Probe).filter_by(brand_id=b.id).all()}
+    q = {(p.source, p.query) for p in s.query(BrandProbe).filter_by(brand_id=b.id).all()}
     assert ("niche", "тема") in q  # no city appended
-    s.query(Probe).filter_by(brand_id=b.id).delete(); s.delete(b); s.commit()
+    s.query(BrandProbe).filter_by(brand_id=b.id).delete(); s.delete(b); s.commit()
 
 
 def test_geo_probe_requires_city():
@@ -249,8 +251,9 @@ def test_follower_floor_off_in_local_mode():
 def test_local_mode_audience_probes():
     import json
     from radar.core import db
-    from radar.models import Brand, Probe
-    from radar.api import _rebuild_probes
+    from radar.models import Brand
+    from radar.brand.models import BrandProbe
+    from radar.brand.api import _rebuild_probes
     s = db.get_session()
     b = Brand(name="Salon2", user_id=1, keywords=json.dumps(["мой салон"]),
               competitors=json.dumps([]), niche_keywords=json.dumps([]),
@@ -258,16 +261,17 @@ def test_local_mode_audience_probes():
               geo="Казань", local_mode=True)
     s.add(b); s.flush()
     _rebuild_probes(s, b)
-    q = {(p.source, p.query) for p in s.query(Probe).filter_by(brand_id=b.id).all()}
+    q = {(p.source, p.query) for p in s.query(BrandProbe).filter_by(brand_id=b.id).all()}
     assert ("niche", "женское Казань") in q
     assert ("niche", "мода Казань") in q
-    s.query(Probe).filter_by(brand_id=b.id).delete(); s.delete(b); s.commit()
+    s.query(BrandProbe).filter_by(brand_id=b.id).delete(); s.delete(b); s.commit()
 
 def test_local_mode_off_no_audience_probes():
     import json
     from radar.core import db
-    from radar.models import Brand, Probe
-    from radar.api import _rebuild_probes
+    from radar.models import Brand
+    from radar.brand.models import BrandProbe
+    from radar.brand.api import _rebuild_probes
     s = db.get_session()
     b = Brand(name="Fed2", user_id=1, keywords=json.dumps(["б"]),
               competitors=json.dumps([]), niche_keywords=json.dumps([]),
@@ -275,9 +279,9 @@ def test_local_mode_off_no_audience_probes():
               geo="Казань", local_mode=False)
     s.add(b); s.flush()
     _rebuild_probes(s, b)
-    q = {p.query for p in s.query(Probe).filter_by(brand_id=b.id).all()}
+    q = {p.query for p in s.query(BrandProbe).filter_by(brand_id=b.id).all()}
     assert "женское Казань" not in q
-    s.query(Probe).filter_by(brand_id=b.id).delete(); s.delete(b); s.commit()
+    s.query(BrandProbe).filter_by(brand_id=b.id).delete(); s.delete(b); s.commit()
 
 
 def test_provider_by_handle():
@@ -319,12 +323,12 @@ def test_provider_handle_no_substring_collision():
 # ── suggest_brand: response parsing ───────────────────────────────────────────
 
 def test_extract_suggest_json_single_text_block():
-    from radar.api import _extract_suggest_json
+    from radar.brand.api import _extract_suggest_json
     blocks = [{"type": "text", "text": '{"keywords": ["ozon"]}'}]
     assert _extract_suggest_json(blocks) == {"keywords": ["ozon"]}
 
 def test_extract_suggest_json_takes_last_text_block():
-    from radar.api import _extract_suggest_json
+    from radar.brand.api import _extract_suggest_json
     blocks = [
         {"type": "text", "text": "Let me search for this brand."},
         {"type": "server_tool_use", "name": "web_search", "input": {"query": "ozon"}},
@@ -335,13 +339,13 @@ def test_extract_suggest_json_takes_last_text_block():
         "keywords": ["ozon", "озон"], "competitors": ["wildberries"]}
 
 def test_extract_suggest_json_strips_markdown_fence():
-    from radar.api import _extract_suggest_json
+    from radar.brand.api import _extract_suggest_json
     blocks = [{"type": "text", "text": '```json\n{"keywords": ["x"]}\n```'}]
     assert _extract_suggest_json(blocks) == {"keywords": ["x"]}
 
 def test_extract_suggest_json_no_text_raises():
     import pytest
-    from radar.api import _extract_suggest_json
+    from radar.brand.api import _extract_suggest_json
     with pytest.raises(ValueError):
         _extract_suggest_json([{"type": "web_search_tool_result", "content": []}])
 
@@ -349,24 +353,24 @@ def test_extract_suggest_json_no_text_raises():
 # ── suggest_brand: request payload ────────────────────────────────────────────
 
 def test_build_suggest_payload_has_web_search_tool():
-    from radar.api import _build_suggest_payload
+    from radar.brand.api import _build_suggest_payload
     p = _build_suggest_payload("Ozon")
     tools = p["tools"]
     assert any(t.get("type") == "web_search_20250305" for t in tools)
 
 def test_build_suggest_payload_large_token_budget():
-    from radar.api import _build_suggest_payload
+    from radar.brand.api import _build_suggest_payload
     p = _build_suggest_payload("Ozon")
     assert p["max_tokens"] >= 4000
 
 def test_build_suggest_payload_includes_brand_name():
-    from radar.api import _build_suggest_payload
+    from radar.brand.api import _build_suggest_payload
     p = _build_suggest_payload("CafeBlanche")
     user_msg = p["messages"][0]["content"]
     assert "CafeBlanche" in user_msg
 
 def test_build_suggest_payload_asks_for_many_keywords():
-    from radar.api import _build_suggest_payload
+    from radar.brand.api import _build_suggest_payload
     p = _build_suggest_payload("Ozon")
     user_msg = p["messages"][0]["content"]
     assert "20-30" in user_msg
@@ -382,29 +386,29 @@ def _httpx_status_error(code):
 
 def test_is_transient_parse_and_value_errors():
     import json as _json
-    from radar.api import _is_transient_suggest_error
+    from radar.brand.api import _is_transient_suggest_error
     assert _is_transient_suggest_error(ValueError("x")) is True
     assert _is_transient_suggest_error(KeyError("x")) is True
     assert _is_transient_suggest_error(_json.JSONDecodeError("e", "", 0)) is True
 
 def test_is_transient_network_error():
     import httpx
-    from radar.api import _is_transient_suggest_error
+    from radar.brand.api import _is_transient_suggest_error
     assert _is_transient_suggest_error(httpx.TimeoutException("t")) is True
     assert _is_transient_suggest_error(httpx.ConnectError("c")) is True
 
 def test_is_transient_http_status():
-    from radar.api import _is_transient_suggest_error
+    from radar.brand.api import _is_transient_suggest_error
     assert _is_transient_suggest_error(_httpx_status_error(503)) is True
     assert _is_transient_suggest_error(_httpx_status_error(429)) is True
     assert _is_transient_suggest_error(_httpx_status_error(400)) is False
 
 def test_is_transient_other_false():
-    from radar.api import _is_transient_suggest_error
+    from radar.brand.api import _is_transient_suggest_error
     assert _is_transient_suggest_error(RuntimeError("nope")) is False
 
 def test_suggest_with_retry_succeeds_after_transient():
-    from radar.api import _suggest_with_retry
+    from radar.brand.api import _suggest_with_retry
     calls = {"n": 0}
     def call():
         calls["n"] += 1
@@ -416,7 +420,7 @@ def test_suggest_with_retry_succeeds_after_transient():
 
 def test_suggest_with_retry_exhausts_and_raises_last():
     import pytest
-    from radar.api import _suggest_with_retry
+    from radar.brand.api import _suggest_with_retry
     def call():
         raise ValueError("still bad")
     with pytest.raises(ValueError):
@@ -424,7 +428,7 @@ def test_suggest_with_retry_exhausts_and_raises_last():
 
 def test_suggest_with_retry_non_transient_raises_immediately():
     import pytest
-    from radar.api import _suggest_with_retry
+    from radar.brand.api import _suggest_with_retry
     calls = {"n": 0}
     def call():
         calls["n"] += 1
@@ -456,16 +460,16 @@ def test_build_ads_payload_no_sphere_ok():
 # ── brand-name guaranteed in keywords ─────────────────────────────────────────
 
 def test_ensure_name_prepends_when_missing():
-    from radar.api import _ensure_name_in_keywords
+    from radar.brand.api import _ensure_name_in_keywords
     assert _ensure_name_in_keywords("Тануки", ["суши", "роллы"]) == ["Тануки", "суши", "роллы"]
 
 def test_ensure_name_noop_when_present_substring_ci():
-    from radar.api import _ensure_name_in_keywords
+    from radar.brand.api import _ensure_name_in_keywords
     # already covered (case-insensitive substring) → unchanged
     assert _ensure_name_in_keywords("Самокат", ["самокат доставка", "еда"]) == ["самокат доставка", "еда"]
 
 def test_ensure_name_empty_name_noop():
-    from radar.api import _ensure_name_in_keywords
+    from radar.brand.api import _ensure_name_in_keywords
     assert _ensure_name_in_keywords("", ["суши"]) == ["суши"]
     assert _ensure_name_in_keywords("   ", ["суши"]) == ["суши"]
 

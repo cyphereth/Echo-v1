@@ -44,41 +44,18 @@ class TokenBucket:
             time.sleep(1)
 
 def _run_brand_pipeline(session, brand_id, provider, tg_provider):
-    import radar.pipeline as _pipeline
-    import radar.stories as _stories
-    from ..models import Brand
-    from ..scope import scope_for_brand
-    _pipeline.classify_and_draft(session, brand_id)
-    _pipeline.fetch_new_comments(session, brand_id, provider, tg_provider)
-    # Story clustering is additive and best-effort: it triggers the heavy
-    # embedding-model load on first use, so a failure (no network/disk/OOM) must
-    # NOT poison the core classify/draft pipeline. Degrade to "no stories this tick".
-    try:
-        b = session.get(Brand, brand_id)
-        _stories.update_stories(session, scope_for_brand(b))
-    except Exception:
-        log.exception("update_stories failed for brand %s (story layer skipped)", brand_id)
+    # Delegate to the brand-domain passes module (Task 4.2).
+    # Legacy radar.pipeline / radar.stories references are kept in the brand
+    # passes module for now; they will be removed in Phase 5.
+    from ..brand.passes import run_brand_pipeline
+    run_brand_pipeline(session, brand_id, provider, tg_provider)
 
 
 def _run_web_pass(session, web_provider):
     """Search the web per auto-collect brand and feed results into the pipeline."""
-    import radar.collector as _collector
-    import radar.pipeline as _pipeline
-    import radar.stories as _stories
-    from ..models import Brand
-    from ..scope import scope_for_brand
-    for b in session.query(Brand).filter(Brand.auto_collect.is_(True)).all():
-        try:
-            n = _collector.collect_web(session, scope_for_brand(b), web_provider)
-        except Exception:
-            log.exception("collect_web failed for brand %s", b.id)
-            continue
-        if n:
-            try:
-                _pipeline.classify_and_draft(session, b.id)
-                _stories.update_stories(session, scope_for_brand(b))
-            except Exception:
-                log.exception("web pipeline failed for brand %s", b.id)
+    # Delegate to the brand-domain passes module (Task 4.2).
+    from ..brand.passes import run_web_pass
+    run_web_pass(session, web_provider)
 
 
 def _run_topic_web_pass(session, web_provider):
@@ -105,14 +82,13 @@ def _run_topic_tg_pass(session, tg_provider):
 
 def _run_digest_pass(session):
     """Generate a daily digest for each auto-collect brand. Best-effort."""
-    import radar.digests as _digests
+    from ..brand.digests import build_brand_digest
     from .llm import LLMNotConfigured
     from ..models import Brand
-    from ..scope import scope_for_brand
     brands = session.query(Brand).filter(Brand.auto_collect.is_(True)).all()
     for b in brands:
         try:
-            if _digests.build_daily_digest(session, scope_for_brand(b)):
+            if build_brand_digest(session, b.id):
                 session.commit()
                 log.info("Daily digest generated for brand %s", b.id)
         except LLMNotConfigured:
@@ -281,14 +257,9 @@ class Scheduler:
     def _collect_chats_worker(self):
         session = get_session()
         try:
-            from ..collector import ensure_chats_discovered, collect_chats
-            brands = session.query(Brand).filter(Brand.auto_collect.is_(True)).all()
-            for b in brands:
-                ensure_chats_discovered(session, b, self._tg_provider)
-                n = collect_chats(session, b, self._tg_provider)
-                if n:
-                    _run_brand_pipeline(session, b.id, self._provider, self._tg_provider)
-                    log.info("Chat monitor: %d new niche message(s) for brand %s", n, b.id)
+            # Delegate to the brand-domain passes module (Task 4.2).
+            from ..brand.passes import run_chat_monitor
+            run_chat_monitor(session, self._tg_provider, self._provider)
             # (Topic TG collection runs on its own faster worker — see
             # _maybe_collect_topic_tg — so it isn't gated behind brand chats.)
         except Exception:
@@ -305,12 +276,11 @@ class Scheduler:
                 b.id for b in
                 session.query(Brand.id).filter(Brand.auto_collect.is_(True))
             ]
-            from ..hotwatch import hotwatch_tick
-            n = hotwatch_tick(
+            # Delegate to the brand-domain passes module (Task 4.2).
+            from ..brand.passes import run_hotwatch
+            run_hotwatch(
                 session, self._provider,
                 brand_ids=brand_ids, acquire=self._bucket.acquire,
             )
-            if n:
-                log.info("Hot-watch re-polled %d mention(s)", n)
         except Exception:
             log.exception("Hot-watch tick failed")

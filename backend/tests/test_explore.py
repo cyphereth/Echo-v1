@@ -139,7 +139,7 @@ class _BG:
 
 def test_explore_city_uses_cache(monkeypatch):
     from datetime import datetime, timezone
-    from radar import api
+    import radar.brand.api as api
     from radar.models import CityReport
     s = _mem_session()
     s.add(CityReport(city="москва", display_city="Москва",
@@ -158,7 +158,7 @@ def test_explore_city_uses_cache(monkeypatch):
 
 
 def test_explore_city_missing_schedules_background():
-    from radar import api
+    import radar.brand.api as api
     s = _mem_session()
     class U: id = 1; email = "u@x.com"
     bg = _BG()
@@ -171,7 +171,7 @@ def test_explore_city_missing_schedules_background():
 
 def test_explore_city_refresh_schedules_background_even_if_cached():
     from datetime import datetime, timezone
-    from radar import api
+    import radar.brand.api as api
     from radar.models import CityReport
     s = _mem_session()
     s.add(CityReport(city="москва", display_city="Москва",
@@ -187,7 +187,7 @@ def test_explore_city_refresh_schedules_background_even_if_cached():
 
 def test_run_city_explore_stores_report(monkeypatch):
     import json
-    from radar import api
+    import radar.brand.api as api
     from radar.models import CityReport
     s = _mem_session()
     monkeypatch.setattr(api, "get_session", lambda: s)

@@ -7,27 +7,31 @@ def test_generate_and_list_digests(monkeypatch, tmp_path):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path/'d.db'}")
     import importlib
     import radar.core.db as db; importlib.reload(db); db.init_db()
-    import radar.digests as D; importlib.reload(D)
+    import radar.brand.digests as D; importlib.reload(D)
+    # Reload brand_api FIRST so the app.include_router picks up the reloaded current_user
+    import radar.brand.api as brand_api; importlib.reload(brand_api)
     import radar.api as api; importlib.reload(api)
     from fastapi.testclient import TestClient
-    from radar.models import Story, StoryPoint, Brand, User
+    from radar.models import Brand, User
+    from radar.brand.models import BrandStory, BrandStoryPoint
 
     s = db.get_session()
     u = User(email="d@d.d", password_hash="x"); s.add(u); s.flush()
     b = Brand(id=1, user_id=u.id, name="b"); s.add(b); s.flush()
     now = datetime.now(timezone.utc)
-    st = Story(brand_id=1, title="t", status="active", post_count=5,
-               first_seen_at=now, last_seen_at=now)
+    st = BrandStory(brand_id=1, title="t", status="active", post_count=5,
+                    first_seen_at=now, last_seen_at=now)
     s.add(st); s.flush()
-    s.add(StoryPoint(story_id=st.id, bucket_start=now, mention_count=5,
-                     avg_sentiment=-0.2, source_count=2))
+    s.add(BrandStoryPoint(story_id=st.id, bucket_start=now, mention_count=5,
+                          avg_sentiment=-0.2, source_count=2))
     s.commit()
 
-    # stub the LLM call (no network). D was reloaded above; api imports build_daily_digest
-    # from .digests at call time, so patching D.llm.complete is what matters.
+    # stub the LLM call (no network). D is radar.brand.digests; brand api calls
+    # build_brand_digest from .digests at call time, so patching D.llm.complete works.
     monkeypatch.setattr(D.llm, "complete", lambda *a, **k: "ГОТОВО")
 
-    api.app.dependency_overrides[api.current_user] = lambda: u
+    # /brands/{id}/digest is served by brand router — override brand_api.current_user
+    api.app.dependency_overrides[brand_api.current_user] = lambda: u
     client = TestClient(api.app)
 
     r = client.post("/brands/1/digest")

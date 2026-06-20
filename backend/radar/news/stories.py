@@ -10,6 +10,7 @@ ADDITIVE: legacy radar/stories.py, radar/credibility.py, radar/digests.py
 are untouched.
 """
 from __future__ import annotations
+import logging
 import os
 
 from sqlalchemy.orm import Session
@@ -18,6 +19,8 @@ from ..core.clustering import cluster_owner
 from ..core.domain import DomainModels
 from ..core.embeddings import embed as _batch_embed
 from .models import NewsMention, NewsIncident, NewsStory, NewsStoryPoint
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Tunables — mirror the legacy env-var name/default so behaviour is identical.
@@ -44,7 +47,9 @@ def _default_embed(text: str):
 
 def update_stories(session: Session, topic_id: int, embed=None) -> None:
     """Cluster pending NewsMentions for *topic_id* into incidents/stories, then
-    recompute source_count + verified for every story under that topic."""
+    recompute source_count + verified for every story under that topic, and
+    run anomaly detection (restores the legacy radar/stories.py behaviour that
+    was dropped when the news domain was split out)."""
     cluster_owner(
         session,
         owner_id=topic_id,
@@ -52,6 +57,24 @@ def update_stories(session: Session, topic_id: int, embed=None) -> None:
         embed=embed if embed is not None else _default_embed,
     )
     _recompute_verification(session, topic_id)
+    _detect_anomalies(session, topic_id)
+
+
+def _detect_anomalies(session: Session, topic_id: int) -> None:
+    """Run anomaly detection on every NewsStory under topic_id.
+
+    Restores the legacy radar/stories.py anomaly-flagging that was dropped when
+    the news domain was split out. Mirrors how legacy radar/stories.py iterated
+    touched stories and called detect_anomaly, wrapped in per-story try/except so
+    one failure does not abort the rest.
+    """
+    from ..core import anomalies
+    stories = session.query(NewsStory).filter_by(topic_id=topic_id).all()
+    for st in stories:
+        try:
+            anomalies.detect_anomaly(session, st.id, NewsStory, NewsStoryPoint)
+        except Exception:
+            log.exception("anomaly detection failed for news story %s (skipped)", st.id)
 
 
 def _recompute_verification(session: Session, topic_id: int) -> None:

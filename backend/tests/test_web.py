@@ -87,13 +87,15 @@ def test_collect_web_stores_relevant_dedup(monkeypatch):
 
 def test_run_web_pass_collects_for_autocollect_brands(monkeypatch):
     import radar.core.scheduler as SCH
+    import radar.brand.passes  # ensure module imported so monkeypatch target exists
     from radar.models import Brand
     s = _mem()
     s.add(Brand(id=1, name="a", auto_collect=True))
     s.add(Brand(id=2, name="b", auto_collect=False))   # excluded
     s.commit()
     calls = []
-    monkeypatch.setattr("radar.collector.collect_web",
+    # brand.passes.run_web_pass now imports from .collector (brand-native); patch there.
+    monkeypatch.setattr("radar.brand.collector.collect_web",
                         lambda sess, brand, prov: calls.append(brand.id) or 0)
     SCH._run_web_pass(s, web_provider=object())
     assert calls == [1]

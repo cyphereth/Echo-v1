@@ -64,13 +64,13 @@ def update_stories(session: Session, brand_id: int, embed=None) -> None:
         embed=embed if embed is not None else _default_embed,
     )
     # Anomaly detection — mirrors legacy brand path in radar/stories.py.
-    # We detect on ALL brand stories (not just touched) to keep it simple and
-    # consistent; the anomaly detector is idempotent and cheap.
+    # Pass brand-domain models so detect_anomaly reads brand_stories /
+    # brand_story_points, NOT the legacy stories / story_points tables.
     try:
         from ..core import anomalies
         stories = session.query(BrandStory).filter_by(brand_id=brand_id).all()
         for st in stories:
-            anomalies.detect_anomaly(session, st.id)
+            anomalies.detect_anomaly(session, st.id, BrandStory, BrandStoryPoint)
     except Exception:
         import logging
         logging.getLogger(__name__).exception(

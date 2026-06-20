@@ -62,19 +62,17 @@ def run_web_pass(session: Session, web_provider) -> None:
     """Search the web per auto-collect brand and feed results into the pipeline.
 
     Mirrors ``_run_web_pass`` in scheduler.py but uses brand-domain modules.
-    Uses radar.collector.collect_web (the legacy shared web collector) since
-    test_web.py patches it at that path.
+    Uses radar.brand.collector.collect_web (brand-native) so results are written
+    as BrandMention rows visible to the brand domain (NOT the legacy Mention table).
     """
-    from ..collector import collect_web  # legacy shared; test patches here
+    from .collector import collect_web  # brand-native; writes BrandMention
     from .pipeline import classify_and_draft
     from .models import Brand
     from . import stories as _stories
-    from ..scope import scope_for_brand
 
     for b in session.query(Brand).filter(Brand.auto_collect.is_(True)).all():
         try:
-            scope = scope_for_brand(b)
-            n = collect_web(session, scope, web_provider)
+            n = collect_web(session, b, web_provider)
         except Exception:
             log.exception("collect_web failed for brand %s", b.id)
             continue

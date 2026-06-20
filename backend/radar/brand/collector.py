@@ -4,14 +4,19 @@ Lifts the BRAND branch of radar/collector.py::collect_probe and reparameterizes 
 against BrandProbe / BrandMention / BrandMentionSnapshot.  No Scope, no topic path.
 """
 from __future__ import annotations
-import json, logging, re
+import hashlib, json, logging, os, re
 from functools import lru_cache
 from datetime import datetime, timezone, timedelta
+from urllib.parse import urlparse
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from .models import Brand, BrandMention, BrandMentionSnapshot, BrandProbe
 from ..core.providers.base import Post, SearchProvider
 from ..core.spam import looks_like_ad_cheap
+
+# Same env-var as legacy radar/collector.py so freshness discipline is shared.
+NICHE_FRESH_HOURS = int(os.getenv("NICHE_FRESH_HOURS", "24"))
+MIN_TEXT_LEN = 20
 
 log = logging.getLogger(__name__)
 
@@ -236,3 +241,289 @@ def collect_probe(session: Session, probe: BrandProbe, provider) -> int:
         raise
 
     return count
+
+
+# ---------------------------------------------------------------------------
+# Brand-native web collector — writes BrandMention (NOT legacy Mention)
+# ---------------------------------------------------------------------------
+
+def _web_query_terms(name: str, keywords: list[str]) -> str:
+    """Build a search query from brand name + first 5 niche keywords."""
+    parts = [name] + keywords[:5]
+    return " ".join(p for p in parts if p).strip() or name
+
+
+def _domain(url: str) -> str:
+    try:
+        return urlparse(url).netloc or "web"
+    except Exception:
+        return "web"
+
+
+def _web_published(value) -> datetime:
+    if value:
+        for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(value[:len(fmt) + 2], fmt).replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                continue
+    return _now()
+
+
+def _store_niche_brand_post(
+    session: Session, brand_id: int, post: Post, spam: bool
+) -> bool:
+    """Upsert a niche-source web post as BrandMention.
+
+    Mirrors legacy _store_niche_post:
+    - Drops posts older than NICHE_FRESH_HOURS (freshness gate).
+    - Stores spam hidden (no snapshot, returns False).
+    - Returns True only when the post counts toward pipeline volume.
+    """
+    created = post.created_at.replace(tzinfo=None) if post.created_at.tzinfo else post.created_at
+    if (_now().replace(tzinfo=None) - created) > timedelta(hours=NICHE_FRESH_HOURS):
+        return False  # stale — skip
+    mention = _upsert_mention(session, post, brand_id, platform="web")
+    mention.source = "niche"
+    mention.is_spam = spam
+    if spam:
+        return False
+    session.add(BrandMentionSnapshot(
+        mention_id=mention.id, ts=_now(),
+        likes=post.likes, views=post.views,
+        comments=post.comments, shares=post.shares,
+    ))
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Brand-native geo + chat collectors — write BrandMention / BrandProbe
+# ---------------------------------------------------------------------------
+
+UNIVERSAL_INTENT_TERMS = ["посоветуйте", "подскажите", "что выбрать", "какой лучше", "стоит ли"]
+MAX_CHATS_PER_RUN      = int(os.getenv("MAX_CHATS_PER_RUN", "15"))
+MAX_DISCOVERY_CHANNELS = int(os.getenv("MAX_DISCOVERY_CHANNELS", "60"))
+
+
+def _brand_terms(brand: Brand) -> list[str]:
+    """Niche + category keywords + sphere words — used for sphere-relevance checks."""
+    terms = [t.lower() for t in (brand.niche_keywords_list() + brand.category_terms_list())]
+    terms += [w.lower() for w in (getattr(brand, "sphere", "") or "").split() if len(w) > 3]
+    return [t for t in dict.fromkeys(terms) if t]
+
+
+def collect_geo(session: Session, brand: Brand, provider) -> int:
+    """Pull IG posts geotagged in the brand's city and store as BrandMention (niche).
+
+    Brand-native port of legacy radar/collector.py::collect_geo.
+    Writes BrandMention instead of Mention.  Fail-open — never raises.
+    """
+    city = (getattr(brand, "geo", "") or "").strip()
+    if not city:
+        return 0
+    local = getattr(brand, "local_mode", False)
+    terms = [t.lower() for t in (brand.niche_keywords_list() + brand.category_terms_list())]
+    if local:
+        terms += [t.lower() for t in brand.audience_terms_list()]
+    sphere_words = [w.lower() for w in (getattr(brand, "sphere", "") or "").split() if len(w) > 3]
+
+    def _on_topic(text: str) -> bool:
+        t = text.lower()
+        return any(term in t for term in terms) or any(w in t for w in sphere_words)
+
+    count = 0
+    try:
+        posts = provider.fetch_location_posts(city, "instagram", limit=15)
+        for post in posts:
+            spam = (looks_like_ad_cheap(post.text, post.author, post.hashtags)
+                    or _below_follower_floor(post, local))
+            clean = " ".join(w for w in post.text.split() if not w.startswith("#")).strip()
+            if len(clean) < MIN_TEXT_LEN and not spam:
+                spam = True
+            if not spam and not local and not _on_topic(post.text):
+                spam = True
+            if _store_niche_brand_post(session, brand.id, post, spam):
+                count += 1
+        session.commit()
+    except Exception:
+        session.rollback()
+        log.warning("collect_geo failed for brand %s city %r", brand.id, city)
+    return count
+
+
+def ensure_chats_discovered(
+    session: Session, brand: Brand, provider,
+    min_chats: int = 8, max_add: int = 40
+) -> int:
+    """Auto-discover Telegram discussion chats and store as BrandProbe rows.
+
+    Brand-native port of legacy radar/collector.py::ensure_chats_discovered.
+    Uses BrandProbe instead of Probe.  Fail-open.
+    """
+    if not (hasattr(provider, "linked_chat") and hasattr(provider, "channel_recommendations")):
+        return 0
+    existing = (session.query(BrandProbe)
+                .filter(BrandProbe.brand_id == brand.id, BrandProbe.platform == "telegram",
+                        BrandProbe.kind.in_(("chat", "chat_linked"))).all())
+    if len(existing) >= min_chats:
+        return 0
+
+    seeds = list(brand.tg_channels_list())
+    if not seeds and hasattr(provider, "discover_channels"):
+        geo    = (getattr(brand, "geo", "") or "").strip()
+        sphere = (getattr(brand, "sphere", "") or "").strip()
+        queries = [f"{kw} {geo}".strip() for kw in brand.niche_keywords_list()[:3]]
+        if sphere:
+            queries.append(f"{sphere} {geo}".strip())
+        terms = _brand_terms(brand)
+        for q in dict.fromkeys(x for x in queries if x):
+            try:
+                for c in provider.discover_channels(q, limit=20):
+                    title = c.get("title", "")
+                    if any(t in title.lower() for t in terms):
+                        seeds.append(c["handle"])
+            except Exception:
+                log.warning("discover_channels failed for query %r", q)
+
+    channels: list[str] = list(seeds)
+    for s in seeds:
+        try:
+            for rec in provider.channel_recommendations(s, limit=20):
+                channels.append(rec["handle"])
+        except Exception:
+            log.warning("channel_recommendations failed for %s", s)
+    channels = list(dict.fromkeys(channels))[:MAX_DISCOVERY_CHANNELS]
+
+    seen  = {p.query for p in existing}
+    added = 0
+    for ch in channels:
+        if added >= max_add:
+            break
+        try:
+            linked = provider.linked_chat(ch)
+        except Exception:
+            log.warning("linked_chat failed for %s", ch)
+            continue
+        if not linked:
+            continue
+        if linked.get("handle"):
+            kind, key = "chat", linked["handle"]
+        elif linked.get("id") and linked.get("via"):
+            kind, key = "chat_linked", linked["via"]
+        else:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        session.add(BrandProbe(
+            brand_id=brand.id, platform="telegram", kind=kind,
+            query=key, source="niche", label=(linked["title"] or "")[:120],
+            next_run_at=_now(), interval_sec=3600,
+        ))
+        added += 1
+    session.commit()
+    return added
+
+
+def collect_chats(session: Session, brand: Brand, provider) -> int:
+    """Monitor Telegram group chats and store matching messages as BrandMentions.
+
+    Brand-native port of legacy radar/collector.py::collect_chats.
+    Uses BrandProbe (kind='chat'/'chat_linked') and writes BrandMention.
+    Fail-open per chat.
+    """
+    if not hasattr(provider, "search_chat"):
+        return 0
+    chats = (
+        session.query(BrandProbe)
+        .filter(BrandProbe.brand_id == brand.id, BrandProbe.platform == "telegram",
+                BrandProbe.kind.in_(("chat", "chat_linked")))
+        .order_by(BrandProbe.next_run_at.asc())
+        .limit(MAX_CHATS_PER_RUN)
+        .all()
+    )
+    if not chats:
+        return 0
+
+    from .pipeline import _looks_like_intent
+    terms = _brand_terms(brand)
+    search_terms = list(dict.fromkeys(brand.niche_keywords_list()[:3] + UNIVERSAL_INTENT_TERMS))
+
+    def _topical(text: str) -> bool:
+        t = text.lower()
+        return any(term in t for term in terms)
+
+    count = 0
+    for probe in chats:
+        handle = probe.query
+        method = "search_linked_chat" if probe.kind == "chat_linked" else "search_chat"
+        search = getattr(provider, method, None)
+        if search is None:
+            log.warning("collect_chats: provider has no %s — skipping %s", method, handle)
+            continue
+        wm = int(probe.watermark) if (probe.watermark or "").isdigit() else 0
+        newest = wm
+        seen_ids: set[str] = set()
+        try:
+            for term in search_terms:
+                for post in search(handle, term, limit=20, min_id=wm):
+                    try:
+                        newest = max(newest, int(post.post_id))
+                    except (ValueError, TypeError):
+                        pass
+                    if post.post_id in seen_ids:
+                        continue
+                    seen_ids.add(post.post_id)
+                    clean = " ".join(w for w in post.text.split() if not w.startswith("#")).strip()
+                    spam = (looks_like_ad_cheap(post.text, post.author, post.hashtags)
+                            or len(clean) < MIN_TEXT_LEN)
+                    if not spam and not (_topical(post.text) or _looks_like_intent(post.text)):
+                        spam = True
+                    if _store_niche_brand_post(session, brand.id, post, spam):
+                        count += 1
+            session.commit()
+        except Exception:
+            session.rollback()
+            log.warning("collect_chats failed for brand %s chat %s", brand.id, handle)
+        if newest > wm:
+            probe.watermark = str(newest)
+        probe.next_run_at = _now() + timedelta(seconds=probe.interval_sec or 3600)
+    session.commit()
+    return count
+
+
+def collect_web(session: Session, brand: Brand, provider) -> int:
+    """Search the web for the brand's topic and store relevant results as BrandMentions.
+
+    Brand-native port of legacy radar/collector.py::collect_web.
+    Writes BrandMention (NOT legacy Mention) so results are visible to the brand
+    domain.  Faithful to legacy behaviour:
+      - Relevance gate: niche_keywords term hit (no niche_keywords → keep all).
+      - Freshness window: NICHE_FRESH_HOURS (default 24 h).
+      - Dedup: (platform, post_id) UNIQUE where post_id = sha1(url)[:16].
+      - Spam/follower floor: web posts have followers=0 (unknown) → floor skipped,
+        spam=False (same as legacy which passed spam=False to _store_niche_post).
+    Returns the count of relevant results stored this pass.
+    """
+    query = _web_query_terms(brand.name, brand.keywords_list())
+    results = provider.search(query)
+    terms = [t.lower() for t in brand.niche_keywords_list() if t]
+    n = 0
+    for r in results:
+        url = r.get("url")
+        if not url:
+            continue
+        text = f"{r.get('title', '')}. {r.get('content', '')}".strip()
+        # Relevance gate: if niche terms exist, require at least one to hit.
+        if terms and not any(t in text.lower() for t in terms):
+            continue  # off-topic
+        post = Post(
+            post_id=hashlib.sha1(url.encode()).hexdigest()[:16],
+            platform="web", author=_domain(url), followers=0,
+            text=text, hashtags=[], created_at=_web_published(r.get("published")),
+            likes=0, views=0, comments=0, shares=0,
+        )
+        if _store_niche_brand_post(session, brand.id, post, spam=False):
+            n += 1
+    session.commit()
+    return n

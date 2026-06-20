@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 from sqlalchemy import Boolean, Float, ForeignKey, Integer, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..models import Base, _now, Brand, CityReport, User  # reuse shared owner/shared tables
 
@@ -63,6 +63,20 @@ class BrandMention(Base):
     status:       Mapped[str]           = mapped_column(Text, default="new")
     first_seen:   Mapped[datetime]      = mapped_column(default=_now)
     updated_at:   Mapped[datetime]      = mapped_column(default=_now, onupdate=_now)
+    snapshots:    Mapped[list["BrandMentionSnapshot"]] = relationship(
+        "BrandMentionSnapshot", back_populates="mention",
+        foreign_keys="[BrandMentionSnapshot.mention_id]",
+        order_by="BrandMentionSnapshot.ts",
+    )
+    comment_rows: Mapped[list["BrandComment"]] = relationship(
+        "BrandComment", back_populates="mention",
+        foreign_keys="[BrandComment.mention_id]",
+        order_by="BrandComment.likes.desc()",
+    )
+    draft_edits:  Mapped[list["BrandDraftEdit"]] = relationship(
+        "BrandDraftEdit", back_populates="mention",
+        foreign_keys="[BrandDraftEdit.mention_id]",
+    )
 
 
 class BrandMentionSnapshot(Base):
@@ -74,6 +88,7 @@ class BrandMentionSnapshot(Base):
     views:      Mapped[int]      = mapped_column(Integer, default=0)
     comments:   Mapped[int]      = mapped_column(Integer, default=0)
     shares:     Mapped[int]      = mapped_column(Integer, default=0)
+    mention:    Mapped["BrandMention"] = relationship("BrandMention", back_populates="snapshots", foreign_keys=[mention_id])
 
 
 class BrandComment(Base):
@@ -95,6 +110,7 @@ class BrandComment(Base):
     status:         Mapped[str]             = mapped_column(Text, default="pending")  # pending | sent | posted | skipped
     created_at:     Mapped[datetime]        = mapped_column(nullable=False)
     fetched_at:     Mapped[datetime]        = mapped_column(default=_now)
+    mention:        Mapped["BrandMention"]  = relationship("BrandMention", back_populates="comment_rows", foreign_keys=[mention_id])
 
 
 class BrandDraftEdit(Base):
@@ -106,6 +122,7 @@ class BrandDraftEdit(Base):
     original:   Mapped[str]           = mapped_column(Text)
     edited:     Mapped[str]           = mapped_column(Text)
     created_at: Mapped[datetime]      = mapped_column(default=_now)
+    mention:    Mapped["BrandMention"] = relationship("BrandMention", back_populates="draft_edits", foreign_keys=[mention_id])
 
 
 class BrandEngagementLog(Base):

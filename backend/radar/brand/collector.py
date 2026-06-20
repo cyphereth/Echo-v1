@@ -166,7 +166,8 @@ def collect_probe(session: Session, probe: BrandProbe, provider) -> int:
     - Resolves the probe's Brand; returns 0 if brand was deleted.
     - Applies brand relevance gate (_matches: language + keyword/hashtag match).
     - Deduplicates on (platform, post_id) via UNIQUE constraint (upsert).
-    - Applies follower floor + spam rules; stores spam as hidden (no snapshot).
+    - Applies follower floor + spam rules to ALL brand-scope probes (any source);
+      stores spam as hidden (no snapshot).
     - Advances the probe watermark to the first post_id seen this run.
     - Returns the count of non-spam mentions stored this pass.
     """
@@ -200,10 +201,10 @@ def collect_probe(session: Session, probe: BrandProbe, provider) -> int:
                 if age > 7:
                     continue
 
-                # Cheap ad/spam rules + tiny-account floor (floor only for niche/competitor).
+                # Cheap ad/spam rules + tiny-account floor (faithful to legacy: floor
+                # applies to ALL brand-scope probes, regardless of source).
                 spam = looks_like_ad_cheap(post.text, post.author, post.hashtags)
-                if probe.source in ("competitor", "niche"):
-                    spam = spam or _below_follower_floor(post, getattr(brand, "local_mode", False))
+                spam = spam or _below_follower_floor(post, getattr(brand, "local_mode", False))
 
                 mention = _upsert_mention(session, post, brand.id, platform=probe.platform)
                 mention.source     = probe.source

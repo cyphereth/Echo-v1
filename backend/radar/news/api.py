@@ -257,8 +257,8 @@ def list_topic_sources(topic_id: int, user: User = Depends(current_user), sessio
               .filter(Probe.topic_id == topic_id, Probe.platform == "telegram",
                       Probe.kind.in_(("channel", "global"))).all())
     for p in probes:
-        cnt = (session.query(func.count(Mention.id))
-               .filter(Mention.topic_id == topic_id, Mention.author == p.query).scalar() or 0)
+        cnt = (session.query(func.count(NewsMention.id))
+               .filter(NewsMention.topic_id == topic_id, NewsMention.author == p.query).scalar() or 0)
         out.append(SourceOut(id=p.id, kind=p.kind, handle=p.query,
                              title=p.label or "", mention_count=cnt))
     # Web domains collected as NewsMentions
@@ -302,3 +302,80 @@ def delete_topic_source(topic_id: int, probe_id: int, user: User = Depends(curre
      .delete(synchronize_session=False))
     session.delete(p); session.commit()
     return {"ok": True}
+
+
+# ── News-scoped stories / inbox ───────────────────────────────────────────────
+
+@router.get("/news/stories", response_model=list[StoryOut])
+def news_list_stories(topic_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    """List active NewsStory rows for a topic. Mirrors legacy GET /stories?topic_id= shape."""
+    _owned_news_topic(session, topic_id, user)
+    rows = (session.query(NewsStory)
+            .filter(NewsStory.topic_id == topic_id, NewsStory.status == "active")
+            .order_by(NewsStory.is_anomaly.desc(), NewsStory.last_seen_at.desc()).all())
+    return [StoryOut(**_story_fields(session, st)) for st in rows]
+
+
+@router.get("/news/stories/{story_id}", response_model=StoryDetailOut)
+def news_get_story(story_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    """One NewsStory with points/incidents/sources. Mirrors legacy GET /stories/{id} topic shape."""
+    st = _owned_news_story(session, story_id, user)
+    points = (session.query(NewsStoryPoint)
+              .filter(NewsStoryPoint.story_id == story_id)
+              .order_by(NewsStoryPoint.bucket_start).all())
+    incidents = (session.query(NewsIncident)
+                 .filter(NewsIncident.story_id == story_id)
+                 .order_by(NewsIncident.last_seen_at.desc()).all())
+    return StoryDetailOut(
+        **_story_fields(session, st),
+        points=[StoryPointOut(bucket_start=p.bucket_start, mention_count=p.mention_count,
+                              source_count=p.source_count)
+                for p in points],
+        incidents=[IncidentOut(id=i.id, title=i.title, post_count=i.post_count,
+                               last_seen_at=i.last_seen_at)
+                   for i in incidents],
+        sources=_story_sources(session, story_id))
+
+
+@router.post("/news/stories/{story_id}/summarize", response_model=StoryOut)
+def news_summarize_story(story_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    """LLM 'what happened' summary for one NewsStory. Mirrors legacy POST /stories/{id}/summarize."""
+    st = _owned_news_story(session, story_id, user)
+    from ..core.llm import LLMNotConfigured
+    try:
+        news_credibility.summarize_story(session, st)
+    except LLMNotConfigured:
+        raise HTTPException(503, "LLM not configured")
+    session.commit()
+    return StoryOut(**_story_fields(session, st))
+
+
+@router.post("/news/stories/{story_id}/assess", response_model=StoryOut)
+def news_assess_story(story_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
+    """Run LLM fake-detection on one NewsStory. Mirrors legacy POST /stories/{id}/assess."""
+    st = _owned_news_story(session, story_id, user)
+    from ..core.llm import LLMNotConfigured
+    try:
+        news_credibility.assess_credibility(session, st)
+    except LLMNotConfigured:
+        raise HTTPException(503, "LLM not configured")
+    session.commit()
+    return StoryOut(**_story_fields(session, st))
+
+
+@router.get("/news/inbox")
+def news_inbox(topic_id: int, include_hidden: int = 0,
+               user: User = Depends(current_user), session: Session = Depends(db)):
+    """Flat list of NewsMentions for the topic. Mirrors legacy GET /inbox?topic_id= shape.
+
+    Returns {"pr": [...], "smm": [...]} where news mentions (no brand lane) all
+    land in smm — identical top-level shape so the frontend can switch endpoints.
+    """
+    _owned_news_topic(session, topic_id, user)
+    q = (session.query(NewsMention)
+         .filter(NewsMention.topic_id == topic_id))
+    mentions = q.order_by(NewsMention.created_at.desc()).all()
+    cards = [_mention_card(m) for m in mentions]
+    # News mentions carry no brand lane; surface everything in smm to mirror the
+    # unlaned-topic-mention behaviour in the legacy endpoint.
+    return {"pr": [], "smm": cards}

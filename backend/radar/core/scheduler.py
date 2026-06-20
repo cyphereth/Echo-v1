@@ -91,12 +91,6 @@ def _run_topic_web_pass(session, web_provider):
     run_topic_web_pass(session, web_provider)
 
 
-# Per-pass cap on channel reads per topic — least-recently-run first, rest rotate
-# in on later passes. Keeps a topic with dozens of channels from bursting into a
-# flood-wait every cycle (mirrors MAX_CHATS_PER_RUN for brand chats).
-MAX_TOPIC_CHANNELS_PER_RUN = int(os.getenv("MAX_TOPIC_CHANNELS_PER_RUN", "8"))
-
-
 def _run_topic_tg_pass(session, tg_provider):
     """Discover + collect Telegram for each auto-collect topic, then cluster into
     stories. Delegates to radar.news.passes.run_topic_tg_pass which operates on

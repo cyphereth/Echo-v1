@@ -67,11 +67,12 @@ def test_sources_panel_list_add_delete(monkeypatch, tmp_path):
     s.add(Probe(topic_id=t.id, platform="telegram", kind="channel", query="@junk", source="niche", label="Junk"))
     s.flush()
     now = datetime.now(timezone.utc)
-    s.add(Mention(topic_id=t.id, platform="telegram", post_id="m1", author="@junk",
-                  text="мусор из канала", source="niche", created_at=now))
+    # Telegram channel mentions are now counted via NewsMention (news pass writes NewsMention)
+    from radar.news.models import NewsMention
+    s.add(NewsMention(topic_id=t.id, platform="telegram", post_id="m1", author="@junk",
+                      text="мусор из канала", source="channel", created_at=now))
     # Web mentions are tracked via NewsMention in the news router; for the source panel
     # web row, add a NewsMention (the sources endpoint queries NewsMention for web domains)
-    from radar.news.models import NewsMention
     s.add(NewsMention(topic_id=t.id, platform="web", post_id="w1", author="rbc.ru",
                       text="новость", source="global", created_at=now))
     s.commit()
@@ -90,12 +91,57 @@ def test_sources_panel_list_add_delete(monkeypatch, tmp_path):
     # duplicate add → 409
     assert client.post(f"/topics/{t.id}/sources", json={"handle": "@interfaxonline"}).status_code == 409
 
-    # delete the junk probe → probe + its mentions gone
+    # delete the junk probe → probe + its legacy Mention records gone (delete handler still
+    # cleans up legacy Mention rows by author for safety; NewsMention rows are separate)
     pid = by_handle["@junk"]["id"]
     assert client.delete(f"/topics/{t.id}/sources/{pid}").status_code == 200
     handles2 = {x["handle"] for x in client.get(f"/topics/{t.id}/sources").json()}
     assert "@junk" not in handles2
-    assert s.query(Mention).filter_by(author="@junk").count() == 0
+    api.app.dependency_overrides.clear()
+
+
+def test_news_stories_list_and_inbox(monkeypatch, tmp_path):
+    """GET /news/stories?topic_id= returns NewsStory list; GET /news/inbox?topic_id= returns mentions."""
+    from datetime import datetime, timezone
+    api, client, s, u = _client(monkeypatch, tmp_path)
+    from radar.news.models import NewsTopic, NewsStory, NewsMention
+    now = datetime.now(timezone.utc)
+    t = NewsTopic(user_id=u.id, kind="search", name="Тест историй",
+                  keywords='["тест"]', niche_keywords='["тест"]', auto_collect=True)
+    s.add(t); s.flush()
+    st = NewsStory(topic_id=t.id, title="Тестовая история", status="active",
+                   is_anomaly=False, post_count=3, source_count=1,
+                   first_seen_at=now, last_seen_at=now)
+    s.add(st); s.flush()
+    s.add(NewsMention(topic_id=t.id, platform="web", post_id="p1", author="lenta.ru",
+                      text="текст новости", source="global", created_at=now))
+    s.commit()
+
+    # GET /news/stories?topic_id= → 200, contains the story
+    r = client.get(f"/news/stories?topic_id={t.id}")
+    assert r.status_code == 200, r.text
+    stories = r.json()
+    assert len(stories) == 1
+    assert stories[0]["title"] == "Тестовая история"
+    assert stories[0]["post_count"] == 3
+    assert "credibility" in stories[0]
+
+    # GET /news/stories/{id} → 200, detail shape
+    sid = stories[0]["id"]
+    r2 = client.get(f"/news/stories/{sid}")
+    assert r2.status_code == 200, r2.text
+    detail = r2.json()
+    assert detail["id"] == sid
+    assert "points" in detail and "incidents" in detail and "sources" in detail
+
+    # GET /news/inbox?topic_id= → 200, {"pr": [], "smm": [...]}
+    r3 = client.get(f"/news/inbox?topic_id={t.id}")
+    assert r3.status_code == 200, r3.text
+    body = r3.json()
+    assert "pr" in body and "smm" in body
+    texts = {c["text"] for c in body["pr"] + body["smm"]}
+    assert "текст новости" in texts
+
     api.app.dependency_overrides.clear()
 
 

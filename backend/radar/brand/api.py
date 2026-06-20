@@ -1019,7 +1019,7 @@ def inbox(brand_id: int, include_hidden: int = 0,
         q = q.filter(BrandMention.is_spam.is_(False))
     mentions = q.order_by(BrandMention.severity.desc()).all()
 
-    from ..collector import NICHE_FRESH_HOURS
+    from .collector import NICHE_FRESH_HOURS
     cutoff = datetime.now(timezone.utc) - timedelta(hours=NICHE_FRESH_HOURS)
 
     def _fresh_enough(m: BrandMention) -> bool:

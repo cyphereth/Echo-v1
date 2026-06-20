@@ -515,7 +515,7 @@ def collect_web(session: Session, brand: Brand, provider) -> int:
             continue
         text = f"{r.get('title', '')}. {r.get('content', '')}".strip()
         # Relevance gate: if niche terms exist, require at least one to hit.
-        if terms and not any(t in text.lower() for t in terms):
+        if terms and not any(_word_in(text.lower(), t) for t in terms):
             continue  # off-topic
         post = Post(
             post_id=hashlib.sha1(url.encode()).hexdigest()[:16],

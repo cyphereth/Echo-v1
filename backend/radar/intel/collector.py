@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .models import IntelMention, IntelProbe
+from .models import IntelLexicon, IntelMention, IntelProbe
 from .geo import detect_direction
 from .tagging import resolve_direction_id
 from ..core.spam import looks_like_ad_cheap
@@ -95,6 +95,9 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
 
     try:
         if probe.kind == "chat":
+            # Load lexicon terms once per call (word-boundary matching inside chat_message_relevant)
+            lexicon_terms = [t for (t,) in session.query(IntelLexicon.term).all()]
+
             # Determine min_id from watermark (if it is a numeric string)
             wm = probe.watermark or ""
             min_id = int(wm) if wm.isdigit() else 0
@@ -111,7 +114,7 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                 author = post.author or ""
 
                 # Hard noise filter for chat
-                if not chat_message_relevant(text, author):
+                if not chat_message_relevant(text, author, lexicon_terms):
                     continue
 
                 dir_id = resolve_direction_id(session, detect_direction(text))

@@ -52,3 +52,22 @@ def test_chat_noise_filter_drops_irrelevant_keeps_relevant():
     n=collector.collect_probe(s, p, prov)
     assert n==1
     assert s.query(IntelMention).one().post_id == "@chat/2"
+
+def test_chat_lexicon_term_passes_gate(tmp_path):
+    from radar.intel import seed, collector
+    from radar.intel.models import IntelProbe, IntelMention, IntelLexicon
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from radar.models import Base
+    import radar.intel.models  # noqa
+    eng = create_engine("sqlite:///:memory:"); Base.metadata.create_all(eng); s = Session(eng)
+    seed.ensure_default_directions(s)
+    s.add(IntelLexicon(term="300", meaning="раненые", category="casualties")); s.commit()
+    p = IntelProbe(platform="telegram", kind="chat", query="@c", side="ru"); s.add(p); s.commit()
+    msgs=[SimpleNamespace(post_id="@c/1", author="u", text="у них трое 300 после обстрела",
+                          followers=0, created_at=datetime.now(timezone.utc), hashtags=[], likes=0)]  # no geo, but lexicon "300"
+    prov=SimpleNamespace(search_chat=lambda handle,term,limit=20,min_id=0: msgs)
+    n=collector.collect_probe(s, p, prov)
+    assert n==1 and s.query(IntelMention).count()==1

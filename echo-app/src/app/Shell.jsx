@@ -8,6 +8,7 @@ import { EchoWordmark } from '../core/components/icons';
 import { clearToken } from '../core/api/client';
 import { NewsApp } from '../features/news/NewsApp';
 import { BrandApp } from '../features/brand/BrandApp';
+import { IntelApp } from '../features/intel/IntelApp';
 import styles from '../components/app/shell.module.css';
 
 // ── Sidebar nav item ────────────────────────────────────────────────────────
@@ -31,6 +32,7 @@ function Sidebar({ mode, screen, setScreen, onModeChange, onLogout }) {
       <div className={styles.modeSwitch}>
         <button className={styles.modePill} data-active={mode === 'news' ? '1' : '0'} onClick={() => onModeChange('news')}>Новости</button>
         <button className={styles.modePill} data-active={mode === 'brand' ? '1' : '0'} onClick={() => onModeChange('brand')}>Бренд</button>
+        <button className={styles.modePill} data-active={mode === 'intel' ? '1' : '0'} onClick={() => onModeChange('intel')}>Разведка</button>
       </div>
       <nav className={styles.nav}>
         {mode === 'news' ? (
@@ -90,6 +92,11 @@ export default function Shell() {
   function handleLogout() {
     clearToken();
     navigate('/login');
+  }
+
+  // Intel (closed contour) — отдельный fullscreen-shell со своей витриной.
+  if (mode === 'intel') {
+    return <IntelApp onExit={() => handleModeChange('brand')} />;
   }
 
   return (

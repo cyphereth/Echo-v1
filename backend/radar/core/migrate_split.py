@@ -63,6 +63,8 @@ def _copy(conn, src: str, dst: str, where: str):
                 dflt = "CURRENT_TIMESTAMP"
             elif "BOOL" in ct or "INT" in ct:
                 dflt = "0"
+            elif any(x in ct for x in ("REAL", "FLOA", "NUMER", "DOUB", "DECIMAL")):
+                dflt = "0"
             else:
                 dflt = "''"
         if dflt is not None:

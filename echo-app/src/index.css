@@ -29,17 +29,17 @@
   --surface-3:  #2F4E6B;  /* hover, pressed; ring track */
 
   /* ---- Hairlines / borders ---- */
-  --line-1:      #243A50;  /* subtle dividers */
-  --line-2:      #314A64;  /* card borders */
-  --line-strong: #42607E;  /* emphasized borders, hover */
+  --line-1:      #2E4660;  /* subtle dividers */
+  --line-2:      #3E5C7A;  /* card borders */
+  --line-strong: #527197;  /* emphasized borders, hover */
 
   /* ====================================================================
      COLOR — Text (cool whites → dim)
      ==================================================================== */
   --fg-1: #EAF1F8;  /* primary */
-  --fg-2: #97A9BE;  /* secondary */
-  --fg-3: #5C6E83;  /* tertiary, dim labels */
-  --fg-4: #3A4A5C;  /* faintest — disabled, timestamps */
+  --fg-2: #B2C2D4;  /* secondary (brighter for Safari/Retina readability) */
+  --fg-3: #8A9CB2;  /* tertiary, dim labels */
+  --fg-4: #6A7E95;  /* faintest — disabled, timestamps */
   --fg-on-brand: #04141A;  /* ink on cyan fills */
   --fg-on-warm:  #1A0A09;  /* ink on amber/crimson fills */
 

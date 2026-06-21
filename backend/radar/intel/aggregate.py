@@ -88,10 +88,11 @@ def compute_overview(session, window_h=24) -> dict:
     events = session.query(func.count(IntelMention.id)).filter(IntelMention.created_at >= since).scalar() or 0
     stories = session.query(IntelStory).filter_by(status="active").all()
     summaries = [story_summary(session, st) for st in stories]
+    summary_by_id = {st.id: s for st, s in zip(stories, summaries)}
     hot = sorted(summaries, key=lambda x: x["spike_pct"], reverse=True)[:8]
     top = sorted(summaries, key=lambda x: x["post_count"], reverse=True)[:8]
-    alerts = [{"id": st.id, "story_id": st.id, "direction": story_summary(session, st)["direction"],
-               "kind": "spike", "magnitude": story_summary(session, st)["spike_pct"],
+    alerts = [{"id": st.id, "story_id": st.id, "direction": summary_by_id[st.id]["direction"],
+               "kind": "spike", "magnitude": summary_by_id[st.id]["spike_pct"],
                "message": st.title, "at": _aware(st.last_seen_at).isoformat() if st.last_seen_at else None}
               for st in stories if st.is_anomaly][:20]
     spiking_dirs = len({s["direction"] for s in summaries if s["spike_pct"] >= 50})

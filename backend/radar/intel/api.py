@@ -14,7 +14,6 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..core.db import get_session

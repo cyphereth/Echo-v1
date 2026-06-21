@@ -28,13 +28,6 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _hashtags_json(hashtags) -> str:
-    """Normalise a hashtag field (list or JSON string) to a JSON string."""
-    if isinstance(hashtags, str):
-        return hashtags
-    return json.dumps(hashtags or [], ensure_ascii=False)
-
-
 # ── Core collection ────────────────────────────────────────────────────────────
 
 def collect_probe(session: Session, probe: IntelProbe, provider) -> int:

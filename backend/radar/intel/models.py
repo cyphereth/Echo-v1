@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import Boolean, Float, ForeignKey, Integer, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Integer, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from ..models import Base, _now
 

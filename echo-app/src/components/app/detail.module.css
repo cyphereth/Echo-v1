@@ -1,223 +1,304 @@
+/* ============================================================================
+   Detail panel — канон: project/ui_kits/app/detail.jsx + styles.css (.er-detail).
+   Фиксированная 446px правая панель: severity ring + пост + draft editor +
+   действия в футере + Telegram-превью. Confidence-гейт → «решает человек».
+   ============================================================================ */
 .panel {
-  flex: 1;
+  width: 446px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  background: var(--bg-raised);
+  border-left: 1px solid var(--line-1);
   overflow: hidden;
-  min-width: 0;
-  min-height: 0;
+}
+
+/* narrow viewports: панель занимает всю ширину под feed */
+@media (max-width: 1100px) {
+  .panel { width: 100%; border-left: none; border-top: 1px solid var(--line-1); }
 }
 
 .empty {
   flex: 1;
   display: grid;
   place-items: center;
-  color: var(--fg-4);
+  color: var(--fg-3);
   font-size: 13px;
+  text-align: center;
+}
+.emptyTitle {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--fg-3);
+  margin-top: 14px;
 }
 
-/* ── Context block ── */
-.context {
-  padding: 20px 24px 18px;
-  border-bottom: 1px solid var(--line);
-  /* Cap the post/context block so a long caption can't starve the comments list;
-     it scrolls internally instead of pushing the comments to ~0 height. */
-  flex-shrink: 1;
-  min-height: 0;
-  max-height: 50%;
+/* ── Scroll area ── */
+.scroll {
+  flex: 1;
   overflow-y: auto;
+  padding: var(--s-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
 }
 
-.contextTop {
+.head {
   display: flex;
   align-items: flex-start;
-  gap: 14px;
-  margin-bottom: 14px;
+  gap: 12px;
 }
-
-.thumbnail {
-  width: 72px;
-  height: 72px;
-  border-radius: var(--r-md);
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 28px;
-}
-
-.contextMeta {
-  flex: 1;
-  min-width: 0;
-}
-
-.contextTitle {
+.headMeta { flex: 1; min-width: 0; }
+.headAuthor {
   font-size: 15px;
   font-weight: 700;
   color: var(--fg-1);
-  line-height: 1.35;
-  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.headSub {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
+  margin-top: 3px;
 }
 
-.contextAuthor {
+/* severity row: ring + badges */
+.sevRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.sevBadges {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+/* blockquote — текст поста */
+.quote {
+  font: var(--body);
+  line-height: 1.55;
+  color: var(--fg-1);
+  background: var(--surface-1);
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--brand-line);
+  border-radius: var(--r-md);
+  padding: 14px 16px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* meta chips: тон / уверенность / категория */
+.metaRow {
+  display: flex;
+  gap: 10px;
+}
+
+/* snapshot chart */
+.snap {
+  background: var(--surface-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.snapHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.snapFoot {
+  display: flex;
+  gap: 10px;
+}
+
+/* ── Confidence gate — low confidence → human decides ── */
+.gate {
+  background: var(--sev-rising-ghost);
+  border: 1px solid var(--sev-rising-line);
+  border-radius: var(--r-lg);
+  padding: 16px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.gateText {
+  font-size: 13px;
+  color: var(--fg-2);
+  line-height: 1.5;
+}
+.gateText strong { color: var(--sev-rising-bright); }
+
+/* ── Draft card ── */
+.draft {
+  background: var(--surface-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.draftHead {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
-  color: var(--fg-3);
-  font-family: var(--font-mono);
-  margin-bottom: 8px;
+  padding: 12px 14px 8px;
 }
-
-.contextStats {
-  display: flex;
-  gap: 14px;
-}
-
-.contextStat {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  font-family: var(--font-mono);
-  color: var(--fg-3);
-}
-
-.aiSummary {
-  background: var(--surface-2);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-md);
-  padding: 10px 14px;
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-}
-
-.aiSummaryText {
-  font-size: 12.5px;
+.draftBody {
+  padding: 0 14px 12px;
+  font-size: 14px;
+  line-height: 1.6;
   color: var(--fg-2);
-  line-height: 1.55;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
-
-.oppBox {
-  background: var(--brand-dim);
-  border: 1px solid rgba(78,110,242,0.25);
+.draftText {
+  background: var(--bg-base);
+  border: 1px solid var(--brand-line);
   border-radius: var(--r-md);
-  padding: 10px 14px;
-  font-size: 12.5px;
-  color: var(--brand-bright);
-  line-height: 1.5;
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  margin-top: 10px;
+  box-shadow: 0 0 0 3px var(--brand-ghost);
+  padding: 12px 14px;
+  width: 100%;
+  min-height: 92px;
+  resize: none;
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
 }
+.draftText:focus { outline: none; }
 
-/* ── Comments ── */
-.commentsHeader {
+/* ── Telegram preview ── */
+.tg { margin-top: 4px; }
+.tgToggle {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--line);
-  flex-shrink: 0;
-}
-
-.commentsTitle {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--fg-1);
-  flex: 1;
-}
-
-.filterChips {
-  display: flex;
-  gap: 4px;
-}
-
-.chip {
-  padding: 4px 10px;
-  border-radius: var(--r-sm);
-  font-size: 11.5px;
-  font-weight: 600;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
   cursor: pointer;
-  border: 1px solid var(--line-2);
   background: none;
+  border: 1px solid transparent;
   color: var(--fg-3);
-  transition: all 0.12s;
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background var(--dur-fast) var(--ease-out);
 }
-.chip:hover { background: var(--surface-2); color: var(--fg-2); }
-.chip[data-active='1'] { background: var(--surface-2); border-color: var(--line-strong); color: var(--fg-1); }
+.tgToggle:hover { background: var(--surface-1); color: var(--fg-2); }
+.tgToggleChev { margin-left: auto; transition: transform var(--dur-fast) var(--ease-out); }
+.tgToggle[data-open='1'] .tgToggleChev { transform: rotate(180deg); }
 
-.commentsList {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 10px 16px;
+.tgCard {
+  background: var(--bg-base);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+  margin-top: 6px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-.commentsList::-webkit-scrollbar { width: 4px; }
-.commentsList::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 99px; }
+.tgHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg-1);
+}
+.tgBody {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--fg-2);
+}
+.tgBody strong { color: var(--sev-critical-bright); }
+.tgQuote {
+  font-size: 12.5px;
+  color: var(--fg-3);
+  border-left: 2px solid var(--line-2);
+  padding-left: 10px;
+  font-style: italic;
+}
+.tgCta {
+  font-size: 13px;
+  color: var(--brand-bright);
+  font-weight: 600;
+}
 
-/* ── Comment card ── */
+/* ── Comments (secondary section) ── */
+.commentsHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 4px;
+}
+.commentsTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg-1);
+}
+.commentsCount {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+.commentsList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .comment {
-  border-radius: var(--r-lg);
-  border: 1px solid var(--line);
   background: var(--surface-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
   overflow: hidden;
-  transition: border-color 0.12s;
 }
-.comment[data-done='1'] {
-  opacity: 0.45;
-}
+.comment[data-done='1'] { opacity: 0.45; }
 
-.commentBody {
-  padding: 12px 14px 10px;
-}
-
+.commentBody { padding: 12px 14px 10px; }
 .commentMeta {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 7px;
 }
-
 .commentAvatar {
   width: 24px;
   height: 24px;
   border-radius: 50%;
   background: var(--surface-3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   font-size: 10px;
   font-weight: 700;
   color: var(--fg-2);
   flex-shrink: 0;
 }
-
 .commentAuthor {
   font-size: 12px;
   font-weight: 600;
   color: var(--fg-1);
 }
-
 .commentFollowers {
   font-size: 11px;
   color: var(--fg-4);
   font-family: var(--font-mono);
 }
-
 .sentBadge {
   margin-left: auto;
+  font-family: var(--font-mono);
   font-size: 10px;
   padding: 2px 6px;
   border-radius: var(--r-sm);
   font-weight: 600;
-  font-family: var(--font-mono);
 }
-
 .commentText {
   font-size: 13px;
   color: var(--fg-2);
@@ -226,28 +307,28 @@
   word-break: break-word;
 }
 
-/* ── Reply area ── */
 .replyArea {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-1);
   padding: 10px 14px;
   background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
-
 .replyLabel {
+  font-family: var(--font-mono);
   font-size: 10.5px;
-  font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  font-weight: 600;
   color: var(--brand-bright);
-  margin-bottom: 7px;
   display: flex;
   align-items: center;
   gap: 5px;
 }
-
 .replyText {
   width: 100%;
-  background: var(--surface-1);
+  background: var(--bg-base);
   border: 1px solid var(--line-2);
   border-radius: var(--r-md);
   padding: 9px 12px;
@@ -255,44 +336,42 @@
   font-size: 13px;
   line-height: 1.5;
   resize: none;
-  min-height: 70px;
-  transition: border-color 0.12s;
+  min-height: 60px;
   font-family: var(--font-sans);
 }
-.replyText:focus { outline: none; border-color: var(--brand); }
-
+.replyText:focus { outline: none; border-color: var(--brand-line); box-shadow: 0 0 0 3px var(--brand-ghost); }
 .replyActions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 8px;
   justify-content: flex-end;
 }
 
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border-radius: var(--r-md);
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  border: none;
-  transition: opacity 0.12s, background 0.12s;
+/* ── Actions footer ── */
+.actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 10px;
+  padding: var(--s-4) var(--s-5);
+  border-top: 1px solid var(--line-1);
+  background: var(--bg-raised);
 }
-.btn:hover { opacity: 0.85; }
-
-.btnPrimary  { background: var(--brand); color: #fff; }
-.btnGhost    { background: var(--surface-3); color: var(--fg-2); }
-.btnDanger   { background: var(--neg-dim); color: var(--neg); }
-.btnSuccess  { background: var(--calm-dim); color: var(--calm); }
+.sentState {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sev-calm);
+}
 
 /* ── Bulk bar ── */
 .bulkBar {
-  padding: 10px 16px;
+  padding: 10px var(--s-4);
   background: var(--surface-2);
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-1);
   display: flex;
   align-items: center;
   gap: 10px;

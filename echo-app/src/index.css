@@ -1,61 +1,228 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* ============================================================================
+   ECHO RADAR — Foundations: Color + Type + Motion
+   ----------------------------------------------------------------------------
+   «спокойный диспетчерский центр». Тёмный сине-графитовый фон, холодный циан как
+   акцент бренда. Спокойствие как фон (95% экрана), срочность как точка — только
+   сигналы severity вспыхивают тёплым: алый «залетает», янтарный «растёт».
+
+   Канонический источник: project/colors_and_type.css. Старые имена токенов
+   (legacy) алиасятся на новые в самом низу — миграция неразрушающая.
+   ============================================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:        #09090F;
-  --bg-2:      #0F1018;
-  --surface-1: #13141F;
-  --surface-2: #1A1C2A;
-  --surface-3: #222435;
+  /* ---- Type families ---- */
+  --font-sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
-  --line:        rgba(255,255,255,0.06);
-  --line-2:      rgba(255,255,255,0.10);
-  --line-strong: rgba(255,255,255,0.18);
+  /* ====================================================================
+     COLOR — Backgrounds (graphite navy, cold + desaturated)
+     ==================================================================== */
+  --bg-void:    #0A1420;  /* deepest backdrop, behind panels */
+  --bg-base:    #0F1E2E;  /* app canvas */
+  --bg-raised:  #16293B;  /* large panels / sidebars / detail */
+  --surface-1:  #1C3349;  /* cards */
+  --surface-2:  #244059;  /* raised cards, inputs, hover */
+  --surface-3:  #2F4E6B;  /* hover, pressed; ring track */
 
-  --fg-1: #F0F0FA;
-  --fg-2: #9A9BB5;
-  --fg-3: #5A5B72;
-  --fg-4: #35364A;
+  /* ---- Hairlines / borders ---- */
+  --line-1:      #243A50;  /* subtle dividers */
+  --line-2:      #314A64;  /* card borders */
+  --line-strong: #42607E;  /* emphasized borders, hover */
 
-  --brand:        #4E6EF2;
-  --brand-dim:    rgba(78,110,242,0.15);
-  --brand-bright: #7B95F7;
+  /* ====================================================================
+     COLOR — Text (cool whites → dim)
+     ==================================================================== */
+  --fg-1: #EAF1F8;  /* primary */
+  --fg-2: #97A9BE;  /* secondary */
+  --fg-3: #5C6E83;  /* tertiary, dim labels */
+  --fg-4: #3A4A5C;  /* faintest — disabled, timestamps */
+  --fg-on-brand: #04141A;  /* ink on cyan fills */
+  --fg-on-warm:  #1A0A09;  /* ink on amber/crimson fills */
 
-  --neg:        #F24E4E;
-  --neg-dim:    rgba(242,78,78,0.12);
-  --neg-line:   rgba(242,78,78,0.30);
-  --rising:     #F28C4E;
-  --rising-dim: rgba(242,140,78,0.12);
-  --calm:       #4EBF8F;
-  --calm-dim:   rgba(78,191,143,0.12);
+  /* ====================================================================
+     COLOR — Brand (cold cyan = «всё под контролем», radar signal)
+     ==================================================================== */
+  --brand:        #2BB3C7;
+  --brand-bright: #57D2E2;
+  --brand-deep:   #15788A;
+  --brand-ghost:  rgba(43,179,199,0.12);
+  --brand-line:   rgba(43,179,199,0.32);
 
-  --ig: #E1306C;
-  --tt: #F0F0F0;
-  --tg: #29B6F6;
+  /* ====================================================================
+     COLOR — Severity (warm urgency — the «точка» against calm)
+     ==================================================================== */
+  --sev-critical:        #FF4D5E;  /* «залетает» — crimson */
+  --sev-critical-bright: #FF7A87;
+  --sev-critical-ghost:  rgba(255,77,94,0.14);
+  --sev-critical-line:   rgba(255,77,94,0.38);
 
-  --lane-brand:      #F24E4E;
-  --lane-competitor: #A855F7;
-  --lane-niche:      #4E6EF2;
+  --sev-rising:        #FFB23E;    /* «растёт» — amber */
+  --sev-rising-bright: #FFC871;
+  --sev-rising-ghost:  rgba(255,178,62,0.14);
+  --sev-rising-line:   rgba(255,178,62,0.36);
 
-  --r-sm: 6px;
-  --r-md: 10px;
-  --r-lg: 14px;
-  --r-xl: 20px;
+  --sev-calm:        #34D8A0;       /* «под контролем» / позитив — used sparingly */
+  --sev-calm-ghost:  rgba(52,216,160,0.13);
+  --sev-calm-line:   rgba(52,216,160,0.34);
 
-  --font-sans: 'Inter', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  /* ---- Tonality (sentiment) ---- */
+  --tone-negative: var(--sev-critical);
+  --tone-neutral:  #7E91A6;
+  --tone-positive: var(--sev-calm);
+
+  /* ---- Platform marks ---- */
+  --pf-instagram: #E1306C;
+  --pf-tiktok:    #EAF1F8;
+  --pf-telegram:  #29A9EB;
+
+  /* ---- Lanes (PR срочное / SMM / прочее) ---- */
+  --lane-pr:         var(--sev-critical-bright);   /* #FF7A87 — PR urgency */
+  --lane-smm:        var(--brand-bright);           /* cyan */
+  --lane-competitor: #A889D8;                       /* muted violet, fits palette */
+  --lane-niche:      var(--brand);                  /* cyan */
+
+  /* ====================================================================
+     RADII
+     ==================================================================== */
+  --r-xs:   4px;
+  --r-sm:   6px;
+  --r-md:  10px;
+  --r-lg:  14px;
+  --r-xl:  20px;
+  --r-pill: 999px;
+
+  /* ====================================================================
+     SPACING (4px base)
+     ==================================================================== */
+  --s-1:  4px;
+  --s-2:  8px;
+  --s-3:  12px;
+  --s-4:  16px;
+  --s-5:  20px;
+  --s-6:  24px;
+  --s-8:  32px;
+  --s-10: 40px;
+  --s-12: 48px;
+  --s-16: 64px;
+  --s-20: 80px;
+
+  /* ====================================================================
+     ELEVATION — shadows on dark + signal glows
+     ==================================================================== */
+  --shadow-1: 0 1px 2px rgba(0,0,0,0.45);
+  --shadow-2: 0 6px 20px -6px rgba(0,0,0,0.55);
+  --shadow-3: 0 22px 54px -16px rgba(0,0,0,0.70);
+
+  --glow-brand:    0 0 0 1px var(--brand-line),        0 0 26px -6px rgba(43,179,199,0.50);
+  --glow-critical: 0 0 0 1px var(--sev-critical-line), 0 0 24px -4px rgba(255,77,94,0.55);
+  --glow-rising:   0 0 0 1px var(--sev-rising-line),   0 0 24px -6px rgba(255,178,62,0.45);
+
+  /* ====================================================================
+     MOTION
+     ==================================================================== */
+  --ease-out:   cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur-mid:  220ms;
+  --dur-slow: 420ms;
+
+  /* ====================================================================
+     TYPE SCALE  (font shorthand: weight size/line-height family + tracking)
+     ==================================================================== */
+  --display:    700 44px/1.04 var(--font-sans);   --display-ls: -0.022em;
+  --h1:         800 34px/1.08 var(--font-sans);   --h1-ls: -0.02em;
+  --h2:         700 26px/1.14 var(--font-sans);   --h2-ls: -0.016em;
+  --h3:         700 20px/1.22 var(--font-sans);   --h3-ls: -0.012em;
+  --h4:         600 16px/1.30 var(--font-sans);   --h4-ls: -0.006em;
+  --body-lg:    500 17px/1.55 var(--font-sans);
+  --body:       500 15px/1.55 var(--font-sans);
+  --small:      500 13px/1.5  var(--font-sans);
+  --eyebrow:    600 12px/1.1  var(--font-mono);   --eyebrow-ls: 0.16em;
+  --metric:     600 15px/1    var(--font-mono);
+  --metric-lg:  600 28px/1    var(--font-mono);   --metric-lg-ls: -0.01em;
+  --mono-sm:    500 12px/1.4  var(--font-mono);
+
+  /* ========================================================================
+     LEGACY ALIASES — старые имена → канонические токены.
+     Миграция неразрушающая: компоненты, написанные под старую палитру,
+     получают правильные цвета дизайн-системы, не ломаясь. По мере рефакторинга
+     компоненты переходят на канонические имена; алиасы можно убрать.
+     ======================================================================== */
+  --bg:         var(--bg-void);
+  --bg-2:       var(--bg-raised);
+  --surface-0:  var(--bg-raised);
+  --line:       var(--line-1);
+  --border:     var(--line-2);
+  --neg:        var(--sev-critical);
+  --neg-dim:    var(--sev-critical-ghost);
+  --neg-line:   var(--sev-critical-line);
+  --rising-dim: var(--sev-rising-ghost);
+  --calm:       var(--sev-calm);
+  --calm-dim:   var(--sev-calm-ghost);
+  --brand-dim:  var(--brand-ghost);
+  --ig:         var(--pf-instagram);
+  --tt:         var(--pf-tiktok);
+  --tg:         var(--pf-telegram);
+  --warn:       var(--lane-competitor);   /* competitor lane был «warn» */
+  --info:       var(--brand);              /* niche lane был «info» */
 }
 
+/* ============================================================================
+   BASE
+   ============================================================================ */
 body {
-  background: var(--bg);
+  background: var(--bg-void);
   color: var(--fg-2);
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 button { font-family: var(--font-sans); cursor: pointer; border: none; background: none; }
 a { text-decoration: none; color: inherit; }
 input, textarea { font-family: var(--font-sans); }
+
+/* dark scrollbars — read as instrument panel */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--line-2); border-radius: var(--r-pill);
+  border: 2px solid transparent; background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--line-strong); background-clip: padding-box; }
+
+/* ============================================================================
+   SEMANTIC HELPERS — apply directly as classes
+   ============================================================================ */
+.echo-display { font: var(--display); letter-spacing: var(--display-ls); color: var(--fg-1); }
+.echo-h1 { font: var(--h1); letter-spacing: var(--h1-ls); color: var(--fg-1); }
+.echo-h2 { font: var(--h2); letter-spacing: var(--h2-ls); color: var(--fg-1); }
+.echo-h3 { font: var(--h3); letter-spacing: var(--h3-ls); color: var(--fg-1); }
+.echo-h4 { font: var(--h4); letter-spacing: var(--h4-ls); color: var(--fg-1); }
+.echo-body-lg { font: var(--body-lg); color: var(--fg-2); }
+.echo-body { font: var(--body); color: var(--fg-2); }
+.echo-small { font: var(--small); color: var(--fg-3); }
+.echo-eyebrow {
+  font: var(--eyebrow); letter-spacing: var(--eyebrow-ls);
+  text-transform: uppercase; color: var(--fg-3);
+}
+.echo-metric { font: var(--metric); font-variant-numeric: tabular-nums; color: var(--fg-1); }
+.echo-metric-lg { font: var(--metric-lg); letter-spacing: var(--metric-lg-ls); font-variant-numeric: tabular-nums; color: var(--fg-1); }
+
+/* ============================================================================
+   KEYFRAMES — radar pulse + toast + radar sweep
+   ============================================================================ */
+@keyframes erpulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--sev-calm-ghost); opacity: 1; }
+  50%      { box-shadow: 0 0 0 4px transparent; opacity: 0.55; }
+}
+@keyframes ertoast {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}

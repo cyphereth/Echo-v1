@@ -2,6 +2,7 @@
 // Mounted by Shell when mode === 'brand'.
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { TopBar } from '../../components/app/Shell';
+import { Button } from '../../core/components/ui';
 import { BrandFeed } from './components/Feed';
 import { DetailPanel, EmptyDetail } from './components/Detail';
 import { QueueScreen } from './components/Queue';
@@ -9,13 +10,15 @@ import { AnalyticsScreen } from './components/Analytics';
 import { SettingsScreen } from './components/Settings';
 import { CityExplorerScreen } from './components/CityExplorer';
 import { BrandDigestsScreen } from './components/Digests';
+import { ProbesScreen } from './components/Probes';
+import { OverviewScreen } from './components/Overview';
 import { AIWizard } from './components/AIWizard';
 import * as api from './api';
 import styles from '../../components/app/shell.module.css';
 
 // ── Mention → feed item mapper ────────────────────────────────────────────────
 
-function agoStr(isoString) {
+function agoStrLocal(isoString) {
   const mins = Math.round((Date.now() - new Date(isoString)) / 60000);
   if (mins < 1)    return 'только что';
   if (mins < 60)   return `${mins} мин`;
@@ -25,10 +28,10 @@ function agoStr(isoString) {
 
 function mentionToItem(m) {
   const lane = m.source || 'brand';
-  const thumbnail =
-    lane === 'competitor' ? 'competitor' :
-    lane === 'niche'      ? 'niche' :
-    m.tone === 'negative' ? 'neg' : 'neutral';
+  // sparkline из snapshots (просмотры во времени) — иначе одиночная точка
+  const viewsSeries = Array.isArray(m.snapshots) && m.snapshots.length
+    ? m.snapshots.map(s => Number(s.views) || 0)
+    : (m.views ? [m.views] : []);
   return {
     id:              m.id,
     lane,
@@ -37,15 +40,21 @@ function mentionToItem(m) {
     platform:        m.platform,
     author:          m.author,
     authorFollowers: m.followers,
-    ago:             agoStr(m.created_at),
-    title:           m.text.length > 80 ? m.text.slice(0, 80) + '…' : m.text,
+    ago:             agoStrLocal(m.created_at),
+    title:           m.text.length > 120 ? m.text.slice(0, 120) + '…' : m.text,
     summary:         m.text,
     views:           m.views,
+    viewsSeries,
     likes:           m.likes || 0,
-    severity:        m.severity || 0,
-    negativeCommentPct: m.tone === 'negative' ? 72 : 15,
+    severity:        Number(m.severity) || 0,
+    phase:           m.phase || 'unknown',
+    tone:            m.tone || 'neutral',
+    confidence:      Number(m.confidence) || 0,
+    category:        m.category || null,
+    draft:           m.draft || null,
+    draft_flag:      m.draft_flag || null,
+    humor:           m.category === 'humor',
     commentsCount:   m.comments || 0,
-    thumbnail,
     url:             m.url || null,
     comments:        m.draft ? [{
       id:            `c_${m.id}`,
@@ -142,10 +151,12 @@ export function BrandApp({ screen, setScreen }) {
   }
 
   const topBarTitle =
+    screen === 'overview'  ? 'Обзор' :
     screen === 'feed'      ? 'Лента' :
     screen === 'queue'     ? 'Очередь ответов' :
     screen === 'analytics' ? 'Аналитика' :
     screen === 'digests'   ? 'Дайджесты' :
+    screen === 'probes'    ? 'Зонды' :
     screen === 'cities'    ? 'Города' : 'Настройки';
 
   const topBarSub = screen === 'feed'
@@ -156,25 +167,21 @@ export function BrandApp({ screen, setScreen }) {
     <div className={styles.main}>
       <TopBar title={topBarTitle} sub={topBarSub}>
         {brand && (
-          <button
+          <Button
+            variant={collecting ? 'secondary' : 'primary'}
+            size="sm"
+            icon={collecting ? 'refresh' : 'zap'}
             onClick={handleCollect}
             disabled={collecting}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '7px 16px', borderRadius: 'var(--r-md)',
-              background: collecting ? 'var(--surface-3)' : 'var(--brand)',
-              color: collecting ? 'var(--fg-3)' : '#fff',
-              border: 'none', cursor: collecting ? 'default' : 'pointer',
-              fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-sans)',
-              transition: 'all 0.15s', whiteSpace: 'nowrap',
-            }}
           >
-            {collecting ? '⏳ Сбор данных…' : '⚡ Собрать данные'}
-          </button>
+            {collecting ? 'Сбор данных…' : 'Собрать данные'}
+          </Button>
         )}
       </TopBar>
 
-      {screen === 'feed' ? (
+      {screen === 'overview' ? (
+        <div className={styles.workspace}><OverviewScreen brand={brand} /></div>
+      ) : screen === 'feed' ? (
         <div className={styles.splitView}>
           <BrandFeed items={feedItems} selectedId={selectedId} onSelect={setSelectedId} />
           {selected ? <DetailPanel item={selected} /> : <EmptyDetail />}
@@ -185,6 +192,8 @@ export function BrandApp({ screen, setScreen }) {
         <div className={styles.workspace}><AnalyticsScreen brandId={brand?.id} /></div>
       ) : screen === 'digests' ? (
         <div className={styles.workspace}><BrandDigestsScreen brandId={brand?.id} /></div>
+      ) : screen === 'probes' ? (
+        <div className={styles.workspace}><ProbesScreen brand={brand} onBrandSaved={handleBrandSaved} /></div>
       ) : screen === 'cities' ? (
         <div className={styles.workspace}><CityExplorerScreen /></div>
       ) : (

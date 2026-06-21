@@ -1,4 +1,6 @@
-// Shared badge style helper and badge components extracted from Stories.jsx.
+// Shared badge style helper and badge components.
+// Цвета — канон дизайн-системы (calm-зелёный для «проверено», critical-алый для «требует проверки»).
+import { Icon } from './icons';
 
 export const badgeStyle = (bg, color) => ({
   display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px',
@@ -10,8 +12,8 @@ export function VerifiedBadge({ story, compact }) {
   const n = story.source_count ?? 0;
   if (story.verified) {
     return (
-      <span style={badgeStyle('rgba(34,197,94,0.15)', '#16a34a')} title="Подтверждено независимыми источниками">
-        ✓ {n} {compact ? '' : 'источник(ов)'}
+      <span style={badgeStyle('var(--sev-calm-ghost)', 'var(--sev-calm)')} title="Подтверждено независимыми источниками">
+        {n} {compact ? '' : 'источник(ов)'}
       </span>
     );
   }
@@ -25,15 +27,17 @@ export function VerifiedBadge({ story, compact }) {
 export function CredibilityBadge({ story }) {
   if (story.credibility === 'suspect') {
     return (
-      <span style={badgeStyle('rgba(239,68,68,0.15)', '#ef4444')} title={story.credibility_note || ''}>
-        ⚠ требует проверки
+      <span style={badgeStyle('var(--sev-critical-ghost)', 'var(--sev-critical-bright)')} title={story.credibility_note || ''}>
+        <Icon name="warning" size={11} color="var(--sev-critical-bright)" />
+        требует проверки
       </span>
     );
   }
   if (story.credibility === 'credible') {
     return (
-      <span style={badgeStyle('rgba(34,197,94,0.15)', '#16a34a')} title={story.credibility_note || ''}>
-        ✓ проверено
+      <span style={badgeStyle('var(--sev-calm-ghost)', 'var(--sev-calm)')} title={story.credibility_note || ''}>
+        <Icon name="check" size={11} color="var(--sev-calm)" />
+        проверено
       </span>
     );
   }

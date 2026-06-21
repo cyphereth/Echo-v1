@@ -1,0 +1,274 @@
+/* ============================================================================
+   Executive overview «Арена-style» — сводный дашборд для руководителя.
+   Hero-метрики + таймлайн + платформы + аномальные сюжеты + топ-негатив.
+   ============================================================================ */
+.wrap {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--s-6) var(--s-5);
+}
+.inner {
+  width: 100%;
+  max-width: 1080px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-6);
+}
+
+/* ── Header ── */
+.head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s-4);
+}
+.headTitle {
+  font: var(--h1);
+  letter-spacing: var(--h1-ls);
+  margin: 0;
+}
+.headSub {
+  font: var(--body);
+  color: var(--fg-3);
+  margin-top: 6px;
+}
+.liveBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--sev-calm);
+  background: var(--surface-1);
+  border: 1px solid var(--line-2);
+  padding: 8px 14px;
+  border-radius: var(--r-pill);
+}
+.liveDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--sev-calm);
+  flex-shrink: 0;
+  animation: erpulse 2.4s var(--ease-in-out) infinite;
+}
+
+/* ── Hero metrics (4 stat cards) ── */
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--s-4);
+}
+@media (max-width: 900px) {
+  .metrics { grid-template-columns: repeat(2, 1fr); }
+}
+
+.metric {
+  background: var(--surface-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  padding: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.metricHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.metricIc {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.metricValue {
+  font: var(--metric-lg);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-1);
+}
+.metricDelta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+}
+
+/* ── Two-column: timeline + side rail ── */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: var(--s-5);
+  align-items: start;
+}
+@media (max-width: 980px) {
+  .grid { grid-template-columns: 1fr; }
+}
+
+/* ── Card base ── */
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: var(--s-4) var(--s-5);
+  border-bottom: 1px solid var(--line-1);
+}
+.cardTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--fg-1);
+}
+.cardBody {
+  padding: var(--s-4) var(--s-5);
+}
+
+/* ── Legend ── */
+.legend {
+  display: flex;
+  gap: var(--s-4);
+  margin-top: var(--s-3);
+}
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-3);
+}
+.legendDot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+
+/* ── Platform bars ── */
+.barRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.barRow:last-child { margin-bottom: 0; }
+.barLabel {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-2);
+  width: 90px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.barTrack {
+  flex: 1;
+  height: 8px;
+  background: var(--surface-3);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+.barFill {
+  height: 100%;
+  border-radius: var(--r-pill);
+  transition: width var(--dur-mid) var(--ease-out);
+}
+.barPct {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-3);
+  width: 40px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Anomaly stories list ── */
+.storyItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px var(--s-5);
+  border-bottom: 1px solid var(--line-1);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.storyItem:last-child { border-bottom: none; }
+.storyItem:hover { background: var(--surface-2); }
+.storyWarn {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sev-critical);
+  flex-shrink: 0;
+  box-shadow: 0 0 8px var(--sev-critical-ghost);
+}
+.storyText {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.storyMeta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  flex-shrink: 0;
+}
+
+/* ── Top negative ── */
+.negItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px var(--s-5);
+  border-bottom: 1px solid var(--line-1);
+}
+.negItem:last-child { border-bottom: none; }
+.negSev {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  width: 32px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.negText {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Empty / loading ── */
+.empty {
+  padding: var(--s-8);
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--fg-3);
+}

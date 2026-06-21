@@ -7,6 +7,7 @@ import { IntelHome } from './components/IntelHome';
 import { IntelStories } from './components/IntelStories';
 import { IntelBoard } from './components/IntelBoard';
 import { intelApi } from './api';
+import { INTEL_USE_MOCK } from './data/mock';
 import styles from './intel.module.css';
 
 const SCREENS = [
@@ -53,7 +54,7 @@ export function IntelApp({ onExit }) {
         <div className={styles.sidebarBottom}>
           <div className={styles.statusRow}>
             <span className={styles.statusDot} />
-            В эфире · mock-данные
+            {INTEL_USE_MOCK ? 'В эфире · mock-данные' : 'В эфире · live'}
           </div>
           {onExit && (
             <button onClick={onExit} className={styles.navItem} style={{ width: '100%', marginTop: 8, justifyContent: 'center' }}>

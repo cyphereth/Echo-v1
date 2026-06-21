@@ -1,11 +1,61 @@
-.wrap { height: 100%; overflow-y: auto; }
-.bar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-.btn { padding: 8px 14px; border: 1px solid #6366f1; border-radius: 8px;
-  background: #6366f1; color: #fff; cursor: pointer; font-size: 14px; }
-.btn:disabled { opacity: 0.6; cursor: default; }
-.err { color: #ef4444; font-size: 13px; }
-.list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 12px; }
-.item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 14px; }
-.meta { color: #6b7280; font-size: 12px; margin-bottom: 6px; }
-.body { white-space: pre-wrap; font-size: 14px; line-height: 1.5; }
-.empty { color: #9ca3af; padding: 24px; }
+/* Digests screen — тёмная дизайн-система. */
+.wrap {
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--s-5);
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin-bottom: var(--s-4);
+}
+.barTitle {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--fg-1);
+  letter-spacing: -0.01em;
+}
+
+.err {
+  color: var(--sev-critical-bright);
+  font-size: 13px;
+}
+
+.list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.item {
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  padding: var(--s-4);
+  background: var(--surface-1);
+}
+
+.meta {
+  color: var(--fg-3);
+  font-size: 12px;
+  margin-bottom: var(--s-2);
+  font-family: var(--font-mono);
+}
+
+.body {
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--fg-2);
+}
+
+.empty {
+  color: var(--fg-3);
+  padding: 32px;
+  font-size: 13px;
+  text-align: center;
+  font-family: var(--font-mono);
+}

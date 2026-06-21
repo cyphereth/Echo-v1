@@ -1,0 +1,224 @@
+/* ============================================================================
+   Probes screen — канон: project/ui_kits/app/styles.css (.er-probes/.er-onb).
+   Центрированный, прокручиваемый. Введение + AI-настройка + список активных зондов.
+   ============================================================================ */
+.wrap {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-5);
+  padding: var(--s-6) var(--s-5);
+}
+
+.inner {
+  width: 100%;
+  max-width: 920px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+
+/* ── Intro ── */
+.intro h2 {
+  margin: 0;
+  font: var(--h2);
+  letter-spacing: var(--h2-ls);
+}
+.intro p {
+  margin: var(--s-2) 0 0;
+  font: var(--body);
+  color: var(--fg-2);
+  max-width: 640px;
+}
+.intro p b { color: var(--fg-1); font-weight: 700; }
+
+/* ── AI onboarding card ── */
+.onb {
+  background: var(--surface-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-xl);
+  padding: var(--s-5);
+}
+.onbHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: var(--s-4);
+}
+.onbIc {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--brand-ghost);
+  border: 1px solid var(--brand-line);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.onbTitle {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--fg-1);
+}
+.onbSub {
+  font-size: 12.5px;
+  color: var(--fg-3);
+}
+.onbInput {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  padding: 10px 14px;
+}
+.onbInput input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--fg-1);
+  font-size: 13.5px;
+  font-family: var(--font-sans);
+}
+.onbInput input::placeholder { color: var(--fg-3); }
+.onbHint {
+  display: block;
+  margin: var(--s-4) 0 var(--s-3);
+}
+
+/* AI chips */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--brand-bright);
+  background: var(--brand-ghost);
+  border: 1px solid var(--brand-line);
+  padding: 6px 12px;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.chip:hover { background: var(--brand-line); }
+.chip[data-added='1'] {
+  color: var(--sev-calm);
+  background: var(--sev-calm-ghost);
+  border-color: var(--sev-calm-line);
+}
+
+/* ── Active probes list ── */
+.list {
+  background: var(--surface-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-xl);
+  overflow: hidden;
+}
+.listHead {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: var(--s-4) var(--s-5);
+  border-bottom: 1px solid var(--line-1);
+}
+.listHeadTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--fg-1);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px var(--s-5);
+  border-bottom: 1px solid var(--line-1);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.row:last-child { border-bottom: none; }
+.row:hover { background: var(--surface-2); }
+
+.kind {
+  width: 128px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--fg-3);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  padding: 5px 10px;
+  border-radius: var(--r-pill);
+  text-align: center;
+}
+
+.query {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  color: var(--fg-1);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.platforms {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.source {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  width: 96px;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.rowDel {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: var(--fg-4);
+  border-radius: var(--r-sm);
+  display: inline-flex;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.rowDel:hover { color: var(--sev-critical-bright); }
+
+.empty {
+  padding: var(--s-8);
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--fg-3);
+}
+
+.loading {
+  padding: var(--s-8);
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--fg-3);
+}

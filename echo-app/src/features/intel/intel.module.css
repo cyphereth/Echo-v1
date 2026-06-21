@@ -131,6 +131,7 @@
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
+  min-height: 0;
   background: #060A0F;
 }
 
@@ -205,6 +206,7 @@
 /* ── Workspace (scroll) ── */
 .workspace {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 18px 20px;
   display: flex;
@@ -285,7 +287,7 @@
 
 /* ── Grid layouts ── */
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
-.gridSplit { display: flex; gap: 0; height: 100%; min-height: 0; }
+.gridSplit { display: flex; gap: 0; flex: 1; min-height: 0; }
 @media (max-width: 1000px) {
   .grid2 { grid-template-columns: 1fr; }
   .gridSplit { flex-direction: column; }

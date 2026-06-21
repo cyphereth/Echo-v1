@@ -11,6 +11,7 @@ import { StoriesScreen } from '../components/app/Stories';
 import { DigestsScreen } from '../components/app/Digests';
 import { SourcesScreen } from '../components/app/Sources';
 import { AIWizard } from '../components/app/AIWizard';
+import { NewsApp } from '../features/news/NewsApp';
 import * as api from '../services/api';
 import styles from '../components/app/shell.module.css';
 
@@ -237,82 +238,80 @@ export default function AppPage() {
         mode={mode}
         onModeChange={handleModeChange}
       />
-      <div className={styles.main}>
-        <TopBar
-          title={
-            screen === 'feed'      ? (mode === 'news' ? 'Новости' : 'Лента') :
-            screen === 'queue'     ? 'Очередь ответов' :
-            screen === 'analytics' ? 'Аналитика' :
-            screen === 'stories'   ? 'Сюжеты' :
-            screen === 'digests'   ? 'Дайджесты' :
-            screen === 'sources'   ? 'Источники' :
-            screen === 'cities'    ? 'Города' : 'Настройки'
-          }
-          sub={
-            screen === 'feed'
-              ? (mode === 'news'
-                  ? (scope?.name ? `Тема: ${scope.name} · Telegram + веб` : 'Выберите тему')
-                  : 'Instagram · TikTok · Telegram · реальные данные')
-              : undefined
-          }
-        >
-          {mode === 'brand' && brand && (
-            <button
-              onClick={handleCollect}
-              disabled={collecting}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '7px 16px', borderRadius: 'var(--r-md)',
-                background: collecting ? 'var(--surface-3)' : 'var(--brand)',
-                color: collecting ? 'var(--fg-3)' : '#fff',
-                border: 'none', cursor: collecting ? 'default' : 'pointer',
-                fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-sans)',
-                transition: 'all 0.15s', whiteSpace: 'nowrap',
-              }}
-            >
-              {collecting ? '⏳ Сбор данных…' : '⚡ Собрать данные'}
-            </button>
+
+      {/* ── News mode: delegated to isolated NewsApp ── */}
+      {mode === 'news' && (
+        <NewsApp screen={screen} setScreen={setScreen} />
+      )}
+
+      {/* ── Brand mode: unchanged until Task 6.3 ── */}
+      {mode === 'brand' && (
+        <div className={styles.main}>
+          <TopBar
+            title={
+              screen === 'feed'      ? 'Лента' :
+              screen === 'queue'     ? 'Очередь ответов' :
+              screen === 'analytics' ? 'Аналитика' :
+              screen === 'stories'   ? 'Сюжеты' :
+              screen === 'digests'   ? 'Дайджесты' :
+              screen === 'sources'   ? 'Источники' :
+              screen === 'cities'    ? 'Города' : 'Настройки'
+            }
+            sub={
+              screen === 'feed'
+                ? 'Instagram · TikTok · Telegram · реальные данные'
+                : undefined
+            }
+          >
+            {brand && (
+              <button
+                onClick={handleCollect}
+                disabled={collecting}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '7px 16px', borderRadius: 'var(--r-md)',
+                  background: collecting ? 'var(--surface-3)' : 'var(--brand)',
+                  color: collecting ? 'var(--fg-3)' : '#fff',
+                  border: 'none', cursor: collecting ? 'default' : 'pointer',
+                  fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-sans)',
+                  transition: 'all 0.15s', whiteSpace: 'nowrap',
+                }}
+              >
+                {collecting ? '⏳ Сбор данных…' : '⚡ Собрать данные'}
+              </button>
+            )}
+          </TopBar>
+
+          {screen === 'feed' ? (
+            <div className={styles.workspace}>
+              <Feed items={feedItems} selectedId={selectedId} onSelect={setSelectedId} lanes />
+              {selected ? <DetailPanel item={selected} /> : <EmptyDetail />}
+            </div>
+          ) : screen === 'queue' ? (
+            <div className={styles.workspace}><QueueScreen items={feedItems} brandId={brand?.id} /></div>
+          ) : screen === 'analytics' ? (
+            <div className={styles.workspace}><AnalyticsScreen brandId={brand?.id} /></div>
+          ) : screen === 'stories' ? (
+            <div className={styles.workspace}><StoriesScreen scope={scope} /></div>
+          ) : screen === 'digests' ? (
+            <div className={styles.workspace}><DigestsScreen scope={scope} /></div>
+          ) : screen === 'sources' ? (
+            <div className={styles.workspace}><SourcesScreen scope={scope} /></div>
+          ) : screen === 'cities' ? (
+            <div className={styles.workspace}><CityExplorerScreen /></div>
+          ) : (
+            <div className={styles.workspace}>
+              <SettingsScreen
+                brand={brand}
+                onBrandSaved={handleBrandSaved}
+                onCollect={handleCollect}
+                collecting={collecting}
+                onOpenWizard={() => setShowWizard(true)}
+              />
+            </div>
           )}
-        </TopBar>
-
-        {mode === 'news' && (
-          <TopicBar
-            topics={topics}
-            activeId={activeTopicId}
-            onSelect={setActiveTopicId}
-            onAdd={handleAddTopic}
-          />
-        )}
-
-        {screen === 'feed' ? (
-          <div className={styles.workspace}>
-            <Feed items={feedItems} selectedId={selectedId} onSelect={setSelectedId} lanes={mode === 'brand'} />
-            {selected ? <DetailPanel item={selected} /> : <EmptyDetail />}
-          </div>
-        ) : screen === 'queue' ? (
-          <div className={styles.workspace}><QueueScreen items={feedItems} brandId={brand?.id} /></div>
-        ) : screen === 'analytics' ? (
-          <div className={styles.workspace}><AnalyticsScreen brandId={brand?.id} /></div>
-        ) : screen === 'stories' ? (
-          <div className={styles.workspace}><StoriesScreen scope={scope} /></div>
-        ) : screen === 'digests' ? (
-          <div className={styles.workspace}><DigestsScreen scope={scope} /></div>
-        ) : screen === 'sources' ? (
-          <div className={styles.workspace}><SourcesScreen scope={scope} /></div>
-        ) : screen === 'cities' ? (
-          <div className={styles.workspace}><CityExplorerScreen /></div>
-        ) : (
-          <div className={styles.workspace}>
-            <SettingsScreen
-              brand={brand}
-              onBrandSaved={handleBrandSaved}
-              onCollect={handleCollect}
-              collecting={collecting}
-              onOpenWizard={() => setShowWizard(true)}
-            />
-          </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {showWizard && (
         <AIWizard

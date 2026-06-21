@@ -1,6 +1,6 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from radar.explore import normalize_city, build_city_queries
+from radar.brand.explore import normalize_city, build_city_queries
 
 
 def test_normalize_city_lowercase_trim():
@@ -21,7 +21,7 @@ def test_build_city_queries_shape():
 
 
 from datetime import datetime, timezone
-from radar.providers.base import Post
+from radar.core.providers.base import Post
 
 
 def _post(pid, text, likes=0, views=0, tags=None):
@@ -31,7 +31,7 @@ def _post(pid, text, likes=0, views=0, tags=None):
 
 
 def test_aggregate_posts_dedup_rank_cap_truncate():
-    from radar.explore import aggregate_posts
+    from radar.brand.explore import aggregate_posts
     posts = [_post("1", "x"*400, likes=5), _post("1", "dup", likes=99),
              _post("2", "hi", likes=100, views=500, tags=["#a"])]
     out = aggregate_posts(posts)
@@ -42,8 +42,8 @@ def test_aggregate_posts_dedup_rank_cap_truncate():
 
 
 def test_run_city_search_skips_failing_platform():
-    from radar.explore import run_city_search
-    from radar.providers.base import SearchPage
+    from radar.brand.explore import run_city_search
+    from radar.core.providers.base import SearchPage
     class FakeProvider:
         def search(self, query, kind, cursor, platform):
             if platform == "instagram":
@@ -62,7 +62,7 @@ def _fake_llm_response(text):
 
 
 def test_summarize_city_parses_json(monkeypatch):
-    import radar.explore as ex
+    import radar.brand.explore as ex
     monkeypatch.setattr(ex, "LLM_API_KEY", "k")
     payload = '{"overview":"ok","themes":[{"title":"Еда","description":"кафе"}],' \
               '"wants":["куда сходить"],"trends":["t"],' \
@@ -75,13 +75,13 @@ def test_summarize_city_parses_json(monkeypatch):
 
 
 def test_summarize_city_no_key_returns_empty(monkeypatch):
-    import radar.explore as ex
+    import radar.brand.explore as ex
     monkeypatch.setattr(ex, "LLM_API_KEY", "")
     assert ex.summarize_city("Москва", [{"text": "x"}]) == {}
 
 
 def test_aggregate_posts_caps_at_limit():
-    from radar.explore import aggregate_posts
+    from radar.brand.explore import aggregate_posts
     posts = [_post(str(i), f"post {i}", likes=i) for i in range(50)]
     out = aggregate_posts(posts)
     assert len(out) == 40                      # capped at default limit
@@ -89,7 +89,7 @@ def test_aggregate_posts_caps_at_limit():
 
 
 def test_summarize_city_retries_once_then_succeeds(monkeypatch):
-    import radar.explore as ex
+    import radar.brand.explore as ex
     monkeypatch.setattr(ex, "LLM_API_KEY", "k")
     good = '{"overview":"second try"}'
     calls = {"n": 0}
@@ -105,7 +105,7 @@ def test_summarize_city_retries_once_then_succeeds(monkeypatch):
 
 
 def test_summarize_city_returns_empty_when_retry_also_fails(monkeypatch):
-    import radar.explore as ex
+    import radar.brand.explore as ex
     monkeypatch.setattr(ex, "LLM_API_KEY", "k")
     monkeypatch.setattr(ex.httpx, "post", lambda *a, **k: _fake_llm_response("still not json"))
     assert ex.summarize_city("Москва", [{"text": "x"}]) == {}
@@ -139,7 +139,7 @@ class _BG:
 
 def test_explore_city_uses_cache(monkeypatch):
     from datetime import datetime, timezone
-    from radar import api
+    import radar.brand.api as api
     from radar.models import CityReport
     s = _mem_session()
     s.add(CityReport(city="москва", display_city="Москва",
@@ -158,7 +158,7 @@ def test_explore_city_uses_cache(monkeypatch):
 
 
 def test_explore_city_missing_schedules_background():
-    from radar import api
+    import radar.brand.api as api
     s = _mem_session()
     class U: id = 1; email = "u@x.com"
     bg = _BG()
@@ -171,7 +171,7 @@ def test_explore_city_missing_schedules_background():
 
 def test_explore_city_refresh_schedules_background_even_if_cached():
     from datetime import datetime, timezone
-    from radar import api
+    import radar.brand.api as api
     from radar.models import CityReport
     s = _mem_session()
     s.add(CityReport(city="москва", display_city="Москва",
@@ -187,14 +187,14 @@ def test_explore_city_refresh_schedules_background_even_if_cached():
 
 def test_run_city_explore_stores_report(monkeypatch):
     import json
-    from radar import api
+    import radar.brand.api as api
     from radar.models import CityReport
     s = _mem_session()
     monkeypatch.setattr(api, "get_session", lambda: s)
     monkeypatch.setattr(api, "_get_provider", lambda: object())
-    monkeypatch.setattr("radar.explore.run_city_search",
+    monkeypatch.setattr("radar.brand.explore.run_city_search",
                         lambda provider, city: ([{"text": "p"}], 7, ["tiktok", "instagram"]))
-    monkeypatch.setattr("radar.explore.summarize_city",
+    monkeypatch.setattr("radar.brand.explore.summarize_city",
                         lambda city, posts: {"overview": "fresh"})
     api._run_city_explore("Казань")
     row = s.query(CityReport).filter_by(city="казань").one()

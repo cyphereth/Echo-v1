@@ -1,8 +1,29 @@
 import { useState, useEffect } from 'react';
-import { Icon } from '../shared/icons';
-import { getLaneColor, getLaneLabel } from '../../data/mock';
-import * as api from '../../services/api';
+import { Icon } from '../../core/components/icons';
+import { request } from '../../core/api/client';
 import styles from './detail.module.css';
+
+// Brand mention API calls used by this shared Detail panel
+const api = {
+  getComments:       (mentionId, refresh = false) =>
+    request(`/mentions/${mentionId}/comments${refresh ? '?refresh=1' : ''}`),
+  commentAction:     (commentId, action, draft = null) =>
+    request(`/comments/${commentId}/action`, { method: 'POST', body: JSON.stringify({ action, draft }) }),
+  regenerateComment: (commentId) =>
+    request(`/comments/${commentId}/regenerate`, { method: 'POST' }),
+};
+
+// Lane display helpers (inlined — removes dependency on data/mock)
+function getLaneColor(lane) {
+  if (lane === 'competitor') return 'var(--warn)';
+  if (lane === 'niche')      return 'var(--info, #6c8ebf)';
+  return 'var(--brand)';
+}
+function getLaneLabel(lane, competitor) {
+  if (lane === 'competitor') return competitor ? `vs ${competitor}` : 'Конкурент';
+  if (lane === 'niche')      return 'Ниша';
+  return 'Мой бренд';
+}
 
 function fmtNum(n) {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;

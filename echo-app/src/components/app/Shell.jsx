@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Icon } from '../shared/icons';
+import { Icon } from '../../core/components/icons';
 import styles from './shell.module.css';
 
 function NavItem({ icon, label, active, badge, onClick }) {

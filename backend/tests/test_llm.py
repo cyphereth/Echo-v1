@@ -4,14 +4,14 @@ import pytest
 
 
 def test_complete_raises_without_key(monkeypatch):
-    import radar.llm as L
+    import radar.core.llm as L
     monkeypatch.setattr(L, "LLM_API_KEY", "")
     with pytest.raises(L.LLMNotConfigured):
         L.complete("sys", "user")
 
 
 def test_complete_parses_text_block(monkeypatch):
-    import radar.llm as L
+    import radar.core.llm as L
     monkeypatch.setattr(L, "LLM_API_KEY", "sk-test")
 
     class _Resp:

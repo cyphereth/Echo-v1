@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -22,24 +23,12 @@ from . import seed as seed_module
 
 log = logging.getLogger(__name__)
 
-app = FastAPI(title="Echo API", version="4.0.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.include_router(auth_router)
-app.include_router(news_router)
-app.include_router(brand_router)
-
 _scheduler = None
 
 
-@app.on_event("startup")
-def on_startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- startup ---
     init_db()
     session = get_session()
     try:
@@ -63,6 +52,27 @@ def on_startup():
                                tg_provider=_get_tg_provider(), web_provider=web_provider)
         _scheduler.start()
         log.info("Auto-collect scheduler started (tick=%ss)", _scheduler._tick_sec)
+
+    yield
+
+    # --- shutdown ---
+    if _scheduler is not None:
+        _scheduler.stop()
+        log.info("Auto-collect scheduler stopped")
+
+
+app = FastAPI(title="Echo API", version="4.0.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth_router)
+app.include_router(news_router)
+app.include_router(brand_router)
 
 
 @app.get("/health")

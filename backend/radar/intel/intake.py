@@ -52,8 +52,9 @@ def ingest_lexicon(session, path: str) -> dict:
 
 if __name__ == "__main__":
     import sys
-    from .seed import ensure_default_directions  # noqa
     from ..core.db import get_session
+    if len(sys.argv) < 3 or sys.argv[1] not in ("sources", "lexicon"):
+        sys.exit("usage: python -m radar.intel.intake {sources|lexicon} <path>")
     cmd, path = sys.argv[1], sys.argv[2]
     with get_session() as s:
         out = ingest_sources(s, path) if cmd == "sources" else ingest_lexicon(s, path)

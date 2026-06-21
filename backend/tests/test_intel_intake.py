@@ -27,3 +27,31 @@ def test_ingest_sources_upserts(tmp_path):
     assert out2 == {"added": 0, "updated": 1}
     assert s.query(IntelProbe).filter_by(query="@rybar").one().side == "ua"
     assert s.query(IntelProbe).count() == 2
+
+def test_ingest_lexicon_upserts(tmp_path):
+    from radar.intel.intake import ingest_lexicon
+    from radar.intel.models import IntelLexicon
+    s = _sess()
+    f = tmp_path / "lex.txt"
+    f.write_text(
+        "# lexicon test\nприлёт | удар/обстрел | strike\n300 | раненые | casualties\n\n",
+        encoding="utf-8",
+    )
+    out = ingest_lexicon(s, str(f))
+    assert out == {"added": 2, "updated": 0}
+    row = s.query(IntelLexicon).filter_by(term="прилёт").one()
+    assert row.meaning == "удар/обстрел" and row.category == "strike"
+
+    # re-ingest with changed meaning -> update, not duplicate
+    f.write_text("прилёт | удар | strike\n", encoding="utf-8")
+    out2 = ingest_lexicon(s, str(f))
+    assert out2 == {"added": 0, "updated": 1}
+    row = s.query(IntelLexicon).filter_by(term="прилёт").one()
+    assert row.meaning == "удар"
+    assert s.query(IntelLexicon).count() == 2
+
+    # term keying is lowercased: ПРИЛЁТ resolves to existing прилёт row
+    f.write_text("ПРИЛЁТ | x | y\n", encoding="utf-8")
+    out3 = ingest_lexicon(s, str(f))
+    assert out3 == {"added": 0, "updated": 1}
+    assert s.query(IntelLexicon).count() == 2

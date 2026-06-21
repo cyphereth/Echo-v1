@@ -19,6 +19,7 @@ from .core.db import init_db, get_session
 from .core.auth_api import router as auth_router, current_user  # noqa: F401 (re-export for tests)
 from .news.api import router as news_router
 from .brand.api import router as brand_router
+from .intel.api import router as intel_router
 from . import seed as seed_module
 
 log = logging.getLogger(__name__)
@@ -35,6 +36,8 @@ async def lifespan(app: FastAPI):
         seed_module.run(session)
         seed_module.ensure_demo_user(session)   # idempotent: demo login + backfill owners
         seed_module.ensure_default_topics(session)
+        from .intel import seed as intel_seed
+        intel_seed.ensure_default_directions(session)
     finally:
         session.close()
 
@@ -73,6 +76,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(news_router)
 app.include_router(brand_router)
+app.include_router(intel_router)
 
 
 @app.get("/health")

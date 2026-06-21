@@ -92,7 +92,7 @@ def _migrate() -> None:
 
 
 def init_db() -> None:
-    import radar.news.models, radar.brand.models  # noqa: F401  register new tables
+    import radar.news.models, radar.brand.models, radar.intel.models  # noqa: F401  register new tables
     Base.metadata.create_all(engine)
     from .migrate_split import migrate_split
     migrate_split(engine)

@@ -1,11 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import AppPage from './pages/AppPage';
-import LoginPage from './pages/LoginPage';
-import { getToken } from './services/api';
-
-function RequireAuth({ children }) {
-  return getToken() ? children : <Navigate to="/login" replace />;
-}
+import LoginPage from './core/auth/LoginPage';
+import RequireAuth from './core/auth/RequireAuth';
 
 export default function App() {
   return (

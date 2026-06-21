@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Icon } from '../shared/icons';
+import { Icon } from '../../core/components/icons';
 import { getLaneColor, getLaneLabel } from '../../data/mock';
 import * as api from '../../services/api';
 import styles from './detail.module.css';

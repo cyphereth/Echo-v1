@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Icon } from '../shared/icons';
+import { Icon } from '../../core/components/icons';
 import * as api from '../../services/api';
 import styles from './analytics.module.css';
 

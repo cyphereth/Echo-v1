@@ -1,39 +1,12 @@
 import { useEffect, useState } from 'react';
-import {
-  ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid,
-} from 'recharts';
 import * as api from '../../services/api';
 import styles from './stories.module.css';
+import { badgeStyle, VerifiedBadge, CredibilityBadge } from '../../core/components/Badge';
+import { TimelineChart } from '../../core/components/TimelineChart';
 
 function fmtHour(iso) {
   const d = new Date(iso);
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:00`;
-}
-
-const badge = (bg, color) => ({
-  display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px',
-  borderRadius: 999, fontSize: 11, fontWeight: 700, background: bg, color,
-  fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
-});
-
-function VerifiedBadge({ story, compact }) {
-  const n = story.source_count ?? 0;
-  if (story.verified) {
-    return <span style={badge('rgba(34,197,94,0.15)', '#16a34a')} title="Подтверждено независимыми источниками">
-      ✓ {n} {compact ? '' : 'источник(ов)'}</span>;
-  }
-  return <span style={badge('var(--surface-3)', 'var(--fg-3)')} title="Недостаточно независимых источников">
-    ± {n}</span>;
-}
-
-function CredibilityBadge({ story }) {
-  if (story.credibility === 'suspect') {
-    return <span style={badge('rgba(239,68,68,0.15)', '#ef4444')} title={story.credibility_note || ''}>⚠ требует проверки</span>;
-  }
-  if (story.credibility === 'credible') {
-    return <span style={badge('rgba(34,197,94,0.15)', '#16a34a')} title={story.credibility_note || ''}>✓ проверено</span>;
-  }
-  return null;
 }
 
 function fmtTime(iso) {
@@ -76,13 +49,13 @@ function StoryDetail({ id }) {
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '4px 0 10px' }}>
         <VerifiedBadge story={data} />
         <CredibilityBadge story={data} />
-        {data.is_anomaly && <span style={badge('rgba(245,158,11,0.15)', '#f59e0b')}>⚡ всплеск</span>}
+        {data.is_anomaly && <span style={badgeStyle('rgba(245,158,11,0.15)', '#f59e0b')}>⚡ всплеск</span>}
         <button onClick={summarize} disabled={summarizing}
-          style={{ ...badge('var(--surface-3)', 'var(--fg-2)'), border: 'none', cursor: summarizing ? 'default' : 'pointer' }}>
+          style={{ ...badgeStyle('var(--surface-3)', 'var(--fg-2)'), border: 'none', cursor: summarizing ? 'default' : 'pointer' }}>
           {summarizing ? '…' : '📝 Что произошло'}
         </button>
         <button onClick={assess} disabled={assessing}
-          style={{ ...badge('var(--brand)', '#fff'), border: 'none', cursor: assessing ? 'default' : 'pointer' }}>
+          style={{ ...badgeStyle('var(--brand)', '#fff'), border: 'none', cursor: assessing ? 'default' : 'pointer' }}>
           {assessing ? 'Анализ…' : '🔎 Оценить достоверность'}
         </button>
       </div>
@@ -99,17 +72,7 @@ function StoryDetail({ id }) {
 
       <div className={styles.meta}>{data.post_count} сообщений · {data.source_count} источников</div>
 
-      <ResponsiveContainer width="100%" height={240}>
-        <ComposedChart data={chart}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="t" />
-          <YAxis yAxisId="l" allowDecimals={false} />
-          <YAxis yAxisId="r" orientation="right" allowDecimals={false} />
-          <Tooltip />
-          <Bar yAxisId="l" dataKey="mentions" name="Сообщения/час" fill="#6366f1" />
-          <Line yAxisId="r" dataKey="sources" name="Источников" stroke="#16a34a" dot={false} strokeWidth={2} />
-        </ComposedChart>
-      </ResponsiveContainer>
+      <TimelineChart data={chart} />
 
       <h3>Источники ({sources.length})</h3>
       <ul className={styles.incidents}>

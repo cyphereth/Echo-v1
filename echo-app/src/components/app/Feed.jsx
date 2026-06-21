@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Icon } from '../shared/icons';
+import { Icon } from '../../core/components/icons';
 import { getLaneColor } from '../../data/mock';
 import styles from './feed.module.css';
 

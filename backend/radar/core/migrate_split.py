@@ -29,16 +29,49 @@ _BRAND_CHILD_PLAN = [
 ]
 
 
+def _col_info(conn, table: str) -> dict:
+    """Return {col_name: (col_type, notnull, dflt_value)} from PRAGMA table_info."""
+    result = {}
+    for row in conn.execute(text(f"PRAGMA table_info({table})")):
+        # row: (cid, name, type, notnull, dflt_value, pk)
+        result[row[1]] = (row[2], row[3], row[4])
+    return result
+
+
 def _cols(conn, table: str) -> set[str]:
-    return {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
+    return set(_col_info(conn, table).keys())
 
 
 def _copy(conn, src: str, dst: str, where: str):
-    src_cols = _cols(conn, src)
-    dst_cols = _cols(conn, dst)
-    shared = sorted(c for c in src_cols if c in dst_cols)
-    cols = ", ".join(shared)
-    conn.execute(text(f"INSERT INTO {dst} ({cols}) SELECT {cols} FROM {src} WHERE {where}"))
+    src_cols  = _cols(conn, src)
+    dst_info  = _col_info(conn, dst)
+    dst_cols  = set(dst_info.keys())
+    shared    = sorted(c for c in src_cols if c in dst_cols)
+
+    # For destination-only NOT NULL columns that have no source counterpart,
+    # supply their DDL default (or a safe zero-value) so the INSERT doesn't
+    # violate a NOT NULL constraint when the column is absent from the source.
+    extra_cols: list[str] = []
+    extra_vals: list[str] = []
+    for col in sorted(dst_cols - src_cols):
+        col_type, notnull, dflt = dst_info[col]
+        if notnull and dflt is None:
+            # Supply a type-appropriate safe default:
+            # DATETIME columns → current timestamp; BOOLEAN/INTEGER → 0; TEXT → ''.
+            ct = (col_type or "").upper()
+            if "DATETIME" in ct or "TIMESTAMP" in ct or col.endswith("_at"):
+                dflt = "CURRENT_TIMESTAMP"
+            elif "BOOL" in ct or "INT" in ct:
+                dflt = "0"
+            else:
+                dflt = "''"
+        if dflt is not None:
+            extra_cols.append(col)
+            extra_vals.append(str(dflt))
+
+    all_cols = ", ".join(shared + extra_cols)
+    sel_expr = ", ".join(shared + extra_vals)
+    conn.execute(text(f"INSERT INTO {dst} ({all_cols}) SELECT {sel_expr} FROM {src} WHERE {where}"))
 
 
 def migrate_split(engine) -> None:

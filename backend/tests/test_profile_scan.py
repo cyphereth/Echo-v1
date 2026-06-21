@@ -48,51 +48,51 @@ def _mk_brand(market):
     b = Brand(); b.market = market; return b
 
 def test_lang_ru_keeps_cyrillic():
-    from radar.collector import _passes_language
+    from radar.brand.collector import _passes_language
     assert _passes_language(_mk_post("купил на озоне, отлично"), _mk_brand("ru")) is True
 
 def test_lang_ru_drops_foreign():
-    from radar.collector import _passes_language
+    from radar.brand.collector import _passes_language
     assert _passes_language(_mk_post("amazing delivery, loved it"), _mk_brand("ru")) is False
 
 def test_lang_ru_keeps_viral_foreign():
-    from radar.collector import _passes_language
+    from radar.brand.collector import _passes_language
     assert _passes_language(_mk_post("amazing delivery", views=600_000), _mk_brand("ru")) is True
 
 def test_lang_global_keeps_everything():
-    from radar.collector import _passes_language
+    from radar.brand.collector import _passes_language
     assert _passes_language(_mk_post("amazing delivery"), _mk_brand("global")) is True
 
 
 # ── Viral threshold + hashtag spam ────────────────────────────────────────────
 
 def test_is_viral_by_likes():
-    from radar.collector import _is_viral
+    from radar.brand.collector import _is_viral
     assert _is_viral(_mk_post("x", views=0)) is False
     p = _mk_post("x"); p.likes = 1500
     assert _is_viral(p) is True
 
 def test_is_viral_by_views():
-    from radar.collector import _is_viral
+    from radar.brand.collector import _is_viral
     assert _is_viral(_mk_post("x", views=600_000)) is True
 
 # ── Opportunity prefilter ─────────────────────────────────────────────────────
 
 def test_opportunity_candidate_trigger():
-    from radar.drafts import _is_opportunity_candidate
+    from radar.brand.drafts import _is_opportunity_candidate
     assert _is_opportunity_candidate("у них скоро акция и скидки", "neutral") is True
 
 def test_opportunity_candidate_negative():
-    from radar.drafts import _is_opportunity_candidate
+    from radar.brand.drafts import _is_opportunity_candidate
     assert _is_opportunity_candidate("всё дорого и плохо", "negative") is True
 
 def test_opportunity_candidate_noise():
-    from radar.drafts import _is_opportunity_candidate
+    from radar.brand.drafts import _is_opportunity_candidate
     assert _is_opportunity_candidate("спасибо, классное видео", "positive") is False
 
 
 def test_min_text_len_is_20():
-    from radar.collector import MIN_TEXT_LEN
+    from radar.brand.collector import MIN_TEXT_LEN
     assert MIN_TEXT_LEN == 20
 
 
@@ -142,7 +142,7 @@ def test_classify_ads_batch_no_key():
 
 
 def test_competitor_word_boundary_no_substring():
-    from radar.collector import _matches
+    from radar.brand.collector import _matches
     from radar.core.providers.base import Post
     from radar.models import Brand
     from datetime import datetime, timezone
@@ -160,22 +160,22 @@ def test_competitor_word_boundary_no_substring():
 
 
 def test_follower_floor_small_nonviral():
-    from radar.collector import _below_follower_floor
+    from radar.brand.collector import _below_follower_floor
     p = _mk_post("нормальный пост про доставку озон сегодня", views=0); p.followers = 50
     assert _below_follower_floor(p) is True
 
 def test_follower_floor_small_viral_kept():
-    from radar.collector import _below_follower_floor
+    from radar.brand.collector import _below_follower_floor
     p = _mk_post("нормальный пост", views=600_000); p.followers = 50
     assert _below_follower_floor(p) is False
 
 def test_follower_floor_unknown_not_penalized():
-    from radar.collector import _below_follower_floor
+    from radar.brand.collector import _below_follower_floor
     p = _mk_post("нормальный пост", views=0); p.followers = 0
     assert _below_follower_floor(p) is False
 
 def test_follower_floor_big_account_kept():
-    from radar.collector import _below_follower_floor
+    from radar.brand.collector import _below_follower_floor
     p = _mk_post("нормальный пост", views=0); p.followers = 5000
     assert _below_follower_floor(p) is False
 
@@ -225,7 +225,7 @@ def test_rebuild_probes_no_geo():
 
 
 def test_geo_probe_requires_city():
-    from radar.collector import _matches
+    from radar.brand.collector import _matches
     from radar.core.providers.base import Post
     from radar.models import Brand
     from datetime import datetime, timezone
@@ -243,7 +243,7 @@ def test_geo_probe_requires_city():
 
 
 def test_follower_floor_off_in_local_mode():
-    from radar.collector import _below_follower_floor
+    from radar.brand.collector import _below_follower_floor
     p = _mk_post("обычный городской пост про красоту", views=0); p.followers = 50
     assert _below_follower_floor(p, local_mode=True) is False
     assert _below_follower_floor(p, local_mode=False) is True
@@ -481,9 +481,10 @@ def test_brand_lane_disambiguated_not_ad_judged(monkeypatch):
     real ones kept), NOT the ad/noise judge; niche lane still uses the noise judge."""
     from datetime import datetime, timezone
     import radar.core.spam as spam
-    import radar.pipeline as pipeline
+    import radar.brand.pipeline as pipeline
     from radar.core import db
-    from radar.models import Brand, Mention
+    from radar.models import Brand
+    from radar.brand.models import BrandMention
     # noise judge would hide everything if (wrongly) applied to the brand lane
     monkeypatch.setattr(spam, "classify_ads_batch", lambda texts, sphere="": [True] * len(texts))
     # disambiguation: first brand text off-topic, second on-topic
@@ -496,9 +497,10 @@ def test_brand_lane_disambiguated_not_ad_judged(monkeypatch):
     s.add(b); s.flush()
 
     def mk(src, pid, txt):
-        m = Mention(brand_id=b.id, platform="tiktok", post_id=pid, author="a",
-                    text=txt, source=src, is_spam=False,
-                    created_at=datetime.now(timezone.utc))
+        m = BrandMention(brand_id=b.id, platform="tiktok", post_id=pid, author="a",
+                         text=txt, source=src, is_spam=False,
+                         created_at=datetime.now(timezone.utc),
+                         first_seen=datetime.now(timezone.utc))
         s.add(m); return m
     brand_off = mk("brand", "d-off", "прошёл уровень за тануки в игре сегодня")
     brand_on  = mk("brand", "d-on", "ужинали в тануки, роллы супер")
@@ -512,7 +514,7 @@ def test_brand_lane_disambiguated_not_ad_judged(monkeypatch):
         assert brand_on.is_spam is False    # real brand mention kept
         assert niche_m.is_spam is True      # niche judged as noise
     finally:
-        s.query(Mention).filter_by(brand_id=b.id).delete()
+        s.query(BrandMention).filter_by(brand_id=b.id).delete()
         s.delete(b); s.commit()
 
 
@@ -544,20 +546,26 @@ def test_disambiguate_brand_batch_empty():
 # ── intent reach ──────────────────────────────────────────────────────────────
 
 def test_looks_like_intent_true():
-    from radar.pipeline import _looks_like_intent
+    from radar.brand.pipeline import _looks_like_intent
     assert _looks_like_intent("посоветуйте, где вкусно поесть?") is True
     assert _looks_like_intent("куда сходить на выходных?") is True
 
 def test_looks_like_intent_false():
-    from radar.pipeline import _looks_like_intent
+    from radar.brand.pipeline import _looks_like_intent
     assert _looks_like_intent("купил роллы вчера, очень вкусно") is False
     assert _looks_like_intent("просто красивое видео про суши") is False
 
 def test_opportunity_niche_intent_vs_plain():
-    from radar.pipeline import opportunity_for
-    from radar.models import Mention
-    intent = Mention(source="niche", text="подскажите, куда сходить поесть?")
-    plain  = Mention(source="niche", text="люблю японскую кухню")
+    from radar.brand.pipeline import opportunity_for
+    from radar.brand.models import BrandMention
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    intent = BrandMention(brand_id=1, platform="tiktok", post_id="i1", author="a",
+                          source="niche", text="подскажите, куда сходить поесть?",
+                          created_at=now, first_seen=now)
+    plain  = BrandMention(brand_id=1, platform="tiktok", post_id="i2", author="a",
+                          source="niche", text="люблю японскую кухню",
+                          created_at=now, first_seen=now)
     o_intent = opportunity_for(intent)
     o_plain  = opportunity_for(plain)
     assert "рекомендацию" in o_intent  # stronger intent hint (sphere-neutral copy)
@@ -565,7 +573,11 @@ def test_opportunity_niche_intent_vs_plain():
     assert o_plain is not None         # plain niche keeps the existing hint
 
 def test_opportunity_competitor_unchanged():
-    from radar.pipeline import opportunity_for
-    from radar.models import Mention
-    m = Mention(source="competitor", competitor="Якитория", text="был в якитории")
+    from radar.brand.pipeline import opportunity_for
+    from radar.brand.models import BrandMention
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    m = BrandMention(brand_id=1, platform="tiktok", post_id="c1", author="a",
+                     source="competitor", competitor="Якитория", text="был в якитории",
+                     created_at=now, first_seen=now)
     assert "Якитория" in opportunity_for(m)

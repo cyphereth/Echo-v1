@@ -547,7 +547,7 @@ def _city_report_card(r) -> dict:
 
 
 def _run_city_explore(city: str) -> None:
-    from .. import explore
+    from . import explore
     session = get_session()
     try:
         key, _ = explore.normalize_city(city)
@@ -1354,7 +1354,7 @@ def analytics(brand_id: int, user: User = Depends(current_user),
 def explore_city(body: ExploreCityBody, background_tasks: BackgroundTasks,
                  user: User = Depends(current_user),
                  session: Session = Depends(db)):
-    from .. import explore
+    from . import explore
     key, _ = explore.normalize_city(body.city)
     if not key:
         raise HTTPException(400, "City is required")
@@ -1484,10 +1484,29 @@ def summarize_brand_story(story_id: int, user: User = Depends(current_user),
     503 if no LLM key.
     """
     st = _owned_brand_story(session, story_id, user)
-    from .. import credibility
+    from ..core import llm
     from ..core.llm import LLMNotConfigured
+    _BRAND_SUMMARY_SYSTEM = (
+        "Ты — аналитик бренд-мониторинга. По набору упоминаний о бренде напиши "
+        "краткую фактическую сводку «что обсуждают» на русском: 1–2 предложения, "
+        "только факты, без оценок и воды."
+    )
+    incidents = (session.query(BrandIncident)
+                 .filter(BrandIncident.story_id == st.id)
+                 .order_by(BrandIncident.post_count.desc()).all())
+    mentions = (session.query(BrandMention)
+                .join(BrandIncident, BrandMention.incident_id == BrandIncident.id)
+                .filter(BrandIncident.story_id == st.id)
+                .limit(8).all())
+    lines = [f"Сюжет: «{st.title}»."]
+    if incidents:
+        lines.append("Эпизоды: " + "; ".join(i.title for i in incidents[:5]))
+    lines.append("Сообщения:")
+    for m in mentions:
+        lines.append(f"- [{m.author or '?'}] {(m.text or '').strip()[:200]}")
+    evidence = "\n".join(lines)
     try:
-        credibility.summarize_story(session, st)
+        st.summary = llm.complete(_BRAND_SUMMARY_SYSTEM, evidence, max_tokens=200).strip()
     except LLMNotConfigured:
         raise HTTPException(503, "LLM not configured")
     session.commit()

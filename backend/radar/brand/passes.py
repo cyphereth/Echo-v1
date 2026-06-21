@@ -4,6 +4,8 @@ Extracts the brand-specific pass functions from ``radar/core/scheduler.py`` into
 named, testable functions bound to brand models and ``radar.brand.*`` modules.
 
 Functions:
+  run_brand_collect(session, tg_provider, provider, bucket_acquire)
+      per-probe collection loop (BrandProbe → brand.collector.collect_probe).
   run_brand_pipeline(session, brand_id, provider, tg_provider)
       classify + draft + comment-fetch + story clustering for one brand.
   run_web_pass(session, web_provider)
@@ -16,8 +18,6 @@ Functions:
 Semantics (rotation/flood/cap/scheduling) are preserved byte-for-byte from
 the legacy implementations in scheduler.py; only the imports are redirected to
 brand-domain modules.
-
-ADDITIVE: legacy radar/core/scheduler.py is untouched until Phase 5.
 """
 from __future__ import annotations
 
@@ -27,6 +27,78 @@ from typing import Optional, Sequence, Callable
 from sqlalchemy.orm import Session
 
 log = logging.getLogger(__name__)
+
+INTERVAL_HOT    = 300
+INTERVAL_NORMAL = 3600
+INTERVAL_QUIET  = 7200
+
+
+def _adaptive_interval(probe, new_mentions: int) -> int:
+    """Mirrors adaptive_interval() in scheduler.py: hot/normal/quiet + night multiplier."""
+    import random
+    from datetime import datetime, timezone
+    import os
+
+    NIGHT_START_UTC  = 21
+    NIGHT_END_UTC    = 6
+    NIGHT_MULTIPLIER = 2.0
+
+    if new_mentions > 5:    interval = INTERVAL_HOT
+    elif new_mentions > 0:  interval = INTERVAL_NORMAL
+    else:                   interval = INTERVAL_QUIET
+    hour = datetime.now(timezone.utc).hour
+    if hour >= NIGHT_START_UTC or hour < NIGHT_END_UTC:
+        interval = int(interval * NIGHT_MULTIPLIER)
+    jitter = random.randint(-int(interval * 0.1), int(interval * 0.1))
+    return interval + jitter
+
+
+def run_brand_collect(
+    session,
+    tg_provider,
+    provider,
+    bucket_acquire=None,
+) -> set:
+    """Per-probe brand collection loop using BrandProbe + brand.collector.collect_probe.
+
+    Migrated from ``Scheduler._run_once`` (the Probe/Brand/legacy-collector block).
+    Queries BrandProbe joined to Brand, filters auto_collect + due + not chat kinds,
+    calls brand.collector.collect_probe, updates next_run_at via adaptive interval.
+
+    Returns the set of brand_ids that received new mentions this tick so the
+    caller can run the pipeline for each.
+    """
+    from datetime import datetime, timezone, timedelta
+    from .models import Brand, BrandProbe
+    from .collector import collect_probe
+
+    due = (
+        session.query(BrandProbe).join(Brand)
+        .filter(
+            BrandProbe.next_run_at <= datetime.now(timezone.utc),
+            Brand.auto_collect.is_(True),
+            BrandProbe.kind.notin_(("chat", "chat_linked")),
+        )
+        .all()
+    )
+    touched: set = set()
+    for probe in due:
+        prov = tg_provider if probe.platform == "telegram" else provider
+        if prov is None:
+            continue  # telegram probe but TG provider unavailable — skip
+        if bucket_acquire is not None:
+            bucket_acquire()
+        try:
+            count = collect_probe(session, probe, prov)
+            interval = _adaptive_interval(probe, count)
+            probe.next_run_at  = datetime.now(timezone.utc) + timedelta(seconds=interval)
+            probe.interval_sec = interval
+            session.commit()
+            if count:
+                touched.add(probe.brand_id)
+        except Exception:
+            log.exception("BrandProbe %s failed", probe.id)
+    return touched
 
 
 def run_brand_pipeline(

@@ -4,8 +4,6 @@ from typing import Type
 
 from sqlalchemy.orm import Session
 
-from ..models import Story, StoryPoint
-
 # Tunables (env, calibrate on real brands).
 MIN_BUCKETS   = int(os.getenv("ANOMALY_MIN_BUCKETS", "3"))      # baseline buckets required
 VOLUME_FACTOR = float(os.getenv("ANOMALY_VOLUME_FACTOR", "3.0"))
@@ -22,8 +20,8 @@ def _mean(xs) -> float:
 def detect_anomaly(
     session: Session,
     story_id: int,
-    story_model: Type = Story,
-    point_model: Type = StoryPoint,
+    story_model: Type,
+    point_model: Type,
 ) -> bool:
     """Set story.is_anomaly from its timeline points. Idempotent.
 
@@ -31,8 +29,6 @@ def detect_anomaly(
     evaluated on the latest bucket vs the mean of all prior buckets. Needs at
     least MIN_BUCKETS prior buckets, else False (no baseline yet).
 
-    ``story_model`` and ``point_model`` default to the legacy Story/StoryPoint so
-    the existing ``radar/stories.py`` caller keeps working without modification.
     Pass BrandStory/BrandStoryPoint or NewsStory/NewsStoryPoint to route the same
     logic over domain-specific tables.
     """

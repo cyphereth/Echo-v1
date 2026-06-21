@@ -162,7 +162,7 @@ def test_channel_probe_bypasses_keyword_filter():
     the channel itself is the relevance signal."""
     import json
     from datetime import datetime, timezone
-    from radar.collector import _matches
+    from radar.brand.collector import _matches
     from radar.core.providers.base import Post
     from radar.models import Brand
     b = Brand(); b.exclusions = json.dumps([]); b.market = "ru"
@@ -262,6 +262,7 @@ def _mem_session_tg():
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session as _S
     from radar.models import Base
+    import radar.brand.models  # register brand tables in Base.metadata
     eng = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(eng)
     return _S(eng)
@@ -270,8 +271,9 @@ def _mem_session_tg():
 def test_collect_chats_stores_topical_and_intent_messages_as_niche():
     import json
     from datetime import datetime, timezone
-    from radar.models import Brand, Probe, Mention
-    from radar.collector import collect_chats
+    from radar.models import Brand
+    from radar.brand.models import BrandProbe, BrandMention
+    from radar.brand.collector import collect_chats
     from radar.core.providers.base import Post
 
     s = _mem_session_tg()
@@ -279,7 +281,7 @@ def test_collect_chats_stores_topical_and_intent_messages_as_niche():
               niche_keywords=json.dumps(["ресторан", "суши"]),
               category_terms="[]", audience_terms="[]", geo="Москва")
     s.add(b); s.flush()
-    s.add(Probe(brand_id=b.id, platform="telegram", kind="chat",
+    s.add(BrandProbe(brand_id=b.id, platform="telegram", kind="chat",
                 query="@foodmsk", source="niche", label="Еда МСК",
                 next_run_at=datetime.now(timezone.utc), interval_sec=3600))
     s.commit()
@@ -298,7 +300,7 @@ def test_collect_chats_stores_topical_and_intent_messages_as_niche():
         def search(self, *a, **k): return None
 
     n = collect_chats(s, b, FakeProvider())
-    stored = s.query(Mention).filter_by(brand_id=b.id, is_spam=False).all()
+    stored = s.query(BrandMention).filter_by(brand_id=b.id, is_spam=False).all()
     texts = {m.post_id for m in stored}
     assert "foodmsk/1" in texts          # intent question kept
     assert "foodmsk/2" in texts          # topical (ресторан/суши) kept
@@ -355,8 +357,9 @@ def test_linked_chat_none_when_no_discussion_group():
 
 def test_ensure_chats_discovered_grows_graph_from_seed_channels():
     import json
-    from radar.models import Brand, Probe
-    from radar.collector import ensure_chats_discovered
+    from radar.models import Brand
+    from radar.brand.models import BrandProbe
+    from radar.brand.collector import ensure_chats_discovered
 
     s = _mem_session_tg()
     b = Brand(name="Тануки", sphere="рестораны",
@@ -373,7 +376,7 @@ def test_ensure_chats_discovered_grows_graph_from_seed_channels():
             return table.get(handle)
 
     n = ensure_chats_discovered(s, b, FakeProvider())
-    chats = {p.query for p in s.query(Probe).filter_by(kind="chat").all()}
+    chats = {p.query for p in s.query(BrandProbe).filter_by(kind="chat").all()}
     assert chats == {"@kudaedatalks", "@mosrestchat"}   # seed's + recommendation's linked groups
     assert n == 2
 
@@ -395,8 +398,9 @@ def test_discover_channels_filters_username_and_sorts_by_size():
 
 def test_ensure_chats_discovered_bootstraps_seeds_for_brand_without_channels():
     import json
-    from radar.models import Brand, Probe
-    from radar.collector import ensure_chats_discovered
+    from radar.models import Brand
+    from radar.brand.models import BrandProbe
+    from radar.brand.collector import ensure_chats_discovered
 
     s = _mem_session_tg()
     # An online electronics shop — NO curated tg_channels, only sphere/niche.
@@ -415,7 +419,7 @@ def test_ensure_chats_discovered_bootstraps_seeds_for_brand_without_channels():
                 if handle == "@techchan" else None
 
     n = ensure_chats_discovered(s, b, FakeProvider())
-    chats = {p.query for p in s.query(Probe).filter_by(kind="chat").all()}
+    chats = {p.query for p in s.query(BrandProbe).filter_by(kind="chat").all()}
     assert chats == {"@techchat"}   # discovered a seed channel by sphere, took its chat
     assert n == 1
 
@@ -423,8 +427,9 @@ def test_ensure_chats_discovered_bootstraps_seeds_for_brand_without_channels():
 def test_collect_chats_captures_non_food_shopping_intent():
     import json
     from datetime import datetime, timezone
-    from radar.models import Brand, Probe, Mention
-    from radar.collector import collect_chats
+    from radar.models import Brand
+    from radar.brand.models import BrandProbe, BrandMention
+    from radar.brand.collector import collect_chats
     from radar.core.providers.base import Post
 
     s = _mem_session_tg()
@@ -432,7 +437,7 @@ def test_collect_chats_captures_non_food_shopping_intent():
               niche_keywords=json.dumps(["смартфон"]),
               category_terms="[]", audience_terms="[]", geo="")
     s.add(b); s.flush()
-    s.add(Probe(brand_id=b.id, platform="telegram", kind="chat", query="@techchat",
+    s.add(BrandProbe(brand_id=b.id, platform="telegram", kind="chat", query="@techchat",
                 source="niche", label="Чат техно",
                 next_run_at=datetime.now(timezone.utc), interval_sec=3600))
     s.commit()
@@ -449,7 +454,7 @@ def test_collect_chats_captures_non_food_shopping_intent():
         def search(self, *a, **k): return None
 
     collect_chats(s, b, FakeProvider())
-    kept = {m.post_id for m in s.query(Mention).filter_by(brand_id=b.id, is_spam=False).all()}
+    kept = {m.post_id for m in s.query(BrandMention).filter_by(brand_id=b.id, is_spam=False).all()}
     assert "techchat/1" in kept     # shopping recommendation intent captured (no food terms)
     assert "techchat/2" not in kept
 
@@ -509,15 +514,16 @@ def test_post_url_telegram_internal_id_chat():
 def test_collect_chats_handles_linked_kind_probes():
     import json
     from datetime import datetime, timezone
-    from radar.models import Brand, Probe, Mention
-    from radar.collector import collect_chats
+    from radar.models import Brand
+    from radar.brand.models import BrandProbe, BrandMention
+    from radar.brand.collector import collect_chats
     from radar.core.providers.base import Post
 
     s = _mem_session_tg()
     b = Brand(name="Тануки", sphere="рестораны", niche_keywords=json.dumps(["ресторан"]),
               category_terms="[]", audience_terms="[]", geo="")
     s.add(b); s.flush()
-    s.add(Probe(brand_id=b.id, platform="telegram", kind="chat_linked", query="@kudaeda",
+    s.add(BrandProbe(brand_id=b.id, platform="telegram", kind="chat_linked", query="@kudaeda",
                 source="niche", label="Talks",
                 next_run_at=datetime.now(timezone.utc), interval_sec=3600))
     s.commit()
@@ -532,14 +538,14 @@ def test_collect_chats_handles_linked_kind_probes():
             return [mk("777/1", "посоветуйте хороший ресторан в центре?")]
         def search_chat(self, *a, **k): return []
     n = collect_chats(s, b, FakeProvider())
-    kept = {m.post_id for m in s.query(Mention).filter_by(brand_id=b.id, is_spam=False).all()}
+    kept = {m.post_id for m in s.query(BrandMention).filter_by(brand_id=b.id, is_spam=False).all()}
     assert "777/1" in kept and n == 1
 
 
 # ── Relevance: word-boundary matching (no "кафе" inside "кафедральный") ──
 
 def test_term_hit_word_boundary_rejects_substring_false_positive():
-    from radar.collector import _term_hit
+    from radar.news.collector import _term_hit
     assert _term_hit("Вьетнамское кафе", ["кафе"])              # real word
     assert not _term_hit("Брянский кафедральный собор", ["кафе"])  # substring → reject
     assert _term_hit("лучший ресторан города", ["ресторан"])
@@ -547,8 +553,9 @@ def test_term_hit_word_boundary_rejects_substring_false_positive():
 
 def test_ensure_chats_discovered_bootstrap_filters_offtopic_by_title():
     import json
-    from radar.models import Brand, Probe
-    from radar.collector import ensure_chats_discovered
+    from radar.models import Brand
+    from radar.brand.models import BrandProbe
+    from radar.brand.collector import ensure_chats_discovered
     s = _mem_session_tg()
     b = Brand(name="Дача", sphere="ресторан кафе гриль", tg_channels="[]",
               niche_keywords=json.dumps(["ресторан", "кафе"]),
@@ -563,7 +570,7 @@ def test_ensure_chats_discovered_bootstrap_filters_offtopic_by_title():
         def linked_chat(self, handle):
             return {"handle": f"{handle}_chat", "id": 1, "via": handle, "title": "Chat", "participants": 200}
     ensure_chats_discovered(s, b, FakeProvider())
-    chats = {p.query for p in s.query(Probe).filter_by(kind="chat").all()}
+    chats = {p.query for p in s.query(BrandProbe).filter_by(kind="chat").all()}
     assert chats == {"@cafe_br_chat"}    # cathedral filtered out by title relevance
 
 
@@ -600,15 +607,16 @@ def test_rebuild_probes_preserves_discovered_chat_probes(monkeypatch):
 def test_collect_chats_uses_and_advances_watermark():
     import json
     from datetime import datetime, timezone
-    from radar.models import Brand, Probe, Mention
-    from radar.collector import collect_chats
+    from radar.models import Brand
+    from radar.brand.models import BrandProbe, BrandMention
+    from radar.brand.collector import collect_chats
     from radar.core.providers.base import Post
 
     s = _mem_session_tg()
     b = Brand(name="Тануки", sphere="рестораны", niche_keywords=json.dumps(["ресторан"]),
               category_terms="[]", audience_terms="[]", geo="")
     s.add(b); s.flush()
-    s.add(Probe(brand_id=b.id, platform="telegram", kind="chat", query="@foodchat",
+    s.add(BrandProbe(brand_id=b.id, platform="telegram", kind="chat", query="@foodchat",
                 source="niche", watermark="100",
                 next_run_at=datetime.now(timezone.utc), interval_sec=3600))
     s.commit()
@@ -626,13 +634,14 @@ def test_collect_chats_uses_and_advances_watermark():
 
     collect_chats(s, b, FakeProvider())
     assert all(mid == 100 for mid in seen_min_ids)   # passed the stored watermark
-    probe = s.query(Probe).filter_by(brand_id=b.id, kind="chat").one()
+    probe = s.query(BrandProbe).filter_by(brand_id=b.id, kind="chat").one()
     assert probe.watermark == "150"                  # advanced to newest seen
 
 
 def test_term_hit_matches_inflected_forms_via_morphology():
     import pytest
-    from radar.collector import _MORPH, _term_hit
+    from radar.brand.collector import _MORPH
+    from radar.news.collector import _term_hit
     # FP guard holds with or without morphology (distinct lemmas / boundaries):
     assert not _term_hit("Брянский кафедральный собор", ["кафе"])
     if _MORPH is None:

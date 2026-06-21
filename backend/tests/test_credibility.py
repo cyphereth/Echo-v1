@@ -8,24 +8,28 @@ def _mem():
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session as _S
     from radar.models import Base
+    import radar.news.models  # register news tables
     eng = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(eng)
     return _S(eng)
 
 
 def _story_with_sources(s, authors):
-    """A topic story with one incident and a mention per author."""
-    from radar.models import Story, Incident, Mention
+    """A topic (news-domain) story with one incident and a mention per author."""
+    from radar.news.models import NewsTopic, NewsStory, NewsIncident, NewsMention
     now = datetime.now(timezone.utc)
-    st = Story(id=1, topic_id=1, title="Взрыв на заводе", status="active",
-               first_seen_at=now, last_seen_at=now, post_count=len(authors))
+    t = NewsTopic(id=1, name="Тест", kind="search",
+                  keywords='["тест"]', niche_keywords='["тест"]', auto_collect=True)
+    s.add(t); s.flush()
+    st = NewsStory(id=1, topic_id=1, title="Взрыв на заводе", status="active",
+                   first_seen_at=now, last_seen_at=now, post_count=len(authors))
     s.add(st); s.flush()
-    inc = Incident(id=1, topic_id=1, story_id=1, title="Взрыв на заводе",
-                   sentiment=0.0, post_count=len(authors), first_seen_at=now, last_seen_at=now)
+    inc = NewsIncident(id=1, topic_id=1, story_id=1, title="Взрыв на заводе",
+                       post_count=len(authors), first_seen_at=now, last_seen_at=now)
     s.add(inc); s.flush()
     for i, a in enumerate(authors):
-        s.add(Mention(topic_id=1, incident_id=1, platform="telegram", post_id=f"p{i}",
-                      author=a, text="Сообщают о взрыве на заводе", created_at=now))
+        s.add(NewsMention(topic_id=1, incident_id=1, platform="telegram", post_id=f"p{i}",
+                          author=a, text="Сообщают о взрыве на заводе", created_at=now))
     s.flush()
     return st
 
@@ -33,19 +37,21 @@ def _story_with_sources(s, authors):
 # ── cross-verification ──────────────────────────────────────────────────────────
 
 def test_recompute_verification_counts_distinct_sources():
-    import radar.stories as ST
+    import radar.news.stories as ST
     s = _mem()
     st = _story_with_sources(s, ["@a", "@a", "@b", "news.ru", ""])  # blank ignored, @a dedup
-    ST._recompute_verification(s, st.id)
+    ST._recompute_verification(s, st.topic_id)
+    s.refresh(st)
     assert st.source_count == 3
     assert st.verified is True   # >= VERIFY_MIN_SOURCES (3)
 
 
 def test_recompute_verification_below_threshold_not_verified():
-    import radar.stories as ST
+    import radar.news.stories as ST
     s = _mem()
     st = _story_with_sources(s, ["@a", "@b"])   # only 2 distinct sources
-    ST._recompute_verification(s, st.id)
+    ST._recompute_verification(s, st.topic_id)
+    s.refresh(st)
     assert st.source_count == 2
     assert st.verified is False
 
@@ -53,7 +59,7 @@ def test_recompute_verification_below_threshold_not_verified():
 # ── fake-detection (LLM) ────────────────────────────────────────────────────────
 
 def test_assess_credibility_parses_verdict(monkeypatch):
-    import radar.credibility as CR
+    import radar.news.credibility as CR
     s = _mem()
     st = _story_with_sources(s, ["@a"])
     seen = {}
@@ -68,7 +74,7 @@ def test_assess_credibility_parses_verdict(monkeypatch):
 
 
 def test_assess_credibility_malformed_defaults_unrated(monkeypatch):
-    import radar.credibility as CR
+    import radar.news.credibility as CR
     s = _mem()
     st = _story_with_sources(s, ["@a"])
     monkeypatch.setattr(CR.llm, "complete", lambda system, user, **k: "не могу определить")
@@ -78,7 +84,7 @@ def test_assess_credibility_malformed_defaults_unrated(monkeypatch):
 
 
 def test_assess_credibility_raises_without_key(monkeypatch):
-    import radar.credibility as CR
+    import radar.news.credibility as CR
     s = _mem()
     st = _story_with_sources(s, ["@a"])
     def _boom(*a, **k):
@@ -97,7 +103,7 @@ def _api(monkeypatch, tmp_path):
     import radar.seed as seed; importlib.reload(seed)
     # Reload news_api FIRST so the app.include_router picks up the reloaded current_user
     import radar.news.api as news_api; importlib.reload(news_api)
-    import radar.api as api; importlib.reload(api)
+    import radar.app as api; importlib.reload(api)
     from fastapi.testclient import TestClient
     from radar.models import User
     s = db.get_session()

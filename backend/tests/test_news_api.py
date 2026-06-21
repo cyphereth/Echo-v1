@@ -8,7 +8,7 @@ def _client(monkeypatch, tmp_path):
     import radar.core.db as db; importlib.reload(db); db.init_db()
     import radar.seed as seed; importlib.reload(seed)
     import radar.news.api as news_api; importlib.reload(news_api)
-    import radar.api as api; importlib.reload(api)
+    import radar.app as api; importlib.reload(api)
     from fastapi.testclient import TestClient
     from radar.models import User
     s = db.get_session()
@@ -61,14 +61,11 @@ def test_sources_panel_list_add_delete(monkeypatch, tmp_path):
     from datetime import datetime, timezone
     api, client, s, u = _client(monkeypatch, tmp_path)
     # Use the news-domain NewsTopic "Экономика" (seeded by ensure_default_topics)
-    from radar.news.models import NewsTopic
-    from radar.models import Probe, Mention
+    from radar.news.models import NewsTopic, NewsProbe, NewsMention
     t = s.query(NewsTopic).filter_by(name="Экономика").first()
-    s.add(Probe(topic_id=t.id, platform="telegram", kind="channel", query="@junk", source="niche", label="Junk"))
+    s.add(NewsProbe(topic_id=t.id, platform="telegram", kind="channel", query="@junk", label="Junk"))
     s.flush()
     now = datetime.now(timezone.utc)
-    # Telegram channel mentions are now counted via NewsMention (news pass writes NewsMention)
-    from radar.news.models import NewsMention
     s.add(NewsMention(topic_id=t.id, platform="telegram", post_id="m1", author="@junk",
                       text="мусор из канала", source="channel", created_at=now))
     # Web mentions are tracked via NewsMention in the news router; for the source panel
@@ -91,8 +88,7 @@ def test_sources_panel_list_add_delete(monkeypatch, tmp_path):
     # duplicate add → 409
     assert client.post(f"/topics/{t.id}/sources", json={"handle": "@interfaxonline"}).status_code == 409
 
-    # delete the junk probe → probe + its legacy Mention records gone (delete handler still
-    # cleans up legacy Mention rows by author for safety; NewsMention rows are separate)
+    # delete the junk probe → probe + associated NewsMention rows gone
     pid = by_handle["@junk"]["id"]
     assert client.delete(f"/topics/{t.id}/sources/{pid}").status_code == 200
     handles2 = {x["handle"] for x in client.get(f"/topics/{t.id}/sources").json()}

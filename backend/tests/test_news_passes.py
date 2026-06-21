@@ -38,7 +38,6 @@ def test_news_router_lists_topics(monkeypatch, tmp_path):
     from radar.news.api import router
     from fastapi.testclient import TestClient
 
-    import radar.api as api_mod; importlib.reload(api_mod)
     from radar.models import User
     s = db_mod.get_session()
     u = User(email="pass@t.t", password_hash="x"); s.add(u); s.flush(); s.commit()

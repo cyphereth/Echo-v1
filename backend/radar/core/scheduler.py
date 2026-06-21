@@ -2,7 +2,7 @@ import logging, os, random, time, threading
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from .db import get_session
-from ..models import Brand, Probe
+from ..models import Brand
 
 log = logging.getLogger(__name__)
 INTERVAL_HOT    = 300
@@ -97,7 +97,7 @@ def _run_digest_pass(session):
             log.exception("Digest pass failed for brand %s", b.id)
 
 
-def adaptive_interval(probe: Probe, new_mentions: int) -> int:
+def adaptive_interval(probe, new_mentions: int) -> int:
     if new_mentions > 5:   interval = INTERVAL_HOT
     elif new_mentions > 0: interval = INTERVAL_NORMAL
     else:                  interval = INTERVAL_QUIET
@@ -153,35 +153,16 @@ class Scheduler:
     def _run_once(self):
         session = get_session()
         try:
-            # Only probes of brands that opted into auto-collect are due.
-            # kind="chat" probes are collected via the brand-level collect_chats pass
-            # (term search), not the generic per-probe loop, so exclude them here.
-            due = (
-                session.query(Probe).join(Brand)
-                .filter(
-                    Probe.next_run_at <= datetime.now(timezone.utc),
-                    Brand.auto_collect.is_(True),
-                    Probe.kind.notin_(("chat", "chat_linked")),
-                )
-                .all()
+            # Brand probe collection: queries BrandProbe (brand domain), calls
+            # brand.collector.collect_probe (writes BrandMention). Replaces the
+            # legacy Probe/collect_probe loop that was here before Phase 5.
+            from ..brand.passes import run_brand_collect
+            touched = run_brand_collect(
+                session,
+                tg_provider=self._tg_provider,
+                provider=self._provider,
+                bucket_acquire=self._bucket.acquire,
             )
-            touched: set[int] = set()
-            for probe in due:
-                prov = self._tg_provider if probe.platform == "telegram" else self._provider
-                if prov is None:
-                    continue  # telegram probe but TG provider unavailable — skip
-                self._bucket.acquire()
-                try:
-                    from ..collector import collect_probe
-                    count    = collect_probe(session, probe, prov)
-                    interval = adaptive_interval(probe, count)
-                    probe.next_run_at  = datetime.now(timezone.utc) + timedelta(seconds=interval)
-                    probe.interval_sec = interval
-                    session.commit()
-                    if count:
-                        touched.add(probe.brand_id)
-                except Exception:
-                    log.exception("Probe %s failed", probe.id)
             # Classify + draft for brands that got new mentions this tick, then
             # auto-fetch comments on fresh competitor/niche mentions (opportunity pipeline).
             for brand_id in touched:

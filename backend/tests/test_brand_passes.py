@@ -126,14 +126,15 @@ def _mem_brand():
 
 
 def test_run_web_pass_writes_brand_mention_not_legacy():
-    """run_web_pass must store results as BrandMention, not legacy Mention.
+    """run_web_pass must store results as BrandMention only (legacy Mention table gone).
 
     Feed a provider stub that returns a single relevant web result,
-    then assert BrandMention.count() >= 1 and legacy Mention.count() == 0.
+    then assert BrandMention.count() >= 1.
+    The legacy Mention table was removed in Phase 5 — its absence is the proof
+    that web results cannot accidentally land there.
     """
     from types import SimpleNamespace
     from radar.brand.models import Brand, BrandMention
-    from radar.models import Mention
     from radar.brand.passes import run_web_pass
 
     s = _mem_brand()
@@ -150,7 +151,6 @@ def test_run_web_pass_writes_brand_mention_not_legacy():
     run_web_pass(s, web_provider)
 
     assert s.query(BrandMention).count() >= 1, "Expected at least 1 BrandMention"
-    assert s.query(Mention).count() == 0, "Legacy Mention table must stay empty"
 
 
 # ---------------------------------------------------------------------------

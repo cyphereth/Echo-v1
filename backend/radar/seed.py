@@ -1,4 +1,4 @@
-"""Seed: create demo account only. No brands, no mentions."""
+"""Seed: create demo account and default news topics."""
 from __future__ import annotations
 from sqlalchemy.orm import Session
 from .models import Brand, User
@@ -45,26 +45,12 @@ def ensure_demo_user(session: Session) -> User:
 
 
 def ensure_default_topics(session: Session) -> None:
-    """Idempotent: create global default topics for the news-mode feed.
-
-    Writes to BOTH the legacy Topic table (brand domain / backward-compat) AND
-    the news-domain NewsTopic table (news router / Phase 3.3+).
-    """
+    """Idempotent: create global default topics for the news-mode feed (NewsTopic)."""
     import json as _j
-    from .models import Topic
+    from .news.models import NewsTopic
     for name, kws in DEFAULT_TOPICS.items():
-        if not session.query(Topic).filter_by(name=name, kind="default").first():
-            session.add(Topic(name=name, kind="default", user_id=None,
-                              keywords=_j.dumps(kws, ensure_ascii=False),
-                              niche_keywords=_j.dumps(kws, ensure_ascii=False)))
-    # Also seed the news-domain model so the /news/topics router returns defaults.
-    try:
-        from .news.models import NewsTopic
-        for name, kws in DEFAULT_TOPICS.items():
-            if not session.query(NewsTopic).filter_by(name=name, kind="default").first():
-                session.add(NewsTopic(name=name, kind="default", user_id=None,
-                                      keywords=_j.dumps(kws, ensure_ascii=False),
-                                      niche_keywords=_j.dumps(kws, ensure_ascii=False)))
-    except Exception:
-        pass  # news tables may not exist yet (e.g. running legacy migrations)
+        if not session.query(NewsTopic).filter_by(name=name, kind="default").first():
+            session.add(NewsTopic(name=name, kind="default", user_id=None,
+                                  keywords=_j.dumps(kws, ensure_ascii=False),
+                                  niche_keywords=_j.dumps(kws, ensure_ascii=False)))
     session.commit()

@@ -72,7 +72,7 @@ class NewsStory(Base):
     topic_id:      Mapped[int]      = mapped_column(ForeignKey("news_topics.id"), nullable=False)
     title:         Mapped[str]      = mapped_column(Text, default="")
     status:        Mapped[str]      = mapped_column(Text, default="active")
-    is_anomaly:    Mapped[bool]     = mapped_column(Boolean, default=False)
+    is_anomaly:    Mapped[bool]     = mapped_column(Boolean, default=False, server_default="0")
     post_count:    Mapped[int]      = mapped_column(Integer, default=0)
     source_count:  Mapped[int]      = mapped_column(Integer, default=0)
     verified:      Mapped[bool]     = mapped_column(Boolean, default=False)

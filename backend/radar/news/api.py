@@ -22,8 +22,8 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_session
 from ..core.auth import decode_token
-from ..models import User, Probe, Mention  # legacy Probe / Mention still used for source panel
-from .models import NewsTopic, NewsMention, NewsStory, NewsStoryPoint, NewsIncident, NewsReport  # noqa: F401 — NewsStory etc. kept for potential future use
+from ..models import User
+from .models import NewsTopic, NewsMention, NewsProbe, NewsStory, NewsStoryPoint, NewsIncident, NewsReport  # noqa: F401
 from . import credibility as news_credibility
 from . import digests as news_digests
 
@@ -252,10 +252,10 @@ def list_topic_digests(topic_id: int, user: User = Depends(current_user), sessio
 def list_topic_sources(topic_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
     _owned_news_topic(session, topic_id, user)
     out: list[SourceOut] = []
-    # Telegram channel + global probes (still tracked via legacy Probe on news topics)
-    probes = (session.query(Probe)
-              .filter(Probe.topic_id == topic_id, Probe.platform == "telegram",
-                      Probe.kind.in_(("channel", "global"))).all())
+    # Telegram channel + global probes (news domain NewsProbe)
+    probes = (session.query(NewsProbe)
+              .filter(NewsProbe.topic_id == topic_id, NewsProbe.platform == "telegram",
+                      NewsProbe.kind.in_(("channel", "global"))).all())
     for p in probes:
         cnt = (session.query(func.count(NewsMention.id))
                .filter(NewsMention.topic_id == topic_id, NewsMention.author == p.query).scalar() or 0)
@@ -279,14 +279,14 @@ def add_topic_source(topic_id: int, body: SourceAdd, user: User = Depends(curren
         raise HTTPException(400, "handle required")
     if not handle.startswith("@"):
         handle = "@" + handle
-    exists = (session.query(Probe)
-              .filter(Probe.topic_id == topic_id, Probe.platform == "telegram",
-                      Probe.query == handle).first())
+    exists = (session.query(NewsProbe)
+              .filter(NewsProbe.topic_id == topic_id, NewsProbe.platform == "telegram",
+                      NewsProbe.query == handle).first())
     if exists:
         raise HTTPException(409, "source already exists")
-    p = Probe(topic_id=topic_id, platform="telegram", kind="channel", query=handle,
-              source="niche", label="manual",
-              next_run_at=datetime.now(timezone.utc), interval_sec=3600)
+    p = NewsProbe(topic_id=topic_id, platform="telegram", kind="channel", query=handle,
+                  label="manual",
+                  next_run_at=datetime.now(timezone.utc), interval_sec=3600)
     session.add(p); session.commit()
     return SourceOut(id=p.id, kind="channel", handle=handle, title="manual", mention_count=0)
 
@@ -294,11 +294,12 @@ def add_topic_source(topic_id: int, body: SourceAdd, user: User = Depends(curren
 @router.delete("/topics/{topic_id}/sources/{probe_id}")
 def delete_topic_source(topic_id: int, probe_id: int, user: User = Depends(current_user), session: Session = Depends(db)):
     _owned_news_topic(session, topic_id, user)
-    p = session.get(Probe, probe_id)
+    p = session.get(NewsProbe, probe_id)
     if p is None or p.topic_id != topic_id:
         raise HTTPException(404, "source not found")
-    (session.query(Mention)
-     .filter(Mention.topic_id == topic_id, Mention.author == p.query)
+    # Delete associated NewsMention rows for this source
+    (session.query(NewsMention)
+     .filter(NewsMention.topic_id == topic_id, NewsMention.author == p.query)
      .delete(synchronize_session=False))
     session.delete(p); session.commit()
     return {"ok": True}

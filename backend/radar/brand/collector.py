@@ -380,7 +380,7 @@ def ensure_chats_discovered(
             try:
                 for c in provider.discover_channels(q, limit=20):
                     title = c.get("title", "")
-                    if any(t in title.lower() for t in terms):
+                    if any(_word_in(title.lower(), t) for t in terms):
                         seeds.append(c["handle"])
             except Exception:
                 log.warning("discover_channels failed for query %r", q)
@@ -389,7 +389,8 @@ def ensure_chats_discovered(
     for s in seeds:
         try:
             for rec in provider.channel_recommendations(s, limit=20):
-                channels.append(rec["handle"])
+                handle = rec["handle"] if isinstance(rec, dict) else rec
+                channels.append(handle)
         except Exception:
             log.warning("channel_recommendations failed for %s", s)
     channels = list(dict.fromkeys(channels))[:MAX_DISCOVERY_CHANNELS]
@@ -464,13 +465,24 @@ def collect_chats(session: Session, brand: Brand, provider) -> int:
         wm = int(probe.watermark) if (probe.watermark or "").isdigit() else 0
         newest = wm
         seen_ids: set[str] = set()
+
+        def _post_id_int(pid: str) -> int:
+            """Extract the integer message-id from a post_id that may be 'chat/123' or '123'."""
+            try:
+                return int(pid)
+            except (ValueError, TypeError):
+                pass
+            try:
+                return int(pid.rsplit("/", 1)[-1])
+            except (ValueError, TypeError):
+                return 0
+
         try:
             for term in search_terms:
                 for post in search(handle, term, limit=20, min_id=wm):
-                    try:
-                        newest = max(newest, int(post.post_id))
-                    except (ValueError, TypeError):
-                        pass
+                    n = _post_id_int(post.post_id)
+                    if n:
+                        newest = max(newest, n)
                     if post.post_id in seen_ids:
                         continue
                     seen_ids.add(post.post_id)

@@ -10,7 +10,7 @@ def test_generate_and_list_digests(monkeypatch, tmp_path):
     import radar.brand.digests as D; importlib.reload(D)
     # Reload brand_api FIRST so the app.include_router picks up the reloaded current_user
     import radar.brand.api as brand_api; importlib.reload(brand_api)
-    import radar.api as api; importlib.reload(api)
+    import radar.app as api; importlib.reload(api)
     from fastapi.testclient import TestClient
     from radar.models import Brand, User
     from radar.brand.models import BrandStory, BrandStoryPoint

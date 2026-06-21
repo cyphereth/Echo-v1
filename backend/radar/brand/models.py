@@ -158,7 +158,7 @@ class BrandStory(Base):
     brand_id:      Mapped[int]      = mapped_column(ForeignKey("brands.id"), nullable=False)
     title:         Mapped[str]      = mapped_column(Text, default="")
     status:        Mapped[str]      = mapped_column(Text, default="active")   # active | dormant
-    is_anomaly:    Mapped[bool]     = mapped_column(Boolean, default=False)
+    is_anomaly:    Mapped[bool]     = mapped_column(Boolean, default=False, server_default="0")
     post_count:    Mapped[int]      = mapped_column(Integer, default=0)
     summary:       Mapped[str]      = mapped_column(Text, default="")
     first_seen_at: Mapped[datetime] = mapped_column(nullable=False)

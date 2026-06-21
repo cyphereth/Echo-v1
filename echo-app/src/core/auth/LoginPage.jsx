@@ -1,6 +1,12 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import * as api from '../../services/api';
+import { request, setToken } from '../api/client';
+
+const api = {
+  login:    (email, password) => request('/auth/login',    { method: 'POST', body: JSON.stringify({ email, password }) }),
+  register: (email, password) => request('/auth/register', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  setToken,
+};
 
 export default function LoginPage() {
   const navigate = useNavigate();

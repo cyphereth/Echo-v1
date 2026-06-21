@@ -1,23 +1,23 @@
 import { useEffect, useState } from 'react';
-import * as api from '../../services/api';
-import styles from './digests.module.css';
+import * as api from '../api';
+import styles from '../../../components/app/digests.module.css';
 
-export function DigestsScreen({ scope }) {
+export function BrandDigestsScreen({ brandId }) {
   const [items, setItems] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
   const load = () => {
-    if (!scope?.id) { setItems([]); return; }
-    api.getDigestsScoped(scope).then(setItems).catch(() => setItems([]));
+    if (!brandId) { setItems([]); return; }
+    api.getBrandDigests(brandId).then(setItems).catch(() => setItems([]));
   };
-  useEffect(load, [scope?.kind, scope?.id]);
+  useEffect(load, [brandId]);
 
   const generate = async () => {
-    if (!scope?.id) return;
+    if (!brandId) return;
     setBusy(true); setError(null);
     try {
-      await api.createDigestScoped(scope);
+      await api.createBrandDigest(brandId);
       load();
     } catch (e) {
       setError(String(e.message || e));

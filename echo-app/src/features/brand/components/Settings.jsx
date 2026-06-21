@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Icon } from '../../core/components/icons';
-import * as api from '../../services/api';
-import styles from './settings.module.css';
+import { Icon } from '../../../core/components/icons';
+import * as api from '../api';
+import styles from '../../../components/app/settings.module.css';
 
 // ── Tag input component ──────────────────────────────────────────────────────
 
@@ -105,11 +105,7 @@ function SaveBar({ onSave, onCollect, saved, saving, collecting, showCollect }) 
   return (
     <div className={styles.saveBar}>
       {showCollect && (
-        <button
-          className={styles.collectBtn}
-          onClick={onCollect}
-          disabled={collecting}
-        >
+        <button className={styles.collectBtn} onClick={onCollect} disabled={collecting}>
           {collecting ? '⏳ Сбор…' : '⚡ Собрать данные'}
         </button>
       )}
@@ -126,32 +122,22 @@ function SaveBar({ onSave, onCollect, saved, saving, collecting, showCollect }) 
 export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting, onOpenWizard }) {
   const [tab, setTab] = useState('brand');
 
-  // Brand fields
   const [brandName,      setBrandName]      = useState('');
   const [brandNiche,     setBrandNiche]     = useState('');
   const [brandInstagram, setBrandInstagram] = useState('');
   const [brandTiktok,    setBrandTiktok]    = useState('');
   const [brandWebsite,   setBrandWebsite]   = useState('');
 
-  // Keywords
   const [keywords,   setKeywords]   = useState([]);
   const [hashtags,   setHashtags]   = useState([]);
   const [exclusions, setExclusions] = useState([]);
-
-  // Competitors
   const [competitors, setCompetitors] = useState([]);
-
-  // Telegram channels
   const [tgChannels, setTgChannels] = useState([]);
-
-  // Niche search terms
   const [niche, setNiche] = useState([]);
 
-  // Platforms
   const [platforms, setPlatforms] = useState({ instagram: true, tiktok: true, telegram: false });
   function togglePlatform(p) { setPlatforms(prev => ({ ...prev, [p]: !prev[p] })); }
 
-  // Auto-collect (background scheduler)
   const [autoCollect, setAutoCollect] = useState(false);
   async function toggleAutoCollect() {
     if (!brand) return;
@@ -160,19 +146,17 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting, onO
     try {
       await api.setAutoCollect(brand.id, next);
       onBrandSaved?.({ ...brand, auto_collect: next });
-    } catch (e) {
-      setAutoCollect(!next); // revert on failure
+    } catch {
+      setAutoCollect(!next);
     }
   }
 
-  // Voice
   const [voice, setVoice] = useState('friendly');
   const [toneExample, setToneExample] = useState('Привет! Очень жаль, что так вышло. Напишите нам в директ — разберёмся и всё исправим 🙏');
 
   const [saved,  setSaved]  = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Sync from brand prop when it loads
   useEffect(() => {
     if (!brand) return;
     setBrandName(brand.name ?? '');
@@ -220,7 +204,6 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting, onO
 
   return (
     <div className={styles.page}>
-      {/* Side nav */}
       <nav className={styles.sidenav}>
         {NAV.map(n => (
           <button key={n.key} className={styles.sidenavItem}
@@ -232,7 +215,6 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting, onO
         ))}
       </nav>
 
-      {/* Content */}
       <div className={styles.content}>
 
         {tab === 'brand' && (
@@ -302,65 +284,25 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting, onO
             </div>
             <Section
               title="Ключевые слова"
-              sub="Echo будет искать посты и комментарии, содержащие эти слова. Добавьте названия бренда, продуктов, слоганы — всё что люди могут написать о вас.">
-              <TagInput
-                tags={keywords}
-                onChange={setKeywords}
-                placeholder="Введите слово или фразу, нажмите Enter"
-                color="var(--brand-bright)"
-              />
+              sub="Echo будет искать посты и комментарии, содержащие эти слова.">
+              <TagInput tags={keywords} onChange={setKeywords}
+                placeholder="Введите слово или фразу, нажмите Enter" color="var(--brand-bright)" />
             </Section>
 
-            <Section
-              title="Хэштеги"
-              sub="Поиск по хэштегам в Instagram и TikTok. Вводите без # — добавим автоматически.">
-              <TagInput
-                tags={hashtags}
-                onChange={setHashtags}
-                placeholder="пицца, доставкаеды..."
-                color="var(--ig)"
-                prefix="#"
-              />
+            <Section title="Хэштеги" sub="Поиск по хэштегам в Instagram и TikTok.">
+              <TagInput tags={hashtags} onChange={setHashtags}
+                placeholder="пицца, доставкаеды..." color="var(--ig)" prefix="#" />
             </Section>
 
-            <Section
-              title="Исключения"
-              sub="Слова-фильтры — посты с этими словами не попадут в ленту. Удобно чтобы отсечь нерелевантные упоминания и рецепты.">
-              <TagInput
-                tags={exclusions}
-                onChange={setExclusions}
-                placeholder="рецепт, сделай сам..."
-                color="var(--neg)"
-              />
+            <Section title="Исключения" sub="Слова-фильтры — посты с этими словами не попадут в ленту.">
+              <TagInput tags={exclusions} onChange={setExclusions}
+                placeholder="рецепт, сделай сам..." color="var(--neg)" />
             </Section>
 
-            <Section
-              title="Ниша"
-              sub="Темы без упоминания бренда — Echo найдёт обсуждения вашей ниши, где можно зайти нативно. Попадут в ленту «Ниша».">
-              <TagInput
-                tags={niche}
-                onChange={setNiche}
-                placeholder="доставка пиццы москва..."
-                color="var(--lane-niche)"
-              />
+            <Section title="Ниша" sub="Темы без упоминания бренда — попадут в ленту «Ниша».">
+              <TagInput tags={niche} onChange={setNiche}
+                placeholder="доставка пиццы москва..." color="var(--lane-niche)" />
             </Section>
-
-            <div style={{ background: 'var(--surface-2)', border: '1px solid var(--line-2)', borderRadius: 'var(--r-lg)', padding: '14px 18px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <Icon name="sparkles" size={14} color="var(--brand-bright)" />
-                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-1)' }}>Подсказка AI</span>
-              </div>
-              <p style={{ fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.6 }}>
-                Не знаете с чего начать? Введите ссылку на ваш сайт или аккаунт — Echo предложит ключевые слова автоматически.
-              </p>
-              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                <input className={styles.input} style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 13 }}
-                  placeholder="https://papapizza.ru или @papapizza_ru" />
-                <button className={styles.addBtn}>
-                  <Icon name="sparkles" size={13} />Разобрать
-                </button>
-              </div>
-            </div>
 
             {saveBar(true)}
           </>
@@ -368,31 +310,19 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting, onO
 
         {tab === 'competitors' && (
           <>
-            <Section
-              title="Конкуренты"
-              sub="Echo будет искать негативные упоминания этих брендов — повод ответить от бренда и помочь недовольной аудитории конкурентов.">
-              <TagInput
-                tags={competitors}
-                onChange={setCompetitors}
-                placeholder="Название конкурента, нажмите Enter"
-                color="var(--lane-competitor)"
-              />
+            <Section title="Конкуренты" sub="Echo будет искать негативные упоминания этих брендов.">
+              <TagInput tags={competitors} onChange={setCompetitors}
+                placeholder="Название конкурента, нажмите Enter" color="var(--lane-competitor)" />
               {competitors.length > 0 && (
                 <div style={{ marginTop: 16, padding: '12px 14px', background: 'var(--surface-2)', borderRadius: 'var(--r-md)', fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.6 }}>
-                  💡 Echo ищет негативные посты о <strong style={{ color: 'var(--fg-2)' }}>{competitors.join(', ')}</strong> и выводит их в ленту «Конкуренты». Вы можете ответить на комментарии аудитории и предложить свой продукт как альтернативу.
+                  💡 Echo ищет негативные посты о <strong style={{ color: 'var(--fg-2)' }}>{competitors.join(', ')}</strong>.
                 </div>
               )}
             </Section>
 
-            <Section
-              title="Telegram-каналы"
-              sub="Каналы, которые Echo будет мониторить в Telegram. Вводите @handle через Enter или запятую.">
-              <TagInput
-                tags={tgChannels}
-                onChange={setTgChannels}
-                placeholder="@yakitoriya, @sushiwok_official"
-                color="var(--brand-bright)"
-              />
+            <Section title="Telegram-каналы" sub="Каналы, которые Echo будет мониторить в Telegram.">
+              <TagInput tags={tgChannels} onChange={setTgChannels}
+                placeholder="@yakitoriya, @sushiwok_official" color="var(--brand-bright)" />
             </Section>
 
             {saveBar(false)}
@@ -401,7 +331,7 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting, onO
 
         {tab === 'platforms' && (
           <>
-            <Section title="Платформы" sub="Выберите где Echo будет мониторить упоминания. Можно подключить несколько.">
+            <Section title="Платформы" sub="Выберите где Echo будет мониторить упоминания.">
               <div className={styles.platforms}>
                 <PlatformToggle name="Instagram" icon="instagram" note="Reels, посты, комментарии"
                   on={platforms.instagram} onToggle={() => togglePlatform('instagram')} />
@@ -413,12 +343,12 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting, onO
             </Section>
 
             {brand && (
-              <Section title="Автосбор" sub="Echo сам собирает новые упоминания в фоне — адаптивный интервал, чаще когда тема набирает обороты. Изменения применяются сразу.">
+              <Section title="Автосбор" sub="Echo сам собирает новые упоминания в фоне.">
                 <div className={styles.platforms}>
                   <PlatformToggle
                     name="Автоматический сбор"
                     icon="zap"
-                    note={autoCollect ? 'Включён — Echo мониторит в фоне' : 'Выключен — собирайте вручную кнопкой «Собрать данные»'}
+                    note={autoCollect ? 'Включён — Echo мониторит в фоне' : 'Выключен — собирайте вручную'}
                     on={autoCollect}
                     onToggle={toggleAutoCollect}
                   />
@@ -431,7 +361,7 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting, onO
 
         {tab === 'voice' && (
           <>
-            <Section title="Голос бренда" sub="Как звучат ответы от вашего имени. AI учитывает это при генерации черновиков.">
+            <Section title="Голос бренда" sub="Как звучат ответы от вашего имени.">
               <div className={styles.voicePresets}>
                 {VOICE_PRESETS.map(p => (
                   <button key={p.key} className={styles.voiceCard}
@@ -444,7 +374,7 @@ export function SettingsScreen({ brand, onBrandSaved, onCollect, collecting, onO
               </div>
             </Section>
 
-            <Section title="Пример голоса" sub="Напишите как ваш бренд отвечает на негативный комментарий. AI запомнит стиль.">
+            <Section title="Пример голоса" sub="Напишите как ваш бренд отвечает на негативный комментарий.">
               <div className={styles.field}>
                 <label className={styles.label}>Пример ответа на негатив</label>
                 <textarea className={styles.textarea} value={toneExample}

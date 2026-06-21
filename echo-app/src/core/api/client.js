@@ -1,5 +1,5 @@
 // Low-level HTTP client — token storage + fetch wrapper.
-// Domain-specific API call functions live in services/api.js.
+// Domain-specific API call functions live in features/news/api.js and features/brand/api.js.
 
 const TOKEN_KEY = 'echo_token';
 export const getToken   = () => localStorage.getItem(TOKEN_KEY);

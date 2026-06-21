@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Icon } from '../../core/components/icons';
-import * as api from '../../services/api';
-import styles from './cityexplorer.module.css';
+import { Icon } from '../../../core/components/icons';
+import * as api from '../api';
+import styles from '../../../components/app/cityexplorer.module.css';
 
 export function CityExplorerScreen() {
   const [city, setCity]         = useState('');

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Icon } from '../../core/components/icons';
-import * as api from '../../services/api';
-import styles from './analytics.module.css';
+import { Icon } from '../../../core/components/icons';
+import * as api from '../api';
+import styles from '../../../components/app/analytics.module.css';
 
 const STAT_COLOR = {
   total: 'var(--fg-1)', neg: 'var(--neg)', sent: 'var(--calm)', hot: 'var(--rising)',
@@ -89,15 +89,11 @@ export function AnalyticsScreen({ brandId }) {
     return () => { alive = false; };
   }, [brandId]);
 
-  // Real data only — backend always returns stats/series; competitors/platforms
-  // may be empty until enough mentions are collected.
   const stats     = data?.stats ?? [];
   const series    = data?.series ?? { days: [], neg: [], pos: [], neu: [] };
   const platforms = data?.platforms ?? [];
   const competitors = data?.competitors ?? [];
-  const topVideos = data?.top_negative?.length
-    ? data.top_negative
-    : [];
+  const topVideos = data?.top_negative?.length ? data.top_negative : [];
 
   return (
     <div className={styles.page}>

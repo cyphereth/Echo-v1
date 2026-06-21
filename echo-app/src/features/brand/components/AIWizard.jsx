@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import * as api from '../../services/api';
-import styles from './aiwizard.module.css';
+import * as api from '../api';
+import styles from '../../../components/app/aiwizard.module.css';
 
 /**
  * AIWizard — 2-step brand setup wizard.
@@ -83,7 +83,6 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
       if (data.category_terms?.length) setCategoryTerms(data.category_terms);
       if (data.audience_terms?.length) setAudienceTerms(data.audience_terms);
       if (typeof data.followers === 'number') setFollowers(data.followers);
-      // auto local mode: small account + a city
       if (data.geo && data.followers > 0 && data.followers <= 1000) setLocalMode(true);
       setStep(1);
     } catch (e) {
@@ -181,22 +180,15 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
         <>
           <div className={styles.section}>
             <div className={styles.sectionLabel}>TikTok аккаунт</div>
-            <input
-              className={styles.nameInput}
-              value={tiktokUrl}
+            <input className={styles.nameInput} value={tiktokUrl}
               onChange={e => setTiktokUrl(e.target.value)}
-              placeholder="@ozon или ссылка"
-              autoFocus
-            />
+              placeholder="@ozon или ссылка" autoFocus />
           </div>
           <div className={styles.section}>
             <div className={styles.sectionLabel}>Instagram аккаунт</div>
-            <input
-              className={styles.nameInput}
-              value={instagramUrl}
+            <input className={styles.nameInput} value={instagramUrl}
               onChange={e => setInstagramUrl(e.target.value)}
-              placeholder="@ozon.ru или ссылка"
-            />
+              placeholder="@ozon.ru или ссылка" />
           </div>
 
           {toast && <div className={styles.toast}>{toast}</div>}
@@ -209,11 +201,8 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
             <button className={styles.cancelBtn} onClick={() => setStep(1)}>
               Заполнить вручную по названию →
             </button>
-            <button
-              className={styles.nextBtn}
-              onClick={handleScan}
-              disabled={scanning || (!tiktokUrl.trim() && !instagramUrl.trim())}
-            >
+            <button className={styles.nextBtn} onClick={handleScan}
+              disabled={scanning || (!tiktokUrl.trim() && !instagramUrl.trim())}>
               {scanning ? <><span className={styles.spinner} />Анализирую аккаунты…</> : 'Анализировать аккаунты'}
             </button>
           </div>
@@ -223,19 +212,12 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
       {step === 1 && (
         <>
           <div className={styles.nameRow}>
-            <input
-              className={styles.nameInput}
-              value={name}
+            <input className={styles.nameInput} value={name}
               onChange={e => setName(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleSuggest()}
-              placeholder="Название бренда (например: Ozon)"
-              autoFocus
-            />
-            <button
-              className={styles.suggestBtn}
-              onClick={handleSuggest}
-              disabled={!name.trim() || suggesting}
-            >
+              placeholder="Название бренда (например: Ozon)" autoFocus />
+            <button className={styles.suggestBtn} onClick={handleSuggest}
+              disabled={!name.trim() || suggesting}>
               {suggesting ? <><span className={styles.spinner} />Подбираю…</> : 'Подобрать'}
             </button>
           </div>
@@ -249,22 +231,15 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
 
           <div className={styles.section}>
             <div className={styles.sectionLabel}>🧬 ДНК бренда (сфера)</div>
-            <textarea
-              className={styles.nameInput}
+            <textarea className={styles.nameInput}
               style={{ resize: 'vertical', minHeight: 48, fontFamily: 'var(--font-sans)' }}
-              value={sphere}
-              onChange={e => setSphere(e.target.value)}
-              placeholder="Сфера бренда и интересы аудитории (определяется AI)"
-            />
+              value={sphere} onChange={e => setSphere(e.target.value)}
+              placeholder="Сфера бренда и интересы аудитории (определяется AI)" />
           </div>
           <div className={styles.section}>
             <div className={styles.sectionLabel}>📍 Город (локальный бизнес)</div>
-            <input
-              className={styles.nameInput}
-              value={geo}
-              onChange={e => setGeo(e.target.value)}
-              placeholder="Напр. Москва — пусто для федерального бренда"
-            />
+            <input className={styles.nameInput} value={geo} onChange={e => setGeo(e.target.value)}
+              placeholder="Напр. Москва — пусто для федерального бренда" />
           </div>
           {categoryTerms.length > 0 && (
             <TagGroup label="Категории конкурентов" list={categoryTerms} setList={setCategoryTerms} />
@@ -275,7 +250,7 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
               Локальный бизнес — широкая выдача по городу
             </label>
             <div style={{ fontSize: 11, color: 'var(--fg-4)' }}>
-              Показывать весь городской контент аудитории (для салона — женский/лайфстайл). Авто для аккаунтов ≤1000 подписчиков с городом.
+              Показывать весь городской контент аудитории. Авто для аккаунтов ≤1000 подписчиков с городом.
             </div>
           </div>
           {localMode && audienceTerms.length > 0 && (
@@ -314,11 +289,8 @@ export function AIWizard({ mode, brand, onSaved, onClose }) {
             {mode === 'edit'
               ? <button className={styles.cancelBtn} onClick={onClose}>Отмена</button>
               : <button className={styles.cancelBtn} onClick={() => setStep(0)}>← К аккаунтам</button>}
-            <button
-              className={styles.nextBtn}
-              onClick={handlePreview}
-              disabled={previewing || keywords.length === 0}
-            >
+            <button className={styles.nextBtn} onClick={handlePreview}
+              disabled={previewing || keywords.length === 0}>
               {previewing ? <><span className={styles.spinner} />Загружаю…</> : 'Предпросмотр постов →'}
             </button>
           </div>

@@ -1,17 +1,13 @@
 import { useState, useEffect } from 'react';
-import { Icon } from '../../core/components/icons';
-import { request } from '../../core/api/client';
-import styles from './detail.module.css';
+import { Icon } from '../../../core/components/icons';
+import * as api from '../api';
+import styles from '../../../components/app/detail.module.css';
 
-// Brand mention API calls used by this shared Detail panel
-const api = {
-  getComments:       (mentionId, refresh = false) =>
-    request(`/mentions/${mentionId}/comments${refresh ? '?refresh=1' : ''}`),
-  commentAction:     (commentId, action, draft = null) =>
-    request(`/comments/${commentId}/action`, { method: 'POST', body: JSON.stringify({ action, draft }) }),
-  regenerateComment: (commentId) =>
-    request(`/comments/${commentId}/regenerate`, { method: 'POST' }),
-};
+function fmtNum(n) {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+  if (n >= 1000)    return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
 
 // Lane display helpers (inlined — removes dependency on data/mock)
 function getLaneColor(lane) {
@@ -23,12 +19,6 @@ function getLaneLabel(lane, competitor) {
   if (lane === 'competitor') return competitor ? `vs ${competitor}` : 'Конкурент';
   if (lane === 'niche')      return 'Ниша';
   return 'Мой бренд';
-}
-
-function fmtNum(n) {
-  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
-  if (n >= 1000)    return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
 }
 
 const THUMB_EMOJI = { neg: '😡', competitor: '⚔️', niche: '💬', neutral: '📢' };
@@ -46,14 +36,8 @@ function CommentCard({ c, onApprove, onSkip, onRegenerate }) {
   const [regenerating, setRegenerating] = useState(false);
   const hasSuggestion = !!(c.suggestedReply || c.pendingReply);
 
-  function approve() {
-    onApprove(c.id, draft);
-    setDone(true);
-  }
-  function skip() {
-    onSkip(c.id);
-    setDone(true);
-  }
+  function approve() { onApprove(c.id, draft); setDone(true); }
+  function skip()    { onSkip(c.id); setDone(true); }
   async function regenerate() {
     if (!onRegenerate) return;
     setRegenerating(true);
@@ -66,9 +50,7 @@ function CommentCard({ c, onApprove, onSkip, onRegenerate }) {
     <div className={styles.comment} data-done={done ? '1' : '0'}>
       <div className={styles.commentBody}>
         <div className={styles.commentMeta}>
-          <div className={styles.commentAvatar}>
-            {c.author[0].toUpperCase()}
-          </div>
+          <div className={styles.commentAvatar}>{c.author[0].toUpperCase()}</div>
           <span className={styles.commentAuthor}>{c.author}</span>
           <span className={styles.commentFollowers}>{fmtNum(c.followers)} подп.</span>
           {c.is_opportunity && (
@@ -91,12 +73,8 @@ function CommentCard({ c, onApprove, onSkip, onRegenerate }) {
             AI-черновик
           </div>
           {editing ? (
-            <textarea
-              className={styles.replyText}
-              value={draft}
-              onChange={e => setDraft(e.target.value)}
-              autoFocus
-            />
+            <textarea className={styles.replyText} value={draft}
+              onChange={e => setDraft(e.target.value)} autoFocus />
           ) : (
             <p style={{ fontSize: 13, color: regenerating ? 'var(--fg-3)' : 'var(--fg-1)', lineHeight: 1.55, cursor: 'text', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
               onClick={() => setEditing(true)}>
@@ -135,7 +113,6 @@ export function DetailPanel({ item }) {
   const laneColor = getLaneColor(item.lane);
   const pendingCount = comments.filter(c => (c.suggestedReply || c.pendingReply) && c.status === 'pending').length;
 
-  // Load real comments from the backend for real mentions (numeric id).
   useEffect(() => {
     setComments(item.comments);
     if (!isReal) return;
@@ -182,7 +159,6 @@ export function DetailPanel({ item }) {
 
   return (
     <div className={styles.panel}>
-      {/* Context */}
       <div className={styles.context}>
         <div className={styles.contextTop}>
           <div className={styles.thumbnail} style={{ background: thumbBg }}>
@@ -232,7 +208,6 @@ export function DetailPanel({ item }) {
         )}
       </div>
 
-      {/* Comments header */}
       <div className={styles.commentsHeader}>
         <span className={styles.commentsTitle}>
           Комментарии
@@ -250,7 +225,6 @@ export function DetailPanel({ item }) {
         </div>
       </div>
 
-      {/* Comments list */}
       {loadingComments && (
         <div style={{ padding: '12px 16px', fontSize: 12, color: 'var(--fg-4)' }}>
           Загружаю комментарии…
@@ -263,7 +237,6 @@ export function DetailPanel({ item }) {
         ))}
       </div>
 
-      {/* Bulk bar */}
       {pendingCount > 0 && (
         <div className={styles.bulkBar}>
           <span className={styles.bulkText}>

@@ -1,8 +1,19 @@
 import { useState, useEffect } from 'react';
-import { Icon } from '../../core/components/icons';
-import { getLaneColor, getLaneLabel } from '../../data/mock';
-import * as api from '../../services/api';
-import styles from './queue.module.css';
+import { Icon } from '../../../core/components/icons';
+import * as api from '../api';
+import styles from '../../../components/app/queue.module.css';
+
+// Lane display helpers (inlined — removes dependency on data/mock)
+function getLaneColor(lane) {
+  if (lane === 'competitor') return 'var(--warn)';
+  if (lane === 'niche')      return 'var(--info, #6c8ebf)';
+  return 'var(--brand)';
+}
+function getLaneLabel(lane, competitor) {
+  if (lane === 'competitor') return competitor ? `vs ${competitor}` : 'Конкурент';
+  if (lane === 'niche')      return 'Ниша';
+  return 'Мой бренд';
+}
 
 function buildOppGroups(opps) {
   const byMention = {};
@@ -154,7 +165,6 @@ export function QueueScreen({ items, brandId }) {
   const [states, setStates]                 = useState({});
   const [opps, setOpps]                     = useState([]);
 
-  // Real competitor/niche opportunity comments (separate from synthetic mention drafts).
   useEffect(() => {
     if (typeof brandId !== 'number') return;
     let alive = true;
@@ -167,7 +177,6 @@ export function QueueScreen({ items, brandId }) {
   const oppGroups = buildOppGroups(opps);
   const raw = [...oppGroups, ...buildQueue(items ?? [])];
 
-  // Opportunity comments are real DB rows (numeric id) — persist the action.
   const oppIds = new Set(opps.map(o => o.id));
   const onApprove = (id, draft) => {
     setStates(s => ({ ...s, [id]: 'approved' }));
@@ -229,7 +238,6 @@ export function QueueScreen({ items, brandId }) {
           пропущено
         </span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
-          {/* Sort toggle */}
           <div style={{ display: 'flex', background: 'var(--surface-2)', border: '1px solid var(--line-2)', borderRadius: 'var(--r-md)', padding: 3, gap: 2 }}>
             {SORT_OPTIONS.map(o => (
               <button key={o.key}
@@ -248,7 +256,6 @@ export function QueueScreen({ items, brandId }) {
             ))}
           </div>
           <div className={styles.sep} />
-          {/* Lane filter */}
           <div className={styles.filters}>
             {LANE_FILTERS.map(f => (
               <button key={f} className={styles.chip} data-active={laneFilter === f ? '1' : '0'}

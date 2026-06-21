@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import AppPage from './pages/AppPage';
+import Shell from './app/Shell';
 import LoginPage from './core/auth/LoginPage';
 import RequireAuth from './core/auth/RequireAuth';
 
@@ -8,7 +8,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/app" element={<RequireAuth><AppPage /></RequireAuth>} />
+        <Route path="/app" element={<RequireAuth><Shell /></RequireAuth>} />
         <Route path="*" element={<Navigate to="/app" replace />} />
       </Routes>
     </BrowserRouter>

@@ -19,6 +19,9 @@ export const intelApi = {
   directions:(window = '24h') => INTEL_USE_MOCK ? mockApi.directions() : passthrough('directions', { window }),
   direction: (key, window)    => INTEL_USE_MOCK ? mockApi.direction(key) : request(`/intel/directions/${key}?window=${window || '24h'}`),
   search:    (q)              => INTEL_USE_MOCK ? mockApi.search(q) : passthrough('search', { q }),
+  sources:   (params)         => passthrough('sources', params),
+  addSource: (body)           => request('/intel/sources', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }),
+  deleteSource: (id)          => request('/intel/sources/' + id, { method: 'DELETE' }),
 };
 
 // ── Витринные форматтеры ────────────────────────────────────────────────────
@@ -33,6 +36,8 @@ export const CREDIBILITY = {
 export const SIDE = {
   ru: { label: 'РФ',   color: '#FF7A87' },
   ua: { label: 'УКР',  color: '#57D2E2' },
+  by: { label: 'БЛР',  color: '#9AA7B5' },
+  mx: { label: 'MX',   color: '#9AA7B5' },
 };
 
 export function spikeLevel(pct) {

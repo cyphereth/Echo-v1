@@ -9,8 +9,9 @@ Chat probes additionally apply a hard noise filter (chat_message_relevant) befor
 from __future__ import annotations
 
 import logging
+import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -25,6 +26,23 @@ log = logging.getLogger(__name__)
 # ── Text constants ─────────────────────────────────────────────────────────────
 
 MIN_TEXT_LEN = 20  # posts shorter than this after stripping #-tokens are noise
+
+# Time window: collect only RECENT posts. On the FIRST collection a probe has no
+# watermark, so without a cutoff the loop would paginate the channel's entire history
+# (connection drops + unmanageable clustering). Channels return newest-first, so once
+# we hit a post older than the window we stop. Live intelligence wants fresh news only.
+INTEL_COLLECT_WINDOW_HOURS = int(os.getenv("INTEL_COLLECT_WINDOW_HOURS", "36"))
+
+# Hard safety cap on posts per source per tick (guards a hyper-active channel that
+# posts thousands within the time window). Time window is the primary control.
+MAX_POSTS_PER_SOURCE = int(os.getenv("MAX_POSTS_PER_SOURCE", "300"))
+
+
+def _aware(dt):
+    """Return dt as a tz-aware UTC datetime (treat naive as UTC)."""
+    if dt is None:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 # ── Utilities ──────────────────────────────────────────────────────────────────
@@ -136,12 +154,18 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
             min_id = int(wm) if wm.isdigit() else 0
 
             posts = provider.search_chat(handle, term="", limit=50, min_id=min_id)
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=INTEL_COLLECT_WINDOW_HOURS)
 
             for post in (posts or []):
                 if new_watermark is None:
                     new_watermark = post.post_id
                 if probe.watermark and post.post_id == probe.watermark:
                     break
+
+                # Time window — skip messages older than the window.
+                created = _aware(post.created_at)
+                if created is not None and created < cutoff:
+                    continue
 
                 text = post.text or ""
                 author = post.author or ""
@@ -176,6 +200,8 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
             handle = _clean_handle(probe.query)
             cursor = None
             found_watermark = False
+            seen = 0
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=INTEL_COLLECT_WINDOW_HOURS)
 
             while not found_watermark:
                 page = provider.search(handle, probe.kind, cursor)
@@ -187,6 +213,17 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                         new_watermark = post.post_id
                     # Stop if we've caught up to the last-seen watermark.
                     if probe.watermark and post.post_id == probe.watermark:
+                        found_watermark = True
+                        break
+                    # Time window — posts are newest-first, so once one is older than the
+                    # window, everything after it is too. Stop. (Primary volume control.)
+                    created = _aware(post.created_at)
+                    if created is not None and created < cutoff:
+                        found_watermark = True
+                        break
+                    # Hard safety cap (guards a hyper-active channel within the window).
+                    seen += 1
+                    if seen > MAX_POSTS_PER_SOURCE:
                         found_watermark = True
                         break
 

@@ -23,7 +23,7 @@ def test_run_intel_collect_collects_due_channel():
     s = _sess(); seed.ensure_default_directions(s)
     past = datetime.now(timezone.utc) - timedelta(hours=1)
     s.add(IntelProbe(platform="telegram", kind="channel", query="@rybar", side="ru", next_run_at=past)); s.commit()
-    posts=[SimpleNamespace(post_id="@rybar/1", author="@rybar", text="бои под Авдеевкой",
+    posts=[SimpleNamespace(post_id="@rybar/1", author="@rybar", text="бои под Авдеевкой нарастают сегодня",
                            followers=0, created_at=datetime.now(timezone.utc), hashtags=[], likes=0)]
     prov=SimpleNamespace(search=lambda q,k,c: SimpleNamespace(posts=posts, cursor=None))
     passes.run_intel_collect(s, prov)

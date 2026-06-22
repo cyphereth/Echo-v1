@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 
 # ── Text constants ─────────────────────────────────────────────────────────────
 
-MIN_TEXT_LEN = 10  # posts shorter than this after stripping #-tokens are noise
+MIN_TEXT_LEN = 20  # posts shorter than this after stripping #-tokens are noise
 
 
 # ── Utilities ──────────────────────────────────────────────────────────────────

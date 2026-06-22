@@ -28,3 +28,7 @@ def run_intel_collect(session: Session, tg_provider) -> None:
         except Exception:
             log.exception("intel source %s failed", probe.id)
             session.rollback()
+            # Advance next_run_at even on failure so a broken source doesn't
+            # stay "due" forever and consume a cap slot every tick.
+            probe.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=probe.interval_sec or 3600)
+            session.commit()

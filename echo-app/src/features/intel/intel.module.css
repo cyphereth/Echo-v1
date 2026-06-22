@@ -255,6 +255,9 @@
   border: 1px solid rgba(43,179,199,.10);
   border-radius: 6px;
   overflow: hidden;
+  /* Don't let a long section (e.g. 94 sources) be squashed to fit the workspace
+     and clipped by overflow:hidden — keep full height so .workspace scrolls it. */
+  flex-shrink: 0;
 }
 .sectionHead {
   display: flex;

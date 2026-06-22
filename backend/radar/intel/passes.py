@@ -48,5 +48,7 @@ def run_intel_tick(session, tg_provider, web_provider=None, embed=None) -> None:
     for did in dir_ids:
         try:
             stories.update_stories(session, did, embed=embed)
+            session.commit()
         except Exception:
             log.exception("intel clustering failed for direction %s", did)
+            session.rollback()

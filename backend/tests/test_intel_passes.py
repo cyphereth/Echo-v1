@@ -45,3 +45,57 @@ def test_intel_tick_collects_and_clusters(monkeypatch):
     passes.run_intel_tick(s, tg_provider=prov, embed=lambda t:[float(len(t))])
     assert s.query(IntelMention).count() == 3
     assert s.query(IntelStory).filter(IntelStory.direction_id.isnot(None)).count() >= 1
+
+
+def test_intel_tick_stories_persist_across_session_boundary(tmp_path):
+    """Cross-session persistence test: stories must be committed, not just flushed.
+
+    Uses a temp-file SQLite DB (not :memory:) so a second session truly sees
+    only committed data. Before the fix, IntelStory count was 0 in session B.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from radar.models import Base
+    import radar.intel.models  # noqa: F401 — registers IntelDirection etc.
+    from radar.intel import seed, passes
+    from radar.intel.models import IntelProbe, IntelStory, IntelDirection
+    from datetime import datetime, timezone, timedelta
+    from types import SimpleNamespace
+
+    db_path = tmp_path / "t.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+    Base.metadata.create_all(engine)
+
+    posts = [
+        SimpleNamespace(
+            post_id=f"@r/{i}",
+            author=f"@a{i}",
+            text="удар по складу под Суджей детонация",
+            followers=0,
+            created_at=datetime.now(timezone.utc),
+            hashtags=[],
+            likes=5,
+        )
+        for i in range(3)
+    ]
+    prov = SimpleNamespace(search=lambda q, k, c: SimpleNamespace(posts=posts, cursor=None))
+
+    # Session A: seed, run tick, then CLOSE
+    with Session(engine) as s:
+        seed.ensure_default_directions(s)
+        s.add(IntelProbe(
+            platform="telegram", kind="channel", query="@r", side="ru",
+            next_run_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        ))
+        s.commit()
+        passes.run_intel_tick(s, tg_provider=prov, embed=lambda t: [float(len(t))])
+    # session A is now closed — any uncommitted data would be lost
+
+    # Session B: open a brand-new session on the same DB file
+    with Session(engine) as s2:
+        story_count = s2.query(IntelStory).filter(IntelStory.direction_id.isnot(None)).count()
+
+    assert story_count >= 1, (
+        f"Expected at least 1 persisted IntelStory across session boundary, got {story_count}. "
+        "run_intel_tick must commit after update_stories."
+    )

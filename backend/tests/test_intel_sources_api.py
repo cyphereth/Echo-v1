@@ -88,3 +88,28 @@ def test_sources_list_add_delete(tmp_path, monkeypatch):
         # 9. DELETE non-existent → 404
         r = c.delete(f"/intel/sources/{new_id}", headers=h)
         assert r.status_code == 404
+
+
+def test_sources_list_ok_with_string_watermark(tmp_path, monkeypatch):
+    """Regression: watermark is a post_id STRING, not a datetime. The list
+    endpoint must not call .isoformat() on it (was a 500 after first collect)."""
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/w.db")
+    from fastapi.testclient import TestClient
+    from radar.app import app
+    from radar.core.db import get_session
+    from radar.intel.models import IntelProbe
+    with TestClient(app) as c:
+        # set a string watermark on one source (simulates a completed collect)
+        with get_session() as s:
+            p = s.query(IntelProbe).first()
+            assert p is not None
+            p.watermark = "12345"   # post_id string
+            s.commit()
+        c.post("/auth/register", json={"email": "w@t.local", "password": "secret123"})
+        tok = c.post("/auth/login", json={"email": "w@t.local", "password": "secret123"}).json()["token"]
+        r = c.get("/intel/sources", headers={"Authorization": f"Bearer {tok}"})
+        assert r.status_code == 200
+        rows = r.json()
+        hit = [x for x in rows if x["handle"] == p.query][0]
+        assert hit["collected"] is True
+        assert hit["last_collected"] == "12345"

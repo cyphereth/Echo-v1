@@ -250,13 +250,15 @@ def intel_search(
 
 def _probe_dict(p: IntelProbe) -> dict:
     nra = p.next_run_at.isoformat() if p.next_run_at else None
-    wm = p.watermark.isoformat() if p.watermark else None
+    # watermark is the last-seen post_id (a STRING), not a timestamp — do NOT call
+    # .isoformat() on it. Surface a simple collected flag + the raw watermark.
     return {
         "id": p.id,
         "handle": p.query,
         "side": p.side,
         "kind": p.kind,
-        "last_collected": wm,
+        "collected": p.watermark is not None,
+        "last_collected": p.watermark,  # raw post_id string (None until first collect)
         "next_run_at": nra,
     }
 

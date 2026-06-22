@@ -168,7 +168,7 @@ export function NewsApp({ screen, setScreen }) {
         </div>
       ) : screen === 'sources' ? (
         <div className={styles.workspace}>
-          <NewsSourcesScreen topicId={activeTopicId} />
+          <NewsSourcesScreen topicId={activeTopicId} topicName={activeTopic?.name} />
         </div>
       ) : null}
     </div>

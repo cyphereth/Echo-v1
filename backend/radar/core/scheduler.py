@@ -11,7 +11,8 @@ INTERVAL_QUIET  = 7200
 INTERVAL_CHATS  = 1800   # group-chat monitoring cadence (discover + search)
 # TG is the PRIMARY, fastest news source — read topic channels often and on their
 # own worker, independent of (and ahead of) brand chats and the web pass.
-INTERVAL_TOPIC_TG = int(os.getenv("INTERVAL_TOPIC_TG", "600"))   # 10 min
+INTERVAL_TOPIC_TG   = int(os.getenv("INTERVAL_TOPIC_TG", "600"))   # 10 min
+INTERVAL_INTEL_TG   = int(os.getenv("INTERVAL_INTEL_TG", "600"))   # 10 min
 ENABLE_DIGESTS      = os.getenv("ENABLE_DIGESTS", "0") == "1"   # opt-in; default OFF (no surprise paid LLM calls)
 INTERVAL_DIGEST     = int(os.getenv("DIGEST_INTERVAL_SEC", "86400"))  # once per ~24h
 INTERVAL_WEB    = int(os.getenv("INTERVAL_WEB", "3600"))   # web-source cadence
@@ -80,6 +81,15 @@ def _run_topic_tg_pass(session, tg_provider):
     run_topic_tg_pass(session, tg_provider)
 
 
+def _run_intel_pass(session, tg_provider):
+    """Run one intel cycle: collect -> LLM retag -> cluster per touched direction.
+    Delegates to radar.intel.passes.run_intel_tick (lazy import, mirrors
+    _run_topic_tg_pass). News/brand passes are not touched.
+    """
+    from ..intel.passes import run_intel_tick
+    run_intel_tick(session, tg_provider)
+
+
 def _run_digest_pass(session):
     """Generate a daily digest for each auto-collect brand. Best-effort."""
     from ..brand.digests import build_brand_digest
@@ -121,8 +131,10 @@ class Scheduler:
         self._last_digest   = 0.0
         self._last_web      = 0.0
         self._last_topic_tg = 0.0
-        self._chats_thread  = None   # background worker for the chat-monitoring pass
-        self._topic_tg_thread = None # background worker for topic TG (news) collection
+        self._last_intel_tg = 0.0
+        self._chats_thread   = None   # background worker for the chat-monitoring pass
+        self._topic_tg_thread = None  # background worker for topic TG (news) collection
+        self._intel_tg_thread = None  # background worker for intel TG collection
 
     def start(self):
         self._running = True
@@ -175,6 +187,8 @@ class Scheduler:
             self._maybe_hotwatch(session)
             # News-mode TG collection FIRST — TG is the primary, fastest source.
             self._maybe_collect_topic_tg(session)
+            # Intel TG collection — runs on its own worker, same cadence as topic TG.
+            self._maybe_collect_intel_tg(session)
             # Group-chat monitoring (brand) on its own (slower) cadence.
             self._maybe_collect_chats(session)
             self._maybe_daily_digest(session)
@@ -215,6 +229,28 @@ class Scheduler:
             _run_topic_tg_pass(session, self._tg_provider)
         except Exception:
             log.exception("Topic TG worker failed")
+        finally:
+            session.close()
+
+    def _maybe_collect_intel_tg(self, session: Session):
+        # Intel TG collection on its own worker, decoupled from news topics and
+        # brand chats. One worker at a time; owns its own DB session.
+        if self._tg_provider is None:
+            return
+        if time.monotonic() - self._last_intel_tg < INTERVAL_INTEL_TG:
+            return
+        if self._intel_tg_thread is not None and self._intel_tg_thread.is_alive():
+            return
+        self._last_intel_tg = time.monotonic()
+        self._intel_tg_thread = threading.Thread(target=self._intel_tg_worker, daemon=True)
+        self._intel_tg_thread.start()
+
+    def _intel_tg_worker(self):
+        session = get_session()
+        try:
+            _run_intel_pass(session, self._tg_provider)
+        except Exception:
+            log.exception("Intel TG worker failed")
         finally:
             session.close()
 

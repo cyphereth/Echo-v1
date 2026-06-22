@@ -1,15 +1,17 @@
 // Shell — top-level app chrome. Owns mode (news | brand) and screen state.
-// Mounts NewsApp or BrandApp depending on mode. Sidebar is a pure mode switch + nav.
+// Mounts NewsApp or BrandApp depending on mode. Канон layout:
+// project/ui_kits/app/styles.css — 232px sidebar | main (topbar + scope + workspace).
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../core/components/icons';
+import { EchoWordmark } from '../core/components/icons';
 import { clearToken } from '../core/api/client';
 import { NewsApp } from '../features/news/NewsApp';
 import { BrandApp } from '../features/brand/BrandApp';
+import { IntelApp } from '../features/intel/IntelApp';
 import styles from '../components/app/shell.module.css';
 
-// ── Primitives ────────────────────────────────────────────────────────────────
-
+// ── Sidebar nav item ────────────────────────────────────────────────────────
 function NavItem({ icon, label, active, badge, onClick }) {
   return (
     <button className={styles.navItem} data-active={active ? '1' : '0'} onClick={onClick}>
@@ -20,75 +22,55 @@ function NavItem({ icon, label, active, badge, onClick }) {
   );
 }
 
-function EchoLogo() {
-  return (
-    <div className={styles.logo}>
-      <div className={styles.logoMark}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round">
-          <path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5M12 12h.01" />
-        </svg>
-      </div>
-      <span className={styles.logoName}>Echo</span>
-    </div>
-  );
-}
-
-function ModeSwitch({ mode, onModeChange }) {
-  const pill = (active) => ({
-    flex: 1, padding: '6px 0', borderRadius: 'var(--r-md)', border: 'none',
-    cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-sans)',
-    background: active ? 'var(--brand)' : 'var(--surface-3)',
-    color: active ? '#fff' : 'var(--fg-3)', transition: 'all 0.15s',
-  });
-  return (
-    <div style={{ display: 'flex', gap: 6, padding: '0 14px 12px' }}>
-      <button style={pill(mode === 'news')}  onClick={() => onModeChange('news')}>Новости</button>
-      <button style={pill(mode === 'brand')} onClick={() => onModeChange('brand')}>Бренд</button>
-    </div>
-  );
-}
-
-// ── Sidebar — mode switch + nav items for the active feature ──────────────────
-
+// ── Sidebar ─────────────────────────────────────────────────────────────────
 function Sidebar({ mode, screen, setScreen, onModeChange, onLogout }) {
   return (
     <aside className={styles.sidebar}>
-      <EchoLogo />
-      <ModeSwitch mode={mode} onModeChange={onModeChange} />
+      <div className={styles.logo}>
+        <EchoWordmark size={22} />
+      </div>
+      <div className={styles.modeSwitch}>
+        <button className={styles.modePill} data-active={mode === 'news' ? '1' : '0'} onClick={() => onModeChange('news')}>Новости</button>
+        <button className={styles.modePill} data-active={mode === 'brand' ? '1' : '0'} onClick={() => onModeChange('brand')}>Бренд</button>
+        <button className={styles.modePill} data-active={mode === 'intel' ? '1' : '0'} onClick={() => onModeChange('intel')}>Разведка</button>
+      </div>
       <nav className={styles.nav}>
         {mode === 'news' ? (
           <>
-            <NavItem icon="activity" label="Сюжеты"    active={screen === 'stories'}  onClick={() => setScreen('stories')} />
-            <NavItem icon="radio"    label="Лента"      active={screen === 'feed'}     onClick={() => setScreen('feed')} />
-            <NavItem icon="zap"      label="Дайджесты"  active={screen === 'digests'}  onClick={() => setScreen('digests')} />
-            <NavItem icon="search"   label="Источники"  active={screen === 'sources'}  onClick={() => setScreen('sources')} />
+            <NavItem icon="activity" label="Сюжеты"   active={screen === 'stories'} onClick={() => setScreen('stories')} />
+            <NavItem icon="radio"    label="Лента"    active={screen === 'feed'}    onClick={() => setScreen('feed')} />
+            <NavItem icon="zap"      label="Дайджесты" active={screen === 'digests'} onClick={() => setScreen('digests')} />
+            <NavItem icon="search"   label="Источники" active={screen === 'sources'} onClick={() => setScreen('sources')} />
           </>
         ) : (
           <>
-            <NavItem icon="radio"    label="Лента"      active={screen === 'feed'}      onClick={() => setScreen('feed')} />
-            <NavItem icon="inbox"    label="Очередь"    active={screen === 'queue'}     onClick={() => setScreen('queue')} />
-            <NavItem icon="pieChart" label="Аналитика"  active={screen === 'analytics'} onClick={() => setScreen('analytics')} />
-            <NavItem icon="zap"      label="Дайджесты"  active={screen === 'digests'}   onClick={() => setScreen('digests')} />
-            <NavItem icon="search"   label="Города"     active={screen === 'cities'}    onClick={() => setScreen('cities')} />
-            <NavItem icon="settings" label="Настройки"  active={screen === 'settings'}  onClick={() => setScreen('settings')} />
+            <NavItem icon="bar3"     label="Обзор"     active={screen === 'overview'}  onClick={() => setScreen('overview')} />
+            <NavItem icon="inbox"    label="Лента"     active={screen === 'feed'}      onClick={() => setScreen('feed')} />
+            <NavItem icon="radio"    label="Зонды"     active={screen === 'probes'}    onClick={() => setScreen('probes')} />
+            <NavItem icon="inboxTray" label="Очередь"  active={screen === 'queue'}     onClick={() => setScreen('queue')} />
+            <NavItem icon="activity" label="Сюжеты"    active={screen === 'stories'}   onClick={() => setScreen('stories')} />
+            <NavItem icon="pieChart" label="Аналитика" active={screen === 'analytics'} onClick={() => setScreen('analytics')} />
+            <NavItem icon="zap"      label="Дайджесты" active={screen === 'digests'}   onClick={() => setScreen('digests')} />
+            <NavItem icon="search"   label="Города"    active={screen === 'cities'}    onClick={() => setScreen('cities')} />
+            <NavItem icon="settings" label="Настройки" active={screen === 'settings'}  onClick={() => setScreen('settings')} />
           </>
         )}
       </nav>
       <div className={styles.sidebarBottom}>
-        <div className={styles.brandChip} style={{ cursor: 'default' }}>
-          <div className={styles.brandMonogram}>—</div>
+        <div className={styles.status}>
+          <span className={styles.pulse} />
+          <span className={styles.statusLabel}>В эфире</span>
+        </div>
+        <div className={styles.brandChip}>
+          <div className={styles.brandMonogram}>E</div>
           <div style={{ lineHeight: 1.25, flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-1)' }}>Echo</div>
             <div style={{ fontSize: 11, color: 'var(--fg-3)', fontFamily: 'var(--font-mono)' }}>
-              {mode === 'news' ? 'Режим новостей' : 'Режим бренда'}
+              {mode === 'news' ? 'режим новостей' : 'режим бренда'}
             </div>
           </div>
-          <button
-            onClick={onLogout}
-            title="Выйти"
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: 'var(--fg-4)' }}
-          >
-            <Icon name="x" size={13} color="var(--fg-4)" />
+          <button onClick={onLogout} title="Выйти" className={styles.logoutBtn}>
+            <Icon name="logout" size={15} color="var(--fg-4)" />
           </button>
         </div>
       </div>
@@ -96,20 +78,15 @@ function Sidebar({ mode, screen, setScreen, onModeChange, onLogout }) {
   );
 }
 
-// ── Shell — mode switch that mounts the active feature ────────────────────────
-
-const NEWS_SCREENS = ['stories', 'feed', 'digests', 'sources'];
-const BRAND_SCREENS = ['feed', 'queue', 'analytics', 'digests', 'cities', 'settings'];
-
+// ── Shell — mode switch that mounts the active feature ──────────────────────
 export default function Shell() {
   const navigate = useNavigate();
   const [mode, setMode]     = useState('news');
-  const [screen, setScreen] = useState('stories'); // news default
+  const [screen, setScreen] = useState('stories'); // news default — «Сюжеты»
 
   function handleModeChange(next) {
     setMode(next);
-    // Reset to the default first screen of the new mode
-    setScreen(next === 'news' ? 'stories' : 'feed');
+    setScreen(next === 'news' ? 'stories' : 'overview');
   }
 
   function handleLogout() {
@@ -117,8 +94,13 @@ export default function Shell() {
     navigate('/login');
   }
 
+  // Intel (closed contour) — отдельный fullscreen-shell со своей витриной.
+  if (mode === 'intel') {
+    return <IntelApp onExit={() => handleModeChange('brand')} />;
+  }
+
   return (
-    <div className={styles.layout}>
+    <div className={styles.app}>
       <Sidebar
         mode={mode}
         screen={screen}
@@ -128,9 +110,7 @@ export default function Shell() {
       />
       {mode === 'news'
         ? <NewsApp screen={screen} setScreen={setScreen} />
-        : <BrandApp screen={screen} setScreen={setScreen} />
-      }
+        : <BrandApp screen={screen} setScreen={setScreen} />}
     </div>
   );
 }
-

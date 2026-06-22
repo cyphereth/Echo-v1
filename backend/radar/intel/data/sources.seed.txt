@@ -1,0 +1,97 @@
+# Intel sources seed — TG channels/chats. Format: link | side | kind | name
+# sides: ua ru by mx (ge md pmr supported) | kind: channel|chat | name=display only (ignored by intake)
+# Converted from media_channels_table.numbers (2026-06-22).
+https://t.me/rbc_ua_news | ua | channel | РБК-Украина
+https://t.me/suspilne_news | ua | channel | Суспільне Новини
+https://t.me/pravdanews | ua | channel | Українська правда
+https://t.me/domchannel | ua | channel | Телеканал «Дом»
+https://t.me/u_now | ua | channel | Украина Сейчас
+https://t.me/ru_rubika | ua | channel | РУБІКА (Live)
+https://t.me/lachenkobus | ua | channel | Лаченков
+https://t.me/nexta_live | by | channel | NEXTA Live
+https://t.me/nexta_tv | by | channel | NEXTA
+https://t.me/belamova | by | channel | Беларусь головного мозга
+https://t.me/belarusby | by | channel | Хаджинова (Беларусь)
+https://t.me/rian_ru | ru | channel | РИА Новости
+https://t.me/tass_agency | ru | channel | ТАСС
+https://t.me/channelone | ru | channel | Первый канал
+https://t.me/russia24 | ru | channel | Россия-24
+https://t.me/russian_rt | ru | channel | RT Russian
+https://t.me/tvrain | ru | channel | Дождь
+https://t.me/meduzalive | ru | channel | Медуза — LIVE
+https://t.me/readovkanews | ru | channel | Readovka
+https://t.me/tgz | ru | channel | Незыгарь
+https://t.me/supernova_plus | ua | channel | Supernova+
+https://t.me/exilenova_plus | ua | channel | Exilenova+
+https://t.me/+k_Z9AGYLs7g5ZGUy | ru | chat | Поздняков 3.0
+https://t.me/ASupersharij | ru | channel | Анатолий Шарий
+https://t.me/region_22ua | ua | channel | Регіон_22
+https://t.me/Falconins | ua | channel | 𝔽𝕒𝕝𝕔𝕠𝕟 𝕚𝕟𝕤𝕚𝕘𝕙𝕥
+https://t.me/informnapalm | ua | channel | InformNapalm
+https://t.me/serhii_flash | ua | channel | Сергій FLASH
+https://t.me/drnbmbr | ua | channel | DroneBomber✙
+https://t.me/robert_magyar | ua | channel | МАДЯР
+https://t.me/SBUkr | ua | channel | Служба безпеки України
+https://t.me/usf_army | ua | channel | Сили безпілотних систем ЗС України
+https://t.me/army_1usc | ua | channel | 1 Окремий центр БпС СБС
+https://t.me/zsuwar | ua | channel | Збройні Сили України. Війна з окупантами
+https://t.me/V_Zelenskiy_official | ua | channel | Zelenskiy / Official
+https://t.me/worldmilitares | mx | channel | world.militares
+https://t.me/DniproOfficial | ua | channel | Dnipro Osint ⟨ Гарбуз ⟩
+https://t.me/Proofs_Dnepr1 | ua | channel | Пруфи🇺🇦Дніпра
+https://t.me/ukraine_context | ua | channel | Ukraine Context
+https://t.me/ukrainian_militant | ua | channel | Ukrainian Militant
+https://t.me/+eJMPcjjXIPwwMGNi | ua | chat | 3D models CHAT
+https://t.me/lpr1_treugolnik | ru | channel | LPR 1
+https://t.me/lpr1_Belgorod_alarm | ru | channel | Белгородская область оповещения, тревоги
+https://t.me/LPRalarm | ru | channel | LPR оповещения,
+https://t.me/kupolrussia | ru | channel | КУПОЛ РОССИИ
+https://t.me/nikvantanikita | ru | channel | Никванта
+https://t.me/lpr1_Krasnodar_alarm | ru | channel | LPR краснодар
+https://t.me/lpr1_Crimea_Alarm | ru | channel | LPR CRIMEA
+https://t.me/lpr1_Rostov_alarm | ru | channel | LPR ROSTOV
+https://t.me/radar_bryanskk | ru | channel | Радар БРЯНСК
+https://t.me/exilenova_chat | ua | channel | Exilenova Chat
+https://t.me/vrn_chatt | ru | channel | Воронеж чат
+https://t.me/lazur_chat | ru | channel | ЖК «Лазурный» | Воронеж
+https://t.me/novosti_efir | ru | channel | Прямой Эфир
+https://t.me/tb_chats | ru | channel | Чат Брянска
+https://t.me/akademicheskiibryansk | ru | channel | ЖК «Академический» брянск
+https://t.me/bransskk32 | ru | channel | Чат Брянска и обл
+https://t.me/delfinvrn | ru | channel | ЖК ДЕЛЬФИН ВОРОНЕЖ
+https://t.me/delphin_vrn | ru | channel | ЖК ДЕЛЬФИН ВОРОНЕЖ
+https://t.me/Ateobreaking | ru | channel | AteoBreaking
+https://t.me/gromkovoronezh | ru | channel | Громко, Воронежская область
+https://t.me/belgorod_best | ru | channel | Белгород чат
+https://t.me/wqwqrty | ru | channel | Подслушано в погаре
+https://t.me/prigrani | ru | channel | Приграничье Александровны
+https://t.me/E_V_Kovalchuk | ru | channel | Егор Ковальчук
+https://t.me/zgest_granica | ru | channel | Жесть приграничья Брянская область
+https://t.me/bloknot_vrn | ru | channel | Блокнот воронеж
+https://t.me/gubernator_46 | ru | channel | Курск оперштаб
+https://t.me/zhest_kursk_146 | ru | channel | Жесть Курск
+https://t.me/marmuletik | ua | channel | Marmuletik🇺🇦
+https://t.me/EcV2Xpz3rtkOTRi | ua | channel | АТАСМS - УКРАЇНА
+https://t.me/notes_veterans | ru | channel | ZАПИСКИ VЕТЕРАНА 🇷🇺
+https://t.me/bomber_fighter | ru | channel | Fighterbomber
+https://t.me/locatorru | ru | channel | Локатор приграничье
+https://t.me/GoriZont_bryansk | ru | channel | Горизонт брянск
+https://t.me/radar_russia_monitor | ru | channel | Радар России
+https://t.me/vygonichy32 | ru | channel | Выгоничи чат
+https://t.me/orel_chat57 | ru | channel | Орел чат
+https://t.me/chat_garnizon57 | ru | channel | Орел гарнизон чат
+https://t.me/podslyshkaorelchat | ru | channel | Орел чат
+https://t.me/informationBPLA31BELRN | ru | channel | Радар белгород
+https://t.me/belgorodecRU | ru | channel | Белгородец
+https://t.me/gusev_36 | ru | channel | Губернатор Воронежской области
+https://t.me/zhkwka | ru | channel | Брянск чат
+https://t.me/asupershpitz28 | ua | channel | Mirror шарий
+https://t.me/+JWrp-E73gU9hN2My | ua | chat | Труха радар
+@truexakyiv | ua | channel | Труха киев
+@truexadnepr | ua | channel | Труха днипро
+@truexazaporozie | ua | channel | Труха Запорожье
+@dnipro_22 | ua | channel | Днипро чат
+@dnipro_chatt | ua | channel | Днипро чат
+@chat_dnipro1 | ua | channel | Днипро чат
+@InDonetsk | ru | channel | Донецк чат
+@vecherniychatlnr | ru | channel | Луганск чат

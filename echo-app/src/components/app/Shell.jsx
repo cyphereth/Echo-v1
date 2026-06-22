@@ -1,110 +1,73 @@
-import { useState } from 'react';
+// TopBar + ScopeBar — общие для обоих режимов. Канон: project/ui_kits/app/shell.jsx.
+// Мёртвый дублирующий Sidebar удалён — единый источник истины теперь src/app/Shell.jsx.
 import { Icon } from '../../core/components/icons';
 import styles from './shell.module.css';
 
-function NavItem({ icon, label, active, badge, onClick }) {
-  return (
-    <button className={styles.navItem} data-active={active ? '1' : '0'} onClick={onClick}>
-      <Icon name={icon} size={16} />
-      <span style={{ flex: 1 }}>{label}</span>
-      {badge > 0 && <span className={styles.navBadge}>{badge}</span>}
-    </button>
-  );
-}
-
-function EchoLogo() {
-  return (
-    <div className={styles.logo}>
-      <div className={styles.logoMark}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round">
-          <path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5M12 12h.01" />
-        </svg>
-      </div>
-      <span className={styles.logoName}>Echo</span>
-    </div>
-  );
-}
-
-function ModeSwitch({ mode, onModeChange }) {
-  const pill = (active) => ({
-    flex: 1, padding: '6px 0', borderRadius: 'var(--r-md)', border: 'none',
-    cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-sans)',
-    background: active ? 'var(--brand)' : 'var(--surface-3)',
-    color: active ? '#fff' : 'var(--fg-3)', transition: 'all 0.15s',
-  });
-  return (
-    <div style={{ display: 'flex', gap: 6, padding: '0 14px 12px' }}>
-      <button style={pill(mode === 'news')}  onClick={() => onModeChange('news')}>Новости</button>
-      <button style={pill(mode === 'brand')} onClick={() => onModeChange('brand')}>Бренд</button>
-    </div>
-  );
-}
-
-export function Sidebar({ screen, setScreen, brand, onLogout, mode, onModeChange }) {
-  const negCount = 3;
-
-  return (
-    <aside className={styles.sidebar}>
-      <EchoLogo />
-      <ModeSwitch mode={mode} onModeChange={onModeChange} />
-      <nav className={styles.nav}>
-        {mode === 'news' ? <>
-          <NavItem icon="activity" label="Сюжеты"    active={screen === 'stories'}  onClick={() => setScreen('stories')} />
-          <NavItem icon="radio"    label="Лента"     active={screen === 'feed'}     onClick={() => setScreen('feed')} />
-          <NavItem icon="zap"      label="Дайджесты" active={screen === 'digests'}  onClick={() => setScreen('digests')} />
-          <NavItem icon="search"   label="Источники" active={screen === 'sources'}  onClick={() => setScreen('sources')} />
-        </> : <>
-          <NavItem icon="radio"    label="Лента"     active={screen === 'feed'}      badge={negCount} onClick={() => setScreen('feed')} />
-          <NavItem icon="activity" label="Сюжеты"    active={screen === 'stories'}  onClick={() => setScreen('stories')} />
-          <NavItem icon="zap"      label="Дайджесты" active={screen === 'digests'}   onClick={() => setScreen('digests')} />
-          <NavItem icon="inbox"    label="Очередь"   active={screen === 'queue'}     onClick={() => setScreen('queue')} />
-          <NavItem icon="pieChart" label="Аналитика" active={screen === 'analytics'} onClick={() => setScreen('analytics')} />
-          <NavItem icon="search"   label="Города"    active={screen === 'cities'}    onClick={() => setScreen('cities')} />
-          <NavItem icon="settings" label="Настройки" active={screen === 'settings'}  onClick={() => setScreen('settings')} />
-        </>}
-      </nav>
-      <div className={styles.sidebarBottom}>
-        <div className={styles.brandChip} style={{ cursor: 'default' }}>
-          <div className={styles.brandMonogram}>
-            {brand?.name?.slice(0, 2).toUpperCase() ?? '—'}
-          </div>
-          <div style={{ lineHeight: 1.25, flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {brand?.name ?? '—'}
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--fg-3)', fontFamily: 'var(--font-mono)' }}>
-              {brand?.niche ?? ''}
-            </div>
-          </div>
-          <button
-            onClick={onLogout}
-            title="Выйти"
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: 'var(--fg-4)' }}
-          >
-            <Icon name="x" size={13} color="var(--fg-4)" />
-          </button>
-        </div>
-      </div>
-    </aside>
-  );
-}
-
-export function TopBar({ title, sub, children }) {
+// ── TopBar ──────────────────────────────────────────────────────────────────
+// Принимает опциональный brand-селектор (имя+подзаголовок) или просто title/sub.
+export function TopBar({ title, sub, brand, onSearch, searchText, onSearchChange, actions, children }) {
   return (
     <header className={styles.topbar}>
-      <div>
-        <div className={styles.topbarTitle}>{title}</div>
-        {sub && <div className={styles.topbarSub}>{sub}</div>}
-      </div>
+      {brand ? (
+        <div className={styles.brandSel}>
+          <div className={styles.brandMonogram}>
+            {(brand.name || '?').slice(0, 1).toUpperCase()}
+          </div>
+          <div style={{ lineHeight: 1.2 }}>
+            <div className={styles.brandSelName}>{brand.name}</div>
+            {brand.sub && <div className={styles.brandSelSub}>{brand.sub}</div>}
+          </div>
+        </div>
+      ) : (
+        <div>
+          <div className={styles.topbarTitle}>{title}</div>
+          {sub && <div className={styles.topbarSub}>{sub}</div>}
+        </div>
+      )}
+      <div className={styles.topgrow} />
+      {actions}
       {children}
       <div className={styles.searchBox}>
         <Icon name="search" size={14} color="var(--fg-3)" />
-        <span style={{ fontSize: 13, color: 'var(--fg-3)' }}>Поиск упоминаний…</span>
+        <input
+          value={searchText || ''}
+          onChange={onSearchChange}
+          onKeyDown={(e) => { if (e.key === 'Enter' && onSearch) onSearch(searchText); }}
+          placeholder="Поиск упоминаний…"
+        />
       </div>
-      <button className={styles.icBtn} style={{ position: 'relative' }}>
+      <button className={styles.icBtn} title="Уведомления">
         <Icon name="bell" size={17} color="var(--fg-2)" />
         <span className={styles.bellDot} />
       </button>
     </header>
+  );
+}
+
+// ── ScopeBar ────────────────────────────────────────────────────────────────
+// 46px-полоса с live-счётчиками: сигналов / залетает / растёт.
+// live = всего активных; crit = severity≥75; rise = 45≤severity<75.
+export function ScopeBar({ live = 0, critical = 0, rising = 0, syncText }) {
+  return (
+    <div className={styles.scope}>
+      <div className={styles.scopeLive}>
+        <span className={styles.pulse} style={{ width: 9, height: 9, borderRadius: '50%', background: 'var(--sev-calm)', flexShrink: 0, animation: 'erpulse 2.4s var(--ease-in-out) infinite' }} />
+        <span>В эфире</span>
+      </div>
+      <div className={styles.scopeDiv} />
+      <div className={styles.scopeStat}>
+        <span className={styles.scopeStatNum}>{live}</span>
+        <span className={styles.scopeStatLabel}>сигналов</span>
+      </div>
+      <div className={styles.scopeStat}>
+        <span className={styles.scopeStatNum} style={{ color: '#FF7A87' }}>{critical}</span>
+        <span className={styles.scopeStatLabel}>залетает</span>
+      </div>
+      <div className={styles.scopeStat}>
+        <span className={styles.scopeStatNum} style={{ color: '#FFC871' }}>{rising}</span>
+        <span className={styles.scopeStatLabel}>растёт</span>
+      </div>
+      {syncText && <div className={styles.scopeRight}>{syncText}</div>}
+    </div>
   );
 }

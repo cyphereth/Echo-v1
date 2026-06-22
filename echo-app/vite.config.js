@@ -20,6 +20,7 @@ export default defineConfig({
       '/stories':      'http://127.0.0.1:8000',
       '/news':         'http://127.0.0.1:8000',
       '/topics':       'http://127.0.0.1:8000',
+      '/intel':        'http://127.0.0.1:8000',
     },
   },
 })

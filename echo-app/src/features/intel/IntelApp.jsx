@@ -6,6 +6,7 @@ import { Icon } from '../../core/components/icons';
 import { IntelHome } from './components/IntelHome';
 import { IntelStories } from './components/IntelStories';
 import { IntelBoard } from './components/IntelBoard';
+import { IntelSources } from './components/IntelSources';
 import { intelApi } from './api';
 import { INTEL_USE_MOCK } from './data/mock';
 import styles from './intel.module.css';
@@ -14,6 +15,7 @@ const SCREENS = [
   { key: 'home',    label: 'Ситуационный центр', icon: 'radio',    hotkey: '1' },
   { key: 'stories', label: 'Сюжеты',             icon: 'activity', hotkey: '2' },
   { key: 'board',   label: 'Оперативная доска',  icon: 'bar3',     hotkey: '3' },
+  { key: 'sources', label: 'Источники',           icon: 'link',     hotkey: '4' },
 ];
 
 function NavItem({ item, active, onClick }) {
@@ -100,8 +102,10 @@ export function IntelApp({ onExit }) {
           <IntelHome window={window} onOpenStory={() => setScreen('stories')} />
         ) : screen === 'stories' ? (
           <IntelStories window={window} />
-        ) : (
+        ) : screen === 'board' ? (
           <IntelBoard window={window} onOpenDir={() => setScreen('stories')} />
+        ) : (
+          <IntelSources />
         )}
       </div>
     </div>

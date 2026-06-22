@@ -19,9 +19,12 @@ from sqlalchemy.orm import Session
 from ..core.db import get_session
 from ..core.auth import decode_token
 from ..models import User
-from .models import IntelDirection, IntelMention, IntelStory
+from .models import IntelDirection, IntelMention, IntelStory, IntelProbe
 from . import aggregate
 from . import credibility
+
+_VALID_SIDES = {"ru", "ua", "by", "mx", "ge", "md", "pmr"}
+_VALID_KINDS = {"channel", "chat"}
 
 log = logging.getLogger(__name__)
 
@@ -241,3 +244,74 @@ def intel_search(
         .all()
     )
     return [aggregate.story_summary(session, st) for st in rows]
+
+
+# ── Sources management ────────────────────────────────────────────────────────
+
+def _probe_dict(p: IntelProbe) -> dict:
+    nra = p.next_run_at.isoformat() if p.next_run_at else None
+    wm = p.watermark.isoformat() if p.watermark else None
+    return {
+        "id": p.id,
+        "handle": p.query,
+        "side": p.side,
+        "kind": p.kind,
+        "last_collected": wm,
+        "next_run_at": nra,
+    }
+
+
+@router.get("/intel/sources")
+def intel_sources_list(
+    side: Optional[str] = None,
+    kind: Optional[str] = None,
+    limit: int = 500,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    q = session.query(IntelProbe)
+    if side:
+        q = q.filter(IntelProbe.side == side)
+    if kind:
+        q = q.filter(IntelProbe.kind == kind)
+    rows = q.order_by(IntelProbe.id).limit(limit).all()
+    return [_probe_dict(p) for p in rows]
+
+
+@router.post("/intel/sources")
+def intel_sources_create(
+    body: dict,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    link = (body.get("link") or "").strip()
+    side = (body.get("side") or "").strip().lower()
+    kind = (body.get("kind") or "").strip().lower()
+    if side not in _VALID_SIDES:
+        raise HTTPException(400, f"Invalid side '{side}'. Must be one of: {sorted(_VALID_SIDES)}")
+    if kind not in _VALID_KINDS:
+        raise HTTPException(400, f"Invalid kind '{kind}'. Must be one of: {sorted(_VALID_KINDS)}")
+    if not link:
+        raise HTTPException(400, "link is required")
+    existing = session.query(IntelProbe).filter_by(query=link).first()
+    if existing:
+        return {**_probe_dict(existing), "created": False}
+    probe = IntelProbe(platform="telegram", kind=kind, query=link, side=side)
+    session.add(probe)
+    session.commit()
+    session.refresh(probe)
+    return {**_probe_dict(probe), "created": True}
+
+
+@router.delete("/intel/sources/{source_id}")
+def intel_sources_delete(
+    source_id: int,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    probe = session.get(IntelProbe, source_id)
+    if not probe:
+        raise HTTPException(404, "Source not found")
+    session.delete(probe)
+    session.commit()
+    return {"deleted": True}

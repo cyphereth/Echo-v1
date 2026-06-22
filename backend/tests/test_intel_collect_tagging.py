@@ -27,16 +27,34 @@ def test_channel_post_tagged_by_geo():
     assert s.get(IntelDirection, m.direction_id).key == "kursk"
     assert m.side == "ru"
 
-def test_channel_post_without_geo_goes_unassigned():
+def test_channel_post_without_geo_or_keyword_is_dropped():
+    # After the keyword relevance gate was added, a channel post that has no geo
+    # hit and no lexicon keyword is filtered out — NOT stored at all.
     from radar.intel import seed, collector
-    from radar.intel.models import IntelProbe, IntelMention, IntelDirection
+    from radar.intel.models import IntelProbe, IntelMention
     s = _sess(); seed.ensure_default_directions(s)
     p = IntelProbe(platform="telegram", kind="channel", query="@x", side="ua"); s.add(p); s.commit()
     posts=[SimpleNamespace(post_id="@x/1", author="@x", text="общая сводка дня без географии тут",
                            followers=0, created_at=datetime.now(timezone.utc), hashtags=[], likes=0)]
     prov=SimpleNamespace(search=lambda q,k,c: SimpleNamespace(posts=posts, cursor=None))
-    collector.collect_probe(s, p, prov)
-    m=s.query(IntelMention).one()
+    n = collector.collect_probe(s, p, prov)
+    assert n == 0, "general post should be dropped by keyword gate"
+    assert s.query(IntelMention).count() == 0
+
+def test_channel_keyword_match_no_geo_goes_unassigned():
+    # A channel post that hits a lexicon keyword but no geo → stored, unassigned direction.
+    from radar.intel import seed, collector
+    from radar.intel.models import IntelProbe, IntelMention, IntelDirection, IntelLexicon
+    s = _sess(); seed.ensure_default_directions(s)
+    s.add(IntelLexicon(term="калибр", meaning="ракета", category="missiles_weapons")); s.commit()
+    p = IntelProbe(platform="telegram", kind="channel", query="@x", side="ua"); s.add(p); s.commit()
+    posts=[SimpleNamespace(post_id="@x/2", author="@x",
+                           text="выпустили несколько калибр по территории в ночь с субботы",
+                           followers=0, created_at=datetime.now(timezone.utc), hashtags=[], likes=0)]
+    prov=SimpleNamespace(search=lambda q,k,c: SimpleNamespace(posts=posts, cursor=None))
+    n = collector.collect_probe(s, p, prov)
+    assert n == 1
+    m = s.query(IntelMention).one()
     assert s.get(IntelDirection, m.direction_id).key == "unassigned"
 
 def test_chat_noise_filter_drops_irrelevant_keeps_relevant():

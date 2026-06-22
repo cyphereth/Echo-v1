@@ -18,6 +18,19 @@ def ensure_sources_seed_loaded(session) -> dict:
     return ingest_sources(session, path)
 
 
+def ensure_lexicon_seed_loaded(session) -> dict:
+    """Idempotent: ingest radar/intel/data/keywords.seed.json if it exists.
+
+    Called every startup — safe to re-run, only updates existing rows.
+    Returns {"added": N, "updated": M}.
+    """
+    from .intake import ingest_lexicon_json
+    path = os.path.join(os.path.dirname(__file__), "data", "keywords.seed.json")
+    if not os.path.exists(path):
+        return {"added": 0, "updated": 0}
+    return ingest_lexicon_json(session, path)
+
+
 def ensure_unassigned_direction(session) -> IntelDirection:
     d = session.query(IntelDirection).filter_by(key="unassigned").first()
     if d is None:

@@ -77,6 +77,27 @@ def _is_invite_link(raw: str) -> bool:
     return "/+" in (raw or "") or "joinchat" in s
 
 
+def keyword_or_geo_relevant(text: str, lexicon_terms) -> bool:
+    """Return True if text hits a geo direction or any lexicon term.
+
+    Shared gate used by both channel and chat branches.  The ``lexicon_terms``
+    iterable is loaded once per :func:`collect_probe` call — no per-message DB
+    queries.
+
+    - detect_direction(text) is not None → True (geo match)
+    - any term in lexicon_terms found at a word boundary (case-insensitive) → True
+    - otherwise → False
+    """
+    stripped = (text or "").strip()
+    if detect_direction(stripped) is not None:
+        return True
+    low = stripped.lower()
+    for term in lexicon_terms:
+        if re.search(r"(?<!\w)" + re.escape(term.lower()) + r"(?!\w)", low):
+            return True
+    return False
+
+
 def chat_message_relevant(text: str, author: str, lexicon_terms: tuple = ()) -> bool:
     """Return True if a chat message is worth storing as an IntelMention.
 
@@ -85,11 +106,9 @@ def chat_message_relevant(text: str, author: str, lexicon_terms: tuple = ()) -> 
     - text shorter than MIN_TEXT_LEN after stripping
     - no alphabetic word in the text
 
-    Admit conditions (any → True):
+    Admit conditions (any → True) — delegated to keyword_or_geo_relevant:
     - detect_direction(text) is not None (geo hit)
     - any lexicon term appears in text (word-boundary, case-insensitive)
-
-    Phase 1: lexicon_terms defaults to empty; Task 5 wires real lexicon.
     """
     stripped = (text or "").strip()
 
@@ -101,17 +120,7 @@ def chat_message_relevant(text: str, author: str, lexicon_terms: tuple = ()) -> 
     if not re.search(r"[a-zA-Zа-яА-ЯёЁ]", stripped):
         return False
 
-    # Admit on geo hit
-    if detect_direction(stripped) is not None:
-        return True
-
-    # Admit on lexicon term (word-boundary, case-insensitive)
-    low = stripped.lower()
-    for term in lexicon_terms:
-        if re.search(r"(?<!\w)" + re.escape(term.lower()) + r"(?!\w)", low):
-            return True
-
-    return False
+    return keyword_or_geo_relevant(stripped, lexicon_terms)
 
 
 # ── Core collection ────────────────────────────────────────────────────────────
@@ -138,6 +147,10 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
     count = 0
 
     try:
+        # Load lexicon terms once per call — shared by both channel and chat branches.
+        # Word-boundary matching is done inside keyword_or_geo_relevant / chat_message_relevant.
+        lexicon_terms = [t for (t,) in session.query(IntelLexicon.term).all()]
+
         if probe.kind == "chat":
             # Normalize the stored query to a clean @handle (or detect invite links)
             if _is_invite_link(probe.query):
@@ -145,9 +158,6 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                 return 0
 
             handle = _clean_handle(probe.query)
-
-            # Load lexicon terms once per call (word-boundary matching inside chat_message_relevant)
-            lexicon_terms = [t for (t,) in session.query(IntelLexicon.term).all()]
 
             # Determine min_id from watermark (if it is a numeric string)
             wm = probe.watermark or ""
@@ -235,7 +245,11 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                     if len(clean) < MIN_TEXT_LEN:
                         continue
 
+                    # Keyword/geo relevance gate — keep only military-relevant posts.
                     text = post.text or ""
+                    if not keyword_or_geo_relevant(text, lexicon_terms):
+                        continue
+
                     dir_id = resolve_direction_id(session, detect_direction(text))
                     mention = IntelMention(
                         direction_id=dir_id,

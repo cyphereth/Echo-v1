@@ -27,8 +27,10 @@ def test_channel_time_window_stops_at_old(monkeypatch):
     import importlib, radar.intel.collector as C
     importlib.reload(C)
     from radar.intel import seed
-    from radar.intel.models import IntelMention
+    from radar.intel.models import IntelMention, IntelLexicon
     s = _sess(); seed.ensure_default_directions(s)
+    # Seed lexicon so the keyword gate admits "обстрел" posts.
+    s.add(IntelLexicon(term="обстрел", meaning="shelling", category="military")); s.commit()
     p = _probe(s)
     now = datetime.now(timezone.utc)
     # newest-first: 4 fresh, then older-than-window — collection must stop at the old one
@@ -36,7 +38,7 @@ def test_channel_time_window_stops_at_old(monkeypatch):
              text=f"свежий пост про обстрел под направлением номер {i} сегодня",
              followers=0, created_at=now - timedelta(hours=i), hashtags=[], likes=0) for i in range(4)]
     old = [SimpleNamespace(post_id=f"x/old{i}", author="@x",
-           text=f"старый пост двухдневной давности номер {i} давно прошёл",
+           text=f"старый пост про обстрел двухдневной давности номер {i} прошёл",
            followers=0, created_at=now - timedelta(hours=48 + i), hashtags=[], likes=0) for i in range(20)]
     prov = SimpleNamespace(search=lambda q, k, c: SimpleNamespace(posts=fresh + old, cursor=None, next_cursor=None))
     n = C.collect_probe(s, p, prov)
@@ -50,8 +52,10 @@ def test_channel_safety_cap(monkeypatch):
     import importlib, radar.intel.collector as C
     importlib.reload(C)
     from radar.intel import seed
-    from radar.intel.models import IntelMention
+    from radar.intel.models import IntelMention, IntelLexicon
     s = _sess(); seed.ensure_default_directions(s)
+    # Seed lexicon so the keyword gate admits "обстрел" posts.
+    s.add(IntelLexicon(term="обстрел", meaning="shelling", category="military")); s.commit()
     p = _probe(s)
     now = datetime.now(timezone.utc)
     posts = [SimpleNamespace(post_id=f"x/{i}", author="@x",

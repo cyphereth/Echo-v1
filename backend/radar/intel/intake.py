@@ -97,9 +97,14 @@ def ingest_lexicon_json(session, path: str) -> dict:
 if __name__ == "__main__":
     import sys
     from ..core.db import get_session
-    if len(sys.argv) < 3 or sys.argv[1] not in ("sources", "lexicon"):
-        sys.exit("usage: python -m radar.intel.intake {sources|lexicon} <path>")
+    if len(sys.argv) < 3 or sys.argv[1] not in ("sources", "lexicon", "lexicon_json"):
+        sys.exit("usage: python -m radar.intel.intake {sources|lexicon|lexicon_json} <path>")
     cmd, path = sys.argv[1], sys.argv[2]
     with get_session() as s:
-        out = ingest_sources(s, path) if cmd == "sources" else ingest_lexicon(s, path)
+        if cmd == "sources":
+            out = ingest_sources(s, path)
+        elif cmd == "lexicon_json":
+            out = ingest_lexicon_json(s, path)
+        else:
+            out = ingest_lexicon(s, path)
         print(out)

@@ -150,6 +150,8 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
         # Load lexicon terms once per call — shared by both channel and chat branches.
         # Word-boundary matching is done inside keyword_or_geo_relevant / chat_message_relevant.
         lexicon_terms = [t for (t,) in session.query(IntelLexicon.term).all()]
+        if not lexicon_terms:
+            log.warning("intel lexicon is empty — channel posts kept only on geo match (run lexicon seed)")
 
         if probe.kind == "chat":
             # Normalize the stored query to a clean @handle (or detect invite links)

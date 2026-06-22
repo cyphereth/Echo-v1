@@ -33,6 +33,32 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _clean_handle(raw: str) -> str:
+    """Normalize a stored source link to a Telegram handle the provider can resolve.
+
+    https://t.me/NAME, t.me/NAME, @NAME, NAME -> '@NAME'. Invite links
+    (t.me/+HASH or t.me/joinchat/HASH) are returned UNCHANGED (need a join, handled
+    separately) — caller detects them via _is_invite_link()."""
+    s = (raw or "").strip()
+    low = s.lower()
+    if "/+" in s or "joinchat" in low:
+        return s  # private invite link — leave as-is
+    for pre in ("https://", "http://"):
+        if low.startswith(pre):
+            s = s[len(pre):]
+            low = s.lower()
+    for pre in ("t.me/", "telegram.me/"):
+        if low.startswith(pre):
+            s = s[len(pre):]
+    s = s.strip("/").lstrip("@").strip()
+    return ("@" + s) if s else s
+
+
+def _is_invite_link(raw: str) -> bool:
+    s = (raw or "").lower()
+    return "/+" in (raw or "") or "joinchat" in s
+
+
 def chat_message_relevant(text: str, author: str, lexicon_terms: tuple = ()) -> bool:
     """Return True if a chat message is worth storing as an IntelMention.
 
@@ -95,6 +121,13 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
 
     try:
         if probe.kind == "chat":
+            # Normalize the stored query to a clean @handle (or detect invite links)
+            if _is_invite_link(probe.query):
+                log.warning("intel chat needs join, skipping: %s", probe.query)
+                return 0
+
+            handle = _clean_handle(probe.query)
+
             # Load lexicon terms once per call (word-boundary matching inside chat_message_relevant)
             lexicon_terms = [t for (t,) in session.query(IntelLexicon.term).all()]
 
@@ -102,7 +135,7 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
             wm = probe.watermark or ""
             min_id = int(wm) if wm.isdigit() else 0
 
-            posts = provider.search_chat(probe.query, term="", limit=50, min_id=min_id)
+            posts = provider.search_chat(handle, term="", limit=50, min_id=min_id)
 
             for post in (posts or []):
                 if new_watermark is None:
@@ -140,11 +173,12 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
 
         else:
             # Channel branch — paginated, light filter only
+            handle = _clean_handle(probe.query)
             cursor = None
             found_watermark = False
 
             while not found_watermark:
-                page = provider.search(probe.query, probe.kind, cursor)
+                page = provider.search(handle, probe.kind, cursor)
                 if not page.posts:
                     break
                 for post in page.posts:

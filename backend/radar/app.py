@@ -38,6 +38,7 @@ async def lifespan(app: FastAPI):
         seed_module.ensure_default_topics(session)
         from .intel import seed as intel_seed
         intel_seed.ensure_default_directions(session)
+        intel_seed.ensure_sources_seed_loaded(session)
     finally:
         session.close()
 

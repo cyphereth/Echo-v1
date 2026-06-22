@@ -1,7 +1,7 @@
 from __future__ import annotations
 from .models import IntelProbe, IntelLexicon
 
-_SIDES = {"ru", "ua"}
+_SIDES = {"ru", "ua", "by", "mx", "ge", "md", "pmr"}
 _KINDS = {"channel", "chat"}
 
 def ingest_sources(session, path: str) -> dict:

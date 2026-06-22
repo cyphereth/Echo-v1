@@ -1,3 +1,4 @@
+import os
 from .models import IntelDirection
 
 DEFAULT_DIRECTIONS = [
@@ -7,6 +8,14 @@ DEFAULT_DIRECTIONS = [
     ("donetsk", "Донецкое"),
     ("kherson", "Херсонское"),
 ]
+
+
+def ensure_sources_seed_loaded(session) -> dict:
+    from .intake import ingest_sources
+    path = os.path.join(os.path.dirname(__file__), "data", "sources.seed.txt")
+    if not os.path.exists(path):
+        return {"added": 0, "updated": 0}
+    return ingest_sources(session, path)
 
 
 def ensure_unassigned_direction(session) -> IntelDirection:

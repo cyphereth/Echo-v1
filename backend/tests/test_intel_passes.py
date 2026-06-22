@@ -28,3 +28,20 @@ def test_run_intel_collect_collects_due_channel():
     prov=SimpleNamespace(search=lambda q,k,c: SimpleNamespace(posts=posts, cursor=None))
     passes.run_intel_collect(s, prov)
     assert s.query(IntelMention).count() == 1
+
+
+def test_intel_tick_collects_and_clusters(monkeypatch):
+    from radar.intel import seed, passes, stories
+    from radar.intel.models import IntelProbe, IntelMention, IntelStory, IntelDirection
+    from datetime import datetime, timezone, timedelta
+    from types import SimpleNamespace
+    s = _sess(); seed.ensure_default_directions(s)
+    past = datetime.now(timezone.utc) - timedelta(hours=1)
+    s.add(IntelProbe(platform="telegram", kind="channel", query="@rybar", side="ru", next_run_at=past)); s.commit()
+    posts=[SimpleNamespace(post_id=f"@rybar/{i}", author=f"@a{i}", text="удар по Работино, активизация",
+                           followers=0, created_at=datetime.now(timezone.utc), hashtags=[], likes=0) for i in range(3)]
+    prov=SimpleNamespace(search=lambda q,k,c: SimpleNamespace(posts=posts, cursor=None))
+    # the tick: collect, then cluster each direction that got mentions
+    passes.run_intel_tick(s, tg_provider=prov, embed=lambda t:[float(len(t))])
+    assert s.query(IntelMention).count() == 3
+    assert s.query(IntelStory).filter(IntelStory.direction_id.isnot(None)).count() >= 1

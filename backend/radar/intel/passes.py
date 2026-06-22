@@ -32,3 +32,21 @@ def run_intel_collect(session: Session, tg_provider) -> None:
             # stay "due" forever and consume a cap slot every tick.
             probe.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=probe.interval_sec or 3600)
             session.commit()
+
+
+def run_intel_tick(session, tg_provider, web_provider=None, embed=None) -> None:
+    """One intel cycle: collect -> LLM retag -> cluster each touched direction."""
+    from . import tagging, stories
+    from .models import IntelMention
+    run_intel_collect(session, tg_provider)
+    try:
+        tagging.retag_unassigned(session)
+    except Exception:
+        log.exception("intel retag failed (skipped)")
+    dir_ids = [d for (d,) in session.query(IntelMention.direction_id)
+               .filter(IntelMention.incident_id.is_(None)).distinct().all() if d]
+    for did in dir_ids:
+        try:
+            stories.update_stories(session, did, embed=embed)
+        except Exception:
+            log.exception("intel clustering failed for direction %s", did)

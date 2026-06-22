@@ -44,7 +44,7 @@ def run_intel_tick(session, tg_provider, web_provider=None, embed=None) -> None:
     except Exception:
         log.exception("intel retag failed (skipped)")
     dir_ids = [d for (d,) in session.query(IntelMention.direction_id)
-               .filter(IntelMention.incident_id.is_(None)).distinct().all() if d]
+               .filter(IntelMention.incident_id.is_(None), IntelMention.direction_id.isnot(None)).distinct().all() if d]
     for did in dir_ids:
         try:
             stories.update_stories(session, did, embed=embed)

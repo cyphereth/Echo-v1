@@ -24,7 +24,7 @@ def _llm_classify(text: str, keys: list[str], glossary: str) -> str | None:
 
 
 def retag_unassigned(session, limit: int = 50) -> int:
-    from .models import IntelMention, IntelLexicon, IntelDirection
+    from .models import IntelMention, IntelLexicon
     from .geo import GEO_KEYWORDS
     from ..core.llm import LLMNotConfigured
     uid = seed.ensure_unassigned_direction(session).id

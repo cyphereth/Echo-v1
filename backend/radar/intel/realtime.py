@@ -248,18 +248,13 @@ class IntelRealtime:
             session.close()
 
     def _subscribe(self, join_handles: list[str], invite_links: list[tuple]) -> None:
-        prov = self.provider
-        for handle in join_handles:
-            try:
-                if hasattr(prov, "join_channel"):
-                    prov.join_channel(handle)
-            except Exception:
-                log.warning("intel realtime: join failed for %s", handle)
-        for link, _side, _kind in invite_links:
-            try:
-                if hasattr(prov, "join_invite"):
-                    prov.join_invite(link)
-            except Exception:
-                log.warning("intel realtime: invite join failed for %s", link)
-        log.info("intel realtime: subscribe sweep done (%d channels, %d invites)",
-                 len(join_handles), len(invite_links))
+        # Delegate to the shared sweep: it SKIPS already-joined sources (subscribed.json)
+        # and stops cleanly on a long flood-wait, so it only spends the join budget on
+        # sources not yet subscribed — finishing the remainder across runs rather than
+        # re-attempting the ones already done. Args ignored; subscribe.run rebuilds them.
+        try:
+            from .subscribe import run as run_subscribe
+            summary = run_subscribe(self.provider)
+            log.info("intel realtime: subscribe sweep summary %s", summary)
+        except Exception:
+            log.exception("intel realtime: subscribe sweep failed")

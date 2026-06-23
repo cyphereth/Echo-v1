@@ -133,6 +133,23 @@ def test_keyword_relevant():
     assert keyword_relevant("попал storm shadow точно в цель", ["storm shadow"]) is True
 
 
+def test_abbreviation_filter_case_sensitive():
+    """Uppercase military abbreviations admit a post; their lowercase homographs don't."""
+    from radar.intel.collector import keyword_relevant
+
+    # uppercase abbreviations match even with an empty word-lexicon
+    assert keyword_relevant("ночью работала ТА по переднему краю", []) is True
+    assert keyword_relevant("зафиксирован пуск ПКР по цели", []) is True
+    assert keyword_relevant("БПЛА над акваторией порта", []) is True
+    assert keyword_relevant("отработала РСЗО по позициям", []) is True
+
+    # lowercase "та" (pronoun) must NOT trigger — the whole reason for case-sensitivity
+    assert keyword_relevant("та самая история повторяется снова и снова", []) is False
+
+    # abbreviation embedded in a longer uppercase token does not match (word boundary)
+    assert keyword_relevant("колонна ВТА выдвинулась рано утром сегодня", []) is False
+
+
 def test_keyword_relevant_weather_stoplist():
     """Ambiguous weather words (град/смерч) are dropped only in a weather context."""
     from radar.intel.collector import keyword_relevant

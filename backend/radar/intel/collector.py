@@ -88,13 +88,45 @@ _WEATHER_CONTEXT = (
 )
 
 
+# Uppercase military abbreviations from the curator's glossary. Matched
+# CASE-SENSITIVELY (the UPPERCASE form only) at word boundaries: their lowercase forms
+# collide with ordinary Russian words — above all "ТА" (тактическая авиация) vs the
+# pronoun "та", and "АА" vs an interjection. War channels always write these in caps,
+# so requiring caps is both faithful to the source and false-positive-proof. Kept in
+# code (not the lowercased word-lexicon) precisely so they never match in lowercase.
+ABBREVIATIONS = {
+    "МРШ":  "малоразмерный шар / аэростат",
+    "БПЛА": "беспилотный летательный аппарат",
+    "БЭК":  "безэкипажный катер",
+    "КР":   "крылатая ракета",
+    "ПКР":  "противокорабельная ракета (применяется и по суше)",
+    "КРВБ": "крылатая ракета воздушного (авиационного) базирования",
+    "ПРР":  "противорадиолокационная ракета",
+    "УАБ":  "управляемая авиационная бомба",
+    "РСЗО": "реактивная система залпового огня",
+    "ОТРК": "оперативно-тактический ракетный комплекс (баллистика)",
+    "ТА":   "тактическая авиация",
+    "АА":   "армейская авиация",
+}
+# Longer abbreviations first so the alternation prefers КРВБ over КР, ПКР over КР, etc.
+_ABBREV_RE = re.compile(
+    r"(?<!\w)(" + "|".join(re.escape(a) for a in sorted(ABBREVIATIONS, key=len, reverse=True)) + r")(?!\w)"
+)
+
+
 def matched_terms(text: str, lexicon_terms) -> list[str]:
-    """Lexicon terms appearing in text at a word boundary (lowercased, case-insensitive)."""
-    low = (text or "").strip().lower()
+    """Terms appearing in text at a word boundary.
+
+    Two passes: (1) the word-lexicon, lowercased/case-insensitive; (2) the uppercase
+    ABBREVIATIONS, matched case-sensitively against the ORIGINAL text.
+    """
+    raw = (text or "").strip()
+    low = raw.lower()
     out = []
     for term in lexicon_terms:
         if re.search(r"(?<!\w)" + re.escape(term.lower()) + r"(?!\w)", low):
             out.append(term.lower())
+    out.extend(_ABBREV_RE.findall(raw))
     return out
 
 

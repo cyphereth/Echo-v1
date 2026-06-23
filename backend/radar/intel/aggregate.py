@@ -1,10 +1,28 @@
 from __future__ import annotations
+import hashlib
+import re
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import func
 from .models import IntelDirection, IntelMention, IntelIncident, IntelStory, IntelStoryPoint
 
 def _aware(dt):
     return dt if dt is None or dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+_URL_RE = re.compile(r"https?://\S+")
+_NONWORD_RE = re.compile(r"[^\w\s]", re.UNICODE)
+_WS_RE = re.compile(r"\s+")
+
+def content_sig(text: str) -> str:
+    """Stable signature of a post's CONTENT for cross-channel dedup.
+
+    Normalises (lowercase, drop URLs + punctuation/emoji, collapse whitespace) and
+    hashes the first 120 chars — so verbatim reposts collapse even when each channel
+    appends its own footer/links. Empty text → '' (never deduped)."""
+    t = (text or "").lower()
+    t = _URL_RE.sub(" ", t)
+    t = _NONWORD_RE.sub(" ", t)
+    t = _WS_RE.sub(" ", t).strip()[:120]
+    return hashlib.md5(t.encode("utf-8")).hexdigest()[:16] if t else ""
 
 def _sparkline(points) -> list:
     return [int(p.mention_count) for p in sorted(points, key=lambda p: p.bucket_start)][-12:]
@@ -42,7 +60,8 @@ def story_summary(session, story) -> dict:
 def event(m) -> dict:
     return {"id": m.id, "platform": m.platform, "author": m.author, "side": m.side,
             "text": m.text, "url": m.url, "created_at": _aware(m.created_at).isoformat(),
-            "verified": bool(m.verified), "direction": m.direction_id}
+            "verified": bool(m.verified), "direction": m.direction_id,
+            "sig": content_sig(m.text)}
 
 def story_detail(session, story) -> dict:
     base = story_summary(session, story)

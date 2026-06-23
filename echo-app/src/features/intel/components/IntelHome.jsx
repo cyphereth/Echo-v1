@@ -1,6 +1,6 @@
 // Situational Center (home) — «что горит сейчас».
 // KPI strip + Now hot + Alerts + Top stories + Event stream.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../../core/components/icons';
 import { IntelSparkline } from './IntelSparkline';
 import { intelApi, streamLiveEvents, CREDIBILITY, DIRECTION_NAMES, spikeLevel, agoStrShort, SIDE } from '../api';
@@ -54,9 +54,34 @@ export function IntelHome({ window: win, onOpenStory }) {
     return () => { alive = false; stopStream(); clearInterval(kpiTimer); };
   }, [win]);
 
+  // Collapse verbatim cross-channel reposts: events sharing a content signature become
+  // one row (the newest), with a count of how many channels carried it. Keeps the feed
+  // readable instead of repeating the same post once per channel.
+  const feed = useMemo(() => {
+    const out = [];
+    const bySig = new Map();
+    for (const e of stream) {
+      const key = e.sig || `id:${e.id}`;
+      if (bySig.has(key)) {
+        const item = out[bySig.get(key)];
+        item._dups += 1;
+        if (e.author) item._srcs.add(e.author);
+        continue;
+      }
+      bySig.set(key, out.length);
+      out.push({ ...e, _dups: 1, _srcs: new Set(e.author ? [e.author] : []) });
+    }
+    return out;
+  }, [stream]);
+
   if (!data) return <div className={styles.workspace}><div className={styles.empty}>Загрузка обстановки…</div></div>;
 
   const { kpis, hot, alerts, top_stories } = data;
+  const SNIPPET_MAX = 160;
+  const snippet = (t) => {
+    const s = (t || '').replace(/\s+/g, ' ').trim();
+    return s.length > SNIPPET_MAX ? s.slice(0, SNIPPET_MAX) + '…' : s;
+  };
 
   return (
     <div className={styles.workspace}>
@@ -160,7 +185,7 @@ export function IntelHome({ window: win, onOpenStory }) {
             <span className={styles.sectionTitle}>
               <Icon name="radio" size={13} color="#57D2E2" />
               Лента событий
-              <span className={styles.sectionCount}>{stream.length}</span>
+              <span className={styles.sectionCount}>{feed.length}</span>
             </span>
             <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 10, color: '#34D8A0', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
               {flashIds.size > 0 && (
@@ -170,18 +195,21 @@ export function IntelHome({ window: win, onOpenStory }) {
               LIVE
             </span>
           </div>
-          {stream.map(e => {
+          {feed.map(e => {
             const sd = SIDE[e.side] || SIDE.ru;
             const isNew = flashIds.has(e.id);
+            const dups = e._dups || 1;
             return (
-              <div key={e.id} className={isNew ? `${styles.eventRow} ${styles.eventRowNew}` : styles.eventRow}>
+              <div key={e.id} className={isNew ? `${styles.eventRow} ${styles.eventRowNew}` : styles.eventRow}
+                   title={e.text}>
                 <span className={styles.eventSide} style={{ color: sd.color, background: sd.color + '1A' }}>
                   {sd.label}
                 </span>
                 <div className={styles.eventBody}>
-                  <div className={styles.eventText}>{e.text}</div>
+                  <div className={styles.eventText}>{snippet(e.text)}</div>
                   <div className={styles.eventMeta}>
                     {e.author} · {DIRECTION_NAMES[e.direction]?.split(' ')[0] || e.direction}
+                    {dups > 1 ? ` · ${dups} канал.` : ''}
                     {e.verified ? ' · ✓' : ''}
                   </div>
                 </div>

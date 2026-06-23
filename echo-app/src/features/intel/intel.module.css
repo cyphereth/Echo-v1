@@ -404,7 +404,16 @@
   margin-top: 1px;
 }
 .eventBody { flex: 1; min-width: 0; }
-.eventText { font-size: 12.5px; color: #B8C8D8; line-height: 1.4; }
+.eventText {
+  font-size: 12.5px;
+  color: #B8C8D8;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;       /* hard cap: snippets never exceed two lines */
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .eventMeta {
   font-family: var(--font-mono);
   font-size: 10px;

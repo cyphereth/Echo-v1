@@ -1,11 +1,15 @@
-"""Lightweight periodic intel processor.
+"""Lightweight periodic intel processor + source poller.
 
-The realtime listener writes new IntelMention rows the instant a source publishes, but
-clustering (incidents/stories), timeline buckets, and anomaly detection only run inside
-run_intel_tick. With the heavy brand scheduler disabled, nothing would advance those —
-so stories / Горит сейчас / Сигналы would freeze. This ticker runs ONLY the processing
-half of the tick (no TG re-poll: tg_provider=None) on a slow interval, single-threaded,
-so SQLite stays uncontended.
+Runs the full intel cycle on a slow interval, single-threaded, so SQLite stays
+uncontended:
+  1. POLL due IntelProbes via the shared Telegram client — this is what makes a
+     source added through the UI start producing automatically: a new probe's
+     next_run_at defaults to now, so it's "due" and gets read on the next tick
+     (public channels are read WITHOUT joining). Bounded to MAX_INTEL_SOURCES_PER_RUN
+     per tick; each source re-polled ~hourly via its interval_sec.
+  2. PROCESS: cluster new mentions (realtime + polled) into stories, rebuild timeline
+     buckets, run anomaly detection — keeps Горит сейчас / Сигналы / Крупнейшие сюжеты
+     fresh while the heavy brand scheduler stays disabled.
 """
 from __future__ import annotations
 
@@ -41,9 +45,17 @@ class IntelTicker:
         from .passes import run_intel_tick
         # First pass after one interval (let startup settle); then every interval.
         while not self._stop.wait(self.interval):
+            # Shared singleton — the SAME client the realtime listener uses (one TG
+            # session file). None if Telegram isn't configured → process-only fallback.
+            tg = None
+            try:
+                from ..brand.api import _get_tg_provider
+                tg = _get_tg_provider()
+            except Exception:
+                log.exception("intel ticker: could not get TG provider (process-only)")
             session = get_session()
             try:
-                run_intel_tick(session, tg_provider=None)  # process-only, no TG re-poll
+                run_intel_tick(session, tg_provider=tg)  # poll due sources + process
             except Exception:
                 log.exception("intel tick failed (will retry next interval)")
                 session.rollback()

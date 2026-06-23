@@ -389,7 +389,11 @@ def intel_sources_create(
     existing = session.query(IntelProbe).filter_by(query=link).first()
     if existing:
         return {**_probe_dict(existing), "created": False}
-    probe = IntelProbe(platform="telegram", kind=kind, query=link, side=side)
+    # next_run_at in the past → the source jumps to the FRONT of the due queue, so the
+    # ticker polls it on its very next pass (within one tick) instead of after the
+    # backlog of already-scheduled sources.
+    probe = IntelProbe(platform="telegram", kind=kind, query=link, side=side,
+                       next_run_at=datetime(1970, 1, 1, tzinfo=timezone.utc))
     session.add(probe)
     session.commit()
     session.refresh(probe)

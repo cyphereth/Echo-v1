@@ -1,7 +1,7 @@
 // Intel API layer — mock-first. INTEL_USE_MOCK=true отдаёт моки из data/mock.js;
 // false — ходит в /intel/* (бэкенд intel-домена, строится отдельно).
 // Контракт идентичен (§6 спеки), переключение прозрачное для компонентов.
-import { request } from '../../core/api/client';
+import { request, getToken } from '../../core/api/client';
 import { INTEL_USE_MOCK, mockApi } from './data/mock';
 
 const passthrough = (path, params) => {
@@ -23,6 +23,61 @@ export const intelApi = {
   addSource: (body)           => request('/intel/sources', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }),
   deleteSource: (id)          => request('/intel/sources/' + id, { method: 'DELETE' }),
 };
+
+// ── Live event stream (SSE) ─────────────────────────────────────────────────
+// Opens a long-lived fetch stream to /intel/stream/live and calls onEvent(e) for
+// each new mention pushed by the backend (~1-2s after a source publishes). Uses
+// fetch (not EventSource) so the Bearer token rides in the Authorization header.
+// Auto-reconnects, resuming from the last id seen so no event is missed/duplicated.
+// Returns a stop() function. No-op in mock mode.
+export function streamLiveEvents({ afterId = 0, direction, onEvent }) {
+  if (INTEL_USE_MOCK) return () => {};
+  let stopped = false;
+  let lastId = afterId || 0;
+
+  async function loop() {
+    while (!stopped) {
+      try {
+        const token = getToken();
+        const params = { after_id: String(lastId) };
+        if (direction) params.direction = direction;
+        const qs = new URLSearchParams(params).toString();
+        const res = await fetch(`/intel/stream/live?${qs}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok || !res.body) throw new Error('sse ' + res.status);
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        while (!stopped) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let sep;
+          while ((sep = buf.indexOf('\n\n')) >= 0) {
+            const frame = buf.slice(0, sep);
+            buf = buf.slice(sep + 2);
+            for (const line of frame.split('\n')) {
+              if (!line.startsWith('data:')) continue;       // skip ": ping" heartbeats
+              const raw = line.slice(5).trim();
+              if (!raw) continue;
+              try {
+                const ev = JSON.parse(raw);
+                if (ev && ev.id) lastId = Math.max(lastId, ev.id);
+                onEvent(ev);
+              } catch { /* ignore malformed frame */ }
+            }
+          }
+        }
+      } catch {
+        if (stopped) return;
+      }
+      if (!stopped) await new Promise(r => setTimeout(r, 2000));  // backoff, then resume
+    }
+  }
+  loop();
+  return () => { stopped = true; };
+}
 
 // ── Витринные форматтеры ────────────────────────────────────────────────────
 export const CREDIBILITY = {

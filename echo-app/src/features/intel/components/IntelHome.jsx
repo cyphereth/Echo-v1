@@ -3,13 +3,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '../../../core/components/icons';
 import { IntelSparkline } from './IntelSparkline';
-import { intelApi, CREDIBILITY, DIRECTION_NAMES, spikeLevel, agoStrShort, SIDE } from '../api';
+import { intelApi, streamLiveEvents, CREDIBILITY, DIRECTION_NAMES, spikeLevel, agoStrShort, SIDE } from '../api';
 import styles from '../intel.module.css';
 
-// How often the situational center re-polls the backend for new events. The realtime
-// listener writes new mentions the instant a channel publishes; this surfaces them in
-// the UI without a page refresh.
-const LIVE_POLL_MS = 12000;
+// KPI / hot / alerts refresh — not latency-critical, so a slow poll is fine. The event
+// FEED is fed by an SSE push stream (~1-2s latency), not this interval.
+const KPI_POLL_MS = 15000;
+const STREAM_MAX  = 40;   // cap the in-memory feed so it can't grow unbounded
+const FLASH_MS    = 2600; // how long a freshly arrived row stays highlighted
 
 export function IntelHome({ window: win, onOpenStory }) {
   const [data, setData]         = useState(null);
@@ -20,30 +21,37 @@ export function IntelHome({ window: win, onOpenStory }) {
   useEffect(() => {
     let alive = true;
     seenRef.current = new Set();
+    let stopStream = () => {};
 
-    const tick = (first) => {
+    intelApi.overview(win).then(d => { if (alive) setData(d); }).catch(() => {});
+
+    // Initial snapshot, then resume the live push stream from the newest id we have.
+    intelApi.stream({ window: win, limit: 18 }).then(events => {
+      if (!alive) return;
+      const arr = Array.isArray(events) ? events : [];
+      seenRef.current = new Set(arr.map(e => e.id));
+      setStream(arr);
+      const maxId = arr.reduce((m, e) => Math.max(m, e.id || 0), 0);
+      stopStream = streamLiveEvents({
+        afterId: maxId,
+        onEvent: (e) => {
+          if (!alive || !e || e.id == null || seenRef.current.has(e.id)) return;
+          seenRef.current.add(e.id);
+          setStream(prev => [e, ...prev].slice(0, STREAM_MAX));
+          setFlashIds(prev => { const n = new Set(prev); n.add(e.id); return n; });
+          setTimeout(() => {
+            if (!alive) return;
+            setFlashIds(prev => { const n = new Set(prev); n.delete(e.id); return n; });
+          }, FLASH_MS);
+        },
+      });
+    }).catch(() => {});
+
+    const kpiTimer = setInterval(() => {
       intelApi.overview(win).then(d => { if (alive) setData(d); }).catch(() => {});
-      intelApi.stream({ window: win, limit: 18 }).then(events => {
-        if (!alive) return;
-        const arr = Array.isArray(events) ? events : [];
-        if (first) {
-          seenRef.current = new Set(arr.map(e => e.id));
-          setStream(arr);
-          return;
-        }
-        const fresh = arr.filter(e => !seenRef.current.has(e.id));
-        setStream(arr);   // refresh either way so relative "ago" labels keep ticking
-        if (fresh.length) {
-          fresh.forEach(e => seenRef.current.add(e.id));
-          setFlashIds(new Set(fresh.map(e => e.id)));
-          setTimeout(() => { if (alive) setFlashIds(new Set()); }, LIVE_POLL_MS - 1000);
-        }
-      }).catch(() => {});
-    };
+    }, KPI_POLL_MS);
 
-    tick(true);
-    const timer = setInterval(() => tick(false), LIVE_POLL_MS);
-    return () => { alive = false; clearInterval(timer); };
+    return () => { alive = false; stopStream(); clearInterval(kpiTimer); };
   }, [win]);
 
   if (!data) return <div className={styles.workspace}><div className={styles.empty}>Загрузка обстановки…</div></div>;

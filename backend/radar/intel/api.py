@@ -9,11 +9,15 @@ Domain isolation: only imports from `.` / `..core.*` / `..models`.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi.responses import StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..core.db import get_session
@@ -99,6 +103,93 @@ def intel_stream(
             q = q.filter(IntelMention.direction_id == d.id)
     rows = q.order_by(IntelMention.created_at.desc()).limit(limit).all()
     return [aggregate.event(m) for m in rows]
+
+
+def _auth_user_from_header(authorization: str) -> User:
+    """Authenticate from a raw Authorization header using a short-lived session.
+
+    Used by the SSE stream, which must NOT hold a request-scoped session open for the
+    whole (possibly hours-long) connection."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Not authenticated")
+    try:
+        payload = decode_token(authorization.split(" ", 1)[1])
+    except Exception:
+        raise HTTPException(401, "Invalid or expired token")
+    s = get_session()
+    try:
+        user = s.get(User, payload.get("uid"))
+    finally:
+        s.close()
+    if not user:
+        raise HTTPException(401, "User not found")
+    return user
+
+
+# Server-side tail interval. The realtime listener writes new mentions the instant a
+# source publishes; this loop forwards them to the browser within one cycle → ~1-2s
+# end-to-end latency without a per-event client round-trip.
+INTEL_SSE_INTERVAL = 1.0
+
+
+@router.get("/intel/stream/live")
+async def intel_stream_live(
+    after_id: int = 0,
+    direction: Optional[str] = None,
+    authorization: str = Header(None),
+):
+    """Server-Sent Events: pushes each new IntelMention (id > after_id) as it lands.
+
+    The browser opens this once and receives `data: {event}` frames live. On reconnect
+    it passes the last id it saw via after_id, so no event is missed or duplicated.
+    """
+    _auth_user_from_header(authorization)
+
+    direction_id: Optional[int] = None
+    if direction:
+        s = get_session()
+        try:
+            d = s.query(IntelDirection).filter_by(key=direction).first()
+            direction_id = d.id if d else None
+        finally:
+            s.close()
+
+    async def event_gen():
+        last_id = after_id
+        if last_id <= 0:
+            s = get_session()
+            try:
+                last_id = s.query(func.max(IntelMention.id)).scalar() or 0
+            finally:
+                s.close()
+        # Open the stream immediately so the client knows it's connected.
+        yield ": connected\n\n"
+        while True:
+            s = get_session()
+            try:
+                q = s.query(IntelMention).filter(IntelMention.id > last_id)
+                if direction_id is not None:
+                    q = q.filter(IntelMention.direction_id == direction_id)
+                rows = q.order_by(IntelMention.id.asc()).limit(100).all()
+                payloads = [(m.id, json.dumps(aggregate.event(m), ensure_ascii=False)) for m in rows]
+            finally:
+                s.close()
+            for mid, payload in payloads:
+                last_id = mid
+                yield f"data: {payload}\n\n"
+            # Heartbeat keeps the connection alive through proxies between bursts.
+            yield ": ping\n\n"
+            await asyncio.sleep(INTEL_SSE_INTERVAL)
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # disable proxy buffering so frames flush at once
+        },
+    )
 
 
 @router.get("/intel/stories")

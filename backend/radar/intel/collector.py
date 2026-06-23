@@ -77,25 +77,49 @@ def _is_invite_link(raw: str) -> bool:
     return "/+" in (raw or "") or "joinchat" in s
 
 
-def keyword_or_geo_relevant(text: str, lexicon_terms) -> bool:
-    """Return True if text hits a geo direction or any lexicon term.
+# Ambiguous lexicon terms: real military hardware in the user's list, but also
+# everyday weather words. A post whose ONLY keyword hits are these and that reads
+# like a weather report is dropped (false-positive guard). Geo is NOT an admit path.
+AMBIGUOUS_WEATHER_TERMS = {"град", "смерч", "торнадо"}
+_WEATHER_CONTEXT = (
+    "погод", "синоптик", "метеор", "прогноз", "осадк", "ливень", "ливн",
+    "температур", "градус", "гроза", "грозов", "дожд", "снегопад", "снег ",
+    "облачн", "потепл", "похолод", "циклон", "антициклон", "штормовое предупрежд",
+)
 
-    Shared gate used by both channel and chat branches.  The ``lexicon_terms``
-    iterable is loaded once per :func:`collect_probe` call — no per-message DB
-    queries.
 
-    - detect_direction(text) is not None → True (geo match)
-    - any term in lexicon_terms found at a word boundary (case-insensitive) → True
-    - otherwise → False
-    """
-    stripped = (text or "").strip()
-    if detect_direction(stripped) is not None:
-        return True
-    low = stripped.lower()
+def matched_terms(text: str, lexicon_terms) -> list[str]:
+    """Lexicon terms appearing in text at a word boundary (lowercased, case-insensitive)."""
+    low = (text or "").strip().lower()
+    out = []
     for term in lexicon_terms:
         if re.search(r"(?<!\w)" + re.escape(term.lower()) + r"(?!\w)", low):
-            return True
-    return False
+            out.append(term.lower())
+    return out
+
+
+def _looks_like_weather(text: str) -> bool:
+    low = (text or "").lower()
+    return any(ctx in low for ctx in _WEATHER_CONTEXT)
+
+
+def keyword_relevant(text: str, lexicon_terms) -> bool:
+    """Return True if text contains a military lexicon term.
+
+    KEYWORD-ONLY: a geo-direction match is NOT an admit path (detect_direction is used
+    solely for direction TAGGING elsewhere). The ``lexicon_terms`` iterable is loaded
+    once per :func:`collect_probe` call — no per-message DB queries.
+
+    Weather false-positive guard: if every matched term is an ambiguous weather word
+    (град/смерч/торнадо) AND the text reads like a weather report, drop it.
+    """
+    hits = matched_terms(text, lexicon_terms)
+    if not hits:
+        return False
+    non_ambiguous = [t for t in hits if t not in AMBIGUOUS_WEATHER_TERMS]
+    if not non_ambiguous and _looks_like_weather(text):
+        return False
+    return True
 
 
 def chat_message_relevant(text: str, author: str, lexicon_terms: tuple = ()) -> bool:
@@ -106,9 +130,7 @@ def chat_message_relevant(text: str, author: str, lexicon_terms: tuple = ()) -> 
     - text shorter than MIN_TEXT_LEN after stripping
     - no alphabetic word in the text
 
-    Admit conditions (any → True) — delegated to keyword_or_geo_relevant:
-    - detect_direction(text) is not None (geo hit)
-    - any lexicon term appears in text (word-boundary, case-insensitive)
+    Admit: delegated to keyword_relevant (military keyword present, weather-guarded).
     """
     stripped = (text or "").strip()
 
@@ -120,7 +142,7 @@ def chat_message_relevant(text: str, author: str, lexicon_terms: tuple = ()) -> 
     if not re.search(r"[a-zA-Zа-яА-ЯёЁ]", stripped):
         return False
 
-    return keyword_or_geo_relevant(stripped, lexicon_terms)
+    return keyword_relevant(stripped, lexicon_terms)
 
 
 # ── Core collection ────────────────────────────────────────────────────────────
@@ -148,7 +170,7 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
 
     try:
         # Load lexicon terms once per call — shared by both channel and chat branches.
-        # Word-boundary matching is done inside keyword_or_geo_relevant / chat_message_relevant.
+        # Word-boundary matching is done inside keyword_relevant / chat_message_relevant.
         lexicon_terms = [t for (t,) in session.query(IntelLexicon.term).all()]
         if not lexicon_terms:
             log.warning("intel lexicon is empty — channel posts kept only on geo match (run lexicon seed)")
@@ -247,9 +269,10 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                     if len(clean) < MIN_TEXT_LEN:
                         continue
 
-                    # Keyword/geo relevance gate — keep only military-relevant posts.
+                    # Keyword relevance gate — keep only military-relevant posts
+                    # (geo is used for tagging below, not as an admit path).
                     text = post.text or ""
-                    if not keyword_or_geo_relevant(text, lexicon_terms):
+                    if not keyword_relevant(text, lexicon_terms):
                         continue
 
                     dir_id = resolve_direction_id(session, detect_direction(text))

@@ -112,22 +112,37 @@ def test_channel_keeps_military_drops_general():
     )
 
 
-# ── 3. keyword_or_geo_relevant unit tests ─────────────────────────────────────
+# ── 3. keyword_relevant unit tests (keyword-only, geo is NOT an admit path) ────
 
-def test_keyword_or_geo_relevant():
-    from radar.intel.collector import keyword_or_geo_relevant
+def test_keyword_relevant():
+    from radar.intel.collector import keyword_relevant
 
-    # geo match (no lexicon needed)
-    assert keyword_or_geo_relevant("бои под Суджей", []) is True
+    # geo-only text with NO lexicon term → dropped (geo no longer admits)
+    assert keyword_relevant("бои под Суджей", []) is False
 
-    # lexicon match (no geo)
-    assert keyword_or_geo_relevant("выпустили калибр", ["калибр"]) is True
+    # lexicon match
+    assert keyword_relevant("выпустили калибр", ["калибр"]) is True
 
     # no match → dropped
-    assert keyword_or_geo_relevant("обычная погода завтра", ["калибр"]) is False
+    assert keyword_relevant("обычная погода завтра", ["калибр"]) is False
 
     # term must match at word boundary — embedded substring should not match
-    assert keyword_or_geo_relevant("некалибрный шуруп", ["калибр"]) is False
+    assert keyword_relevant("некалибрный шуруп", ["калибр"]) is False
 
     # multi-word term works
-    assert keyword_or_geo_relevant("попал storm shadow точно в цель", ["storm shadow"]) is True
+    assert keyword_relevant("попал storm shadow точно в цель", ["storm shadow"]) is True
+
+
+def test_keyword_relevant_weather_stoplist():
+    """Ambiguous weather words (град/смерч) are dropped only in a weather context."""
+    from radar.intel.collector import keyword_relevant
+
+    # ambiguous-only + weather context → dropped (false positive)
+    assert keyword_relevant("прогноз погоды: ожидается град и гроза", ["град"]) is False
+    assert keyword_relevant("в регионе прошёл смерч, синоптики предупреждают", ["смерч"]) is False
+
+    # ambiguous term but NO weather context → kept (real military "Град")
+    assert keyword_relevant("работает град по позициям противника", ["град"]) is True
+
+    # ambiguous + weather context BUT also a non-ambiguous military term → kept
+    assert keyword_relevant("несмотря на грозу, зафиксирован прилёт града", ["град", "прилёт"]) is True

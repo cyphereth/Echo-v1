@@ -14,10 +14,11 @@ def _sess():
     return Session(eng)
 
 def test_collect_probe_writes_intel_mention_with_side():
-    from radar.intel.models import IntelDirection, IntelProbe, IntelMention
+    from radar.intel.models import IntelDirection, IntelProbe, IntelMention, IntelLexicon
     from radar.intel import collector
     s = _sess()
     d = IntelDirection(key="kursk", name="Курское"); s.add(d); s.flush()
+    s.add(IntelLexicon(term="удар", meaning="strike", category="military"))
     p = IntelProbe(direction_id=d.id, platform="telegram", kind="channel", query="@mil", side="ru")
     s.add(p); s.commit()
     posts = [SimpleNamespace(post_id="@mil/1", author="@mil", text="удар по складу под Суджей сегодня",
@@ -29,10 +30,11 @@ def test_collect_probe_writes_intel_mention_with_side():
     assert m.side == "ru" and m.direction_id == d.id
 
 def test_collect_probe_dedups_on_platform_post_id():
-    from radar.intel.models import IntelDirection, IntelProbe, IntelMention
+    from radar.intel.models import IntelDirection, IntelProbe, IntelMention, IntelLexicon
     from radar.intel import collector
     s = _sess()
     d = IntelDirection(key="kursk", name="Курское"); s.add(d); s.flush()
+    s.add(IntelLexicon(term="удар", meaning="strike", category="military"))
     p = IntelProbe(direction_id=d.id, platform="telegram", kind="channel", query="@mil", side="ru")
     s.add(p); s.commit()
     post = SimpleNamespace(post_id="@mil/1", author="@mil", text="удар по складу под Суджей сегодня",

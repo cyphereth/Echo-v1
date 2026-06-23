@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 
 from sqlalchemy.exc import IntegrityError
 
@@ -34,11 +35,16 @@ from .collector import (
     MIN_TEXT_LEN,
     _clean_handle,
     _is_invite_link,
-    keyword_or_geo_relevant,
+    keyword_relevant,
     chat_message_relevant,
 )
 
 log = logging.getLogger("radar.intel.realtime")
+
+# How often the running listener re-reads the keyword lexicon from the DB, so edits to
+# the filter take effect live without a backend restart (the poller already reloads
+# per-call; this gives the realtime path the same freshness within the TTL).
+LEXICON_TTL_SEC = 60.0
 
 
 # ── Source map ──────────────────────────────────────────────────────────────────
@@ -87,7 +93,7 @@ def store_realtime_post(session, post, side, kind, lexicon_terms) -> bool:
         clean = " ".join(w for w in text.split() if not w.startswith("#")).strip()
         if len(clean) < MIN_TEXT_LEN:
             return False
-        if not keyword_or_geo_relevant(text, lexicon_terms):
+        if not keyword_relevant(text, lexicon_terms):
             return False
 
     dir_id = resolve_direction_id(session, detect_direction(text))
@@ -130,6 +136,7 @@ class IntelRealtime:
         self._by_user: dict[str, dict] = {}
         self._id_map: dict[int, dict] = {}
         self._lexicon: list[str] = []
+        self._lex_loaded_at: float = 0.0
 
     def start(self) -> bool:
         client = getattr(self.provider, "_client", None)
@@ -146,12 +153,13 @@ class IntelRealtime:
             self._lexicon = [t for (t,) in session.query(IntelLexicon.term).all()]
         finally:
             session.close()
+        self._lex_loaded_at = time.monotonic()
 
         if not self._by_user:
             log.warning("intel realtime: no sources configured — not listening")
             return False
         if not self._lexicon:
-            log.warning("intel realtime: lexicon empty — channel posts kept only on geo match")
+            log.warning("intel realtime: lexicon empty — keyword filter will drop everything")
 
         if os.getenv("ENABLE_INTEL_REALTIME_JOIN", "0") == "1":
             threading.Thread(
@@ -179,6 +187,18 @@ class IntelRealtime:
 
     # -- internals --
 
+    def _refresh_lexicon(self) -> None:
+        """Reload the keyword lexicon from the DB if the TTL has elapsed, so live edits
+        to the filter take effect without restarting the backend."""
+        if time.monotonic() - self._lex_loaded_at < LEXICON_TTL_SEC:
+            return
+        session = get_session()
+        try:
+            self._lexicon = [t for (t,) in session.query(IntelLexicon.term).all()]
+        finally:
+            session.close()
+        self._lex_loaded_at = time.monotonic()
+
     def _lookup(self, username: str, chat_id) -> dict | None:
         info = self._by_user.get((username or "").lower())
         if info is None and chat_id is not None:
@@ -199,6 +219,7 @@ class IntelRealtime:
         if getattr(event, "chat_id", None) is not None:
             self._id_map.setdefault(event.chat_id, info)
 
+        self._refresh_lexicon()
         side, kind = info["side"], info["kind"]
         msg = event.message
         try:

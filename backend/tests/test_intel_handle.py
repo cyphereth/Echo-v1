@@ -39,10 +39,11 @@ def test_clean_handle():
 
 def test_collect_uses_clean_handle():
     from radar.intel import seed, collector
-    from radar.intel.models import IntelProbe, IntelMention, IntelDirection
+    from radar.intel.models import IntelProbe, IntelMention, IntelDirection, IntelLexicon
 
     s = _sess()
     seed.ensure_default_directions(s)
+    s.add(IntelLexicon(term="удар", meaning="strike", category="military"))
 
     p = IntelProbe(platform="telegram", kind="channel", query="https://t.me/rbc", side="ru")
     s.add(p)

@@ -14,9 +14,12 @@ def _sess():
     return Session(eng)
 
 def test_channel_post_tagged_by_geo():
+    # Geo is no longer an ADMIT path, but it still TAGS direction. Seed a keyword so
+    # the post passes the gate, then assert geo tagged it to the kursk direction.
     from radar.intel import seed, collector
-    from radar.intel.models import IntelProbe, IntelMention, IntelDirection
+    from radar.intel.models import IntelProbe, IntelMention, IntelDirection, IntelLexicon
     s = _sess(); seed.ensure_default_directions(s)
+    s.add(IntelLexicon(term="удар", meaning="strike", category="military"))
     p = IntelProbe(platform="telegram", kind="channel", query="@rybar", side="ru"); s.add(p); s.commit()
     posts=[SimpleNamespace(post_id="@rybar/1", author="@rybar", text="удар по складу под Суджей",
                            followers=0, created_at=datetime.now(timezone.utc), hashtags=[], likes=0)]
@@ -59,12 +62,13 @@ def test_channel_keyword_match_no_geo_goes_unassigned():
 
 def test_chat_noise_filter_drops_irrelevant_keeps_relevant():
     from radar.intel import seed, collector
-    from radar.intel.models import IntelProbe, IntelMention
+    from radar.intel.models import IntelProbe, IntelMention, IntelLexicon
     s = _sess(); seed.ensure_default_directions(s)
+    s.add(IntelLexicon(term="прилёт", meaning="strike arrival", category="explosions_sounds"))
     p = IntelProbe(platform="telegram", kind="chat", query="@chat", side="ru"); s.add(p); s.commit()
     msgs = [
         SimpleNamespace(post_id="@chat/1", author="u1", text="ок", followers=0, created_at=datetime.now(timezone.utc), hashtags=[], likes=0),  # noise (too short)
-        SimpleNamespace(post_id="@chat/2", author="u2", text="прилёт под Суджей, вторичная детонация", followers=0, created_at=datetime.now(timezone.utc), hashtags=[], likes=0),  # relevant (geo)
+        SimpleNamespace(post_id="@chat/2", author="u2", text="прилёт под Суджей, вторичная детонация", followers=0, created_at=datetime.now(timezone.utc), hashtags=[], likes=0),  # relevant (keyword "прилёт")
     ]
     prov=SimpleNamespace(search_chat=lambda handle,term,limit=20,min_id=0: msgs)
     n=collector.collect_probe(s, p, prov)

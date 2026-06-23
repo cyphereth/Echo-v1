@@ -19,8 +19,9 @@ def test_run_intel_collect_noop_without_provider():
 
 def test_run_intel_collect_collects_due_channel():
     from radar.intel import seed, passes
-    from radar.intel.models import IntelProbe, IntelMention
+    from radar.intel.models import IntelProbe, IntelMention, IntelLexicon
     s = _sess(); seed.ensure_default_directions(s)
+    s.add(IntelLexicon(term="бои", meaning="combat", category="military"))
     past = datetime.now(timezone.utc) - timedelta(hours=1)
     s.add(IntelProbe(platform="telegram", kind="channel", query="@rybar", side="ru", next_run_at=past)); s.commit()
     posts=[SimpleNamespace(post_id="@rybar/1", author="@rybar", text="бои под Авдеевкой нарастают сегодня",
@@ -35,7 +36,9 @@ def test_intel_tick_collects_and_clusters(monkeypatch):
     from radar.intel.models import IntelProbe, IntelMention, IntelStory, IntelDirection
     from datetime import datetime, timezone, timedelta
     from types import SimpleNamespace
+    from radar.intel.models import IntelLexicon
     s = _sess(); seed.ensure_default_directions(s)
+    s.add(IntelLexicon(term="удар", meaning="strike", category="military"))
     past = datetime.now(timezone.utc) - timedelta(hours=1)
     s.add(IntelProbe(platform="telegram", kind="channel", query="@rybar", side="ru", next_run_at=past)); s.commit()
     posts=[SimpleNamespace(post_id=f"@rybar/{i}", author=f"@a{i}", text="удар по Работино, активизация",
@@ -58,7 +61,7 @@ def test_intel_tick_stories_persist_across_session_boundary(tmp_path):
     from radar.models import Base
     import radar.intel.models  # noqa: F401 — registers IntelDirection etc.
     from radar.intel import seed, passes
-    from radar.intel.models import IntelProbe, IntelStory, IntelDirection
+    from radar.intel.models import IntelProbe, IntelStory, IntelDirection, IntelLexicon
     from datetime import datetime, timezone, timedelta
     from types import SimpleNamespace
 
@@ -83,6 +86,7 @@ def test_intel_tick_stories_persist_across_session_boundary(tmp_path):
     # Session A: seed, run tick, then CLOSE
     with Session(engine) as s:
         seed.ensure_default_directions(s)
+        s.add(IntelLexicon(term="удар", meaning="strike", category="military"))
         s.add(IntelProbe(
             platform="telegram", kind="channel", query="@r", side="ru",
             next_run_at=datetime.now(timezone.utc) - timedelta(hours=1),

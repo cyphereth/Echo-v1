@@ -25,6 +25,7 @@ from . import seed as seed_module
 log = logging.getLogger(__name__)
 
 _scheduler = None
+_intel_realtime = None
 
 
 @asynccontextmanager
@@ -58,12 +59,31 @@ async def lifespan(app: FastAPI):
         _scheduler.start()
         log.info("Auto-collect scheduler started (tick=%ss)", _scheduler._tick_sec)
 
+    # Intel realtime listener — receives monitored channels/chats the instant they
+    # publish, on the SAME shared Telethon client the poller uses (one session file).
+    # Off by default so a console-only collect run doesn't open the update stream.
+    global _intel_realtime
+    if os.getenv("ENABLE_INTEL_REALTIME", "0") == "1" and _intel_realtime is None:
+        from .brand.api import _get_tg_provider
+        tg = _get_tg_provider()
+        if tg is not None:
+            from .intel.realtime import IntelRealtime
+            listener = IntelRealtime(tg)
+            if listener.start():
+                _intel_realtime = listener
+                log.info("Intel realtime listener started")
+        else:
+            log.warning("Intel realtime requested but no Telegram provider available")
+
     yield
 
     # --- shutdown ---
     if _scheduler is not None:
         _scheduler.stop()
         log.info("Auto-collect scheduler stopped")
+    if _intel_realtime is not None:
+        _intel_realtime.stop()
+        log.info("Intel realtime listener stopped")
 
 
 app = FastAPI(title="Echo API", version="4.0.0", lifespan=lifespan)

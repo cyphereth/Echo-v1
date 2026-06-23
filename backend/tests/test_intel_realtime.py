@@ -1,0 +1,77 @@
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
+
+def _sess():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from radar.models import Base
+    import radar.intel.models  # noqa
+    eng = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(eng)
+    return Session(eng)
+
+
+def _post(post_id, text, author="@src"):
+    return SimpleNamespace(
+        post_id=post_id, platform="telegram", author=author, followers=0,
+        text=text, hashtags=[], created_at=datetime.now(timezone.utc),
+        likes=0, views=0, comments=0, shares=0, sound_id=None,
+    )
+
+
+def test_build_source_map_splits_public_and_invite():
+    from radar.intel.realtime import build_source_map
+    from radar.intel.models import IntelProbe
+    s = _sess()
+    s.add_all([
+        IntelProbe(platform="telegram", kind="channel", query="https://t.me/nexta_live", side="by"),
+        IntelProbe(platform="telegram", kind="chat", query="@some_chat", side="ru"),
+        IntelProbe(platform="telegram", kind="chat", query="https://t.me/+AbCdEf123", side="ua"),
+    ])
+    s.commit()
+    by_user, join_handles, invite_links = build_source_map(s)
+    assert by_user["nexta_live"] == {"side": "by", "kind": "channel", "handle": "@nexta_live"}
+    assert by_user["some_chat"]["side"] == "ru"
+    assert "@nexta_live" in join_handles and "@some_chat" in join_handles
+    assert len(invite_links) == 1 and invite_links[0][1] == "ua"
+    # invite link is NOT in the username lookup (no resolvable @handle)
+    assert all("+" not in k for k in by_user)
+
+
+def test_store_channel_post_relevance_and_dedup():
+    from radar.intel import seed
+    from radar.intel.realtime import store_realtime_post
+    from radar.intel.models import IntelMention, IntelLexicon
+    s = _sess()
+    seed.ensure_default_directions(s)
+    s.add(IntelLexicon(term="обстрел", meaning="shelling", category="military"))
+    s.commit()
+    lex = ["обстрел"]
+
+    # irrelevant channel post → not stored
+    assert store_realtime_post(s, _post("c/1", "сегодня хорошая погода и солнце светит ярко"), "ru", "channel", lex) is False
+    # relevant channel post → stored
+    assert store_realtime_post(s, _post("c/2", "сообщают про обстрел района сегодня вечером сильный"), "ru", "channel", lex) is True
+    s.commit()
+    assert s.query(IntelMention).count() == 1
+    # same post_id again (realtime + poll overlap) → deduped, no second row
+    assert store_realtime_post(s, _post("c/2", "сообщают про обстрел района сегодня вечером сильный"), "ru", "channel", lex) is False
+    s.commit()
+    assert s.query(IntelMention).count() == 1
+
+
+def test_store_short_channel_post_dropped():
+    from radar.intel import seed
+    from radar.intel.realtime import store_realtime_post
+    from radar.intel.models import IntelMention, IntelLexicon
+    s = _sess()
+    seed.ensure_default_directions(s)
+    s.add(IntelLexicon(term="обстрел", meaning="shelling", category="military"))
+    s.commit()
+    # contains the keyword but too short after stripping → dropped by length gate
+    assert store_realtime_post(s, _post("c/3", "обстрел"), "ru", "channel", ["обстрел"]) is False
+    s.commit()
+    assert s.query(IntelMention).count() == 0

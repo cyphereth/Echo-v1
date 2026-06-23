@@ -304,6 +304,70 @@ class TelegramProvider(SearchProvider):
             "participants": int(getattr(linked, "participants_count", 0) or 0),
         }
 
+    def join_channel(self, handle: str) -> bool:
+        """Subscribe the account to a public channel/group so its messages start
+        arriving on the realtime update stream. Idempotent — already-joined is a no-op.
+        Returns True on success (or already-member), False if the channel is
+        unavailable. Raises TelegramFloodWait so the caller can back off."""
+        from telethon.tl.functions.channels import JoinChannelRequest
+        from telethon.errors import (
+            FloodWaitError, UserAlreadyParticipantError, InviteRequestSentError,
+        )
+        h = handle if handle.startswith("@") else f"@{handle}"
+        try:
+            ent = self._await(self._client.get_entity(h))
+            self._await(self._client(JoinChannelRequest(ent)))
+            return True
+        except UserAlreadyParticipantError:
+            return True
+        except InviteRequestSentError:
+            # Moderated group — a join request was submitted and awaits admin approval.
+            # Treat as done so we don't keep re-requesting; membership (and realtime
+            # delivery) starts once an admin approves.
+            log.info("Telegram join request sent, awaiting approval (%s)", h)
+            return True
+        except FloodWaitError as e:
+            log.warning("Telegram flood wait %ds", e.seconds)
+            raise TelegramFloodWait(e.seconds)
+        except Exception as e:
+            log.warning("Telegram join failed (%s): %s", h, type(e).__name__)
+            return False
+
+    def join_invite(self, link: str) -> bool:
+        """Join a private chat via its invite link (t.me/+HASH or t.me/joinchat/HASH)
+        so its messages arrive on the realtime stream. Idempotent. Returns True on
+        success (or already-member); raises TelegramFloodWait on flood."""
+        from telethon.tl.functions.messages import ImportChatInviteRequest
+        from telethon.errors import (
+            FloodWaitError, UserAlreadyParticipantError, InviteHashExpiredError,
+            InviteHashInvalidError,
+        )
+        raw = (link or "").strip()
+        # Extract the invite hash from t.me/+HASH or t.me/joinchat/HASH
+        if "/+" in raw:
+            invite_hash = raw.split("/+", 1)[1]
+        elif "joinchat/" in raw:
+            invite_hash = raw.split("joinchat/", 1)[1]
+        else:
+            invite_hash = raw.lstrip("+")
+        invite_hash = invite_hash.strip("/").split("?", 1)[0]
+        if not invite_hash:
+            return False
+        try:
+            self._await(self._client(ImportChatInviteRequest(invite_hash)))
+            return True
+        except UserAlreadyParticipantError:
+            return True
+        except FloodWaitError as e:
+            log.warning("Telegram flood wait %ds", e.seconds)
+            raise TelegramFloodWait(e.seconds)
+        except (InviteHashExpiredError, InviteHashInvalidError) as e:
+            log.warning("Telegram invite invalid (%s): %s", raw, type(e).__name__)
+            return False
+        except Exception as e:
+            log.warning("Telegram invite join failed (%s): %s", raw, type(e).__name__)
+            return False
+
     def search_chat(self, handle: str, term: str, limit: int = 20, min_id: int = 0) -> list[Post]:
         """Server-side search inside one public group for `term`, newest first.
         `min_id` returns only messages newer than that id (the chat's watermark), so

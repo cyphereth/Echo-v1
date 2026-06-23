@@ -30,3 +30,6 @@ node_modules/
 # Local tooling/agent dirs
 .claude/
 .understand-anything/
+
+# Intel realtime subscription state (per-account runtime, not code)
+backend/radar/intel/data/subscribed.json

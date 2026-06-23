@@ -384,6 +384,13 @@
   border-bottom: 1px solid rgba(43,179,199,.05);
 }
 .eventRow:last-child { border-bottom: none; }
+/* Freshly arrived live event — brief green wash + slide-in so new posts are obvious. */
+.eventRowNew { animation: intelEventIn 2.6s var(--ease-out); }
+@keyframes intelEventIn {
+  0%   { background: rgba(52,216,160,.20); transform: translateY(-4px); opacity: .35; }
+  14%  { opacity: 1; transform: translateY(0); }
+  100% { background: transparent; transform: translateY(0); }
+}
 .eventSide {
   font-family: var(--font-mono);
   font-size: 9px;

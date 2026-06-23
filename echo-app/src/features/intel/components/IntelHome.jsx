@@ -1,20 +1,49 @@
 // Situational Center (home) — «что горит сейчас».
 // KPI strip + Now hot + Alerts + Top stories + Event stream.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from '../../../core/components/icons';
 import { IntelSparkline } from './IntelSparkline';
 import { intelApi, CREDIBILITY, DIRECTION_NAMES, spikeLevel, agoStrShort, SIDE } from '../api';
 import styles from '../intel.module.css';
 
+// How often the situational center re-polls the backend for new events. The realtime
+// listener writes new mentions the instant a channel publishes; this surfaces them in
+// the UI without a page refresh.
+const LIVE_POLL_MS = 12000;
+
 export function IntelHome({ window: win, onOpenStory }) {
   const [data, setData]         = useState(null);
   const [stream, setStream]     = useState([]);
+  const [flashIds, setFlashIds] = useState(() => new Set());
+  const seenRef                 = useRef(new Set());
 
   useEffect(() => {
     let alive = true;
-    intelApi.overview(win).then(d => { if (alive) setData(d); }).catch(() => {});
-    intelApi.stream({ window: win, limit: 18 }).then(e => { if (alive) setStream(e); }).catch(() => {});
-    return () => { alive = false; };
+    seenRef.current = new Set();
+
+    const tick = (first) => {
+      intelApi.overview(win).then(d => { if (alive) setData(d); }).catch(() => {});
+      intelApi.stream({ window: win, limit: 18 }).then(events => {
+        if (!alive) return;
+        const arr = Array.isArray(events) ? events : [];
+        if (first) {
+          seenRef.current = new Set(arr.map(e => e.id));
+          setStream(arr);
+          return;
+        }
+        const fresh = arr.filter(e => !seenRef.current.has(e.id));
+        setStream(arr);   // refresh either way so relative "ago" labels keep ticking
+        if (fresh.length) {
+          fresh.forEach(e => seenRef.current.add(e.id));
+          setFlashIds(new Set(fresh.map(e => e.id)));
+          setTimeout(() => { if (alive) setFlashIds(new Set()); }, LIVE_POLL_MS - 1000);
+        }
+      }).catch(() => {});
+    };
+
+    tick(true);
+    const timer = setInterval(() => tick(false), LIVE_POLL_MS);
+    return () => { alive = false; clearInterval(timer); };
   }, [win]);
 
   if (!data) return <div className={styles.workspace}><div className={styles.empty}>Загрузка обстановки…</div></div>;
@@ -126,14 +155,18 @@ export function IntelHome({ window: win, onOpenStory }) {
               <span className={styles.sectionCount}>{stream.length}</span>
             </span>
             <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 10, color: '#34D8A0', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              {flashIds.size > 0 && (
+                <span style={{ color: '#34D8A0', fontWeight: 700 }}>+{flashIds.size}</span>
+              )}
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#34D8A0', animation: 'erpulse 2.4s var(--ease-in-out) infinite' }} />
               LIVE
             </span>
           </div>
           {stream.map(e => {
             const sd = SIDE[e.side] || SIDE.ru;
+            const isNew = flashIds.has(e.id);
             return (
-              <div key={e.id} className={styles.eventRow}>
+              <div key={e.id} className={isNew ? `${styles.eventRow} ${styles.eventRowNew}` : styles.eventRow}>
                 <span className={styles.eventSide} style={{ color: sd.color, background: sd.color + '1A' }}>
                   {sd.label}
                 </span>

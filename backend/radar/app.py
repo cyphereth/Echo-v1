@@ -26,6 +26,7 @@ log = logging.getLogger(__name__)
 
 _scheduler = None
 _intel_realtime = None
+_intel_ticker = None
 
 
 @asynccontextmanager
@@ -75,6 +76,16 @@ async def lifespan(app: FastAPI):
         else:
             log.warning("Intel realtime requested but no Telegram provider available")
 
+        # Process-only ticker: clusters new realtime mentions into stories, rebuilds
+        # timeline buckets, runs anomaly detection. Keeps Горит сейчас / Сигналы /
+        # Крупнейшие сюжеты fresh while the heavy brand scheduler stays disabled.
+        global _intel_ticker
+        if os.getenv("ENABLE_INTEL_TICK", "1") == "1" and _intel_ticker is None:
+            from .intel.ticker import IntelTicker
+            _intel_ticker = IntelTicker()
+            _intel_ticker.start()
+            log.info("Intel ticker started (every %ss)", _intel_ticker.interval)
+
     yield
 
     # --- shutdown ---
@@ -84,6 +95,9 @@ async def lifespan(app: FastAPI):
     if _intel_realtime is not None:
         _intel_realtime.stop()
         log.info("Intel realtime listener stopped")
+    if _intel_ticker is not None:
+        _intel_ticker.stop()
+        log.info("Intel ticker stopped")
 
 
 app = FastAPI(title="Echo API", version="4.0.0", lifespan=lifespan)

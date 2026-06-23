@@ -12,6 +12,7 @@ are untouched. Domain isolation: only imports from `.` / `..core.*`.
 from __future__ import annotations
 import logging
 import os
+from datetime import timezone
 
 from sqlalchemy.orm import Session
 
@@ -56,7 +57,53 @@ def update_stories(session: Session, direction_id: int, embed=None) -> None:
         embed=embed if embed is not None else _default_embed,
     )
     _recompute_verification(session, direction_id)
+    rebuild_points(session, direction_id)   # timeline buckets — must precede anomaly
     _detect_anomalies(session, direction_id)
+
+
+def _bucket_hour(dt):
+    """Truncate a datetime to the start of its UTC hour, returned as NAIVE UTC to match
+    how the rest of the schema stores timestamps (aggregate._aware re-wraps on read)."""
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt.replace(minute=0, second=0, microsecond=0)
+
+
+def rebuild_points(session: Session, direction_id: int) -> None:
+    """Rebuild IntelStoryPoint hourly buckets for every story under direction_id.
+
+    For each story, bucket its mentions (joined via incident) by UTC hour and store
+    mention_count + distinct-source_count per bucket. Idempotent: existing points for a
+    story are deleted and rewritten, so re-running on the same data is a no-op. These
+    buckets feed spike_pct / sparkline (Горит сейчас) and anomaly detection (Сигналы).
+    """
+    stories = session.query(IntelStory).filter_by(direction_id=direction_id).all()
+    for st in stories:
+        rows = (
+            session.query(IntelMention.created_at, IntelMention.author)
+            .join(IntelIncident, IntelMention.incident_id == IntelIncident.id)
+            .filter(IntelIncident.story_id == st.id)
+            .all()
+        )
+        buckets: dict = {}
+        for created_at, author in rows:
+            if created_at is None:
+                continue
+            key = _bucket_hour(created_at)
+            entry = buckets.setdefault(key, {"count": 0, "sources": set()})
+            entry["count"] += 1
+            a = (author or "").strip()
+            if a:
+                entry["sources"].add(a)
+        session.query(IntelStoryPoint).filter_by(story_id=st.id).delete()
+        for bucket_start, entry in sorted(buckets.items()):
+            session.add(IntelStoryPoint(
+                story_id=st.id,
+                bucket_start=bucket_start,
+                mention_count=entry["count"],
+                source_count=len(entry["sources"]),
+            ))
+    session.flush()
 
 
 def _detect_anomalies(session: Session, direction_id: int) -> None:

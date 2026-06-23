@@ -39,10 +39,13 @@ def run_intel_tick(session, tg_provider, web_provider=None, embed=None) -> None:
     from . import tagging, stories
     from .models import IntelMention
     run_intel_collect(session, tg_provider)
+    # Deterministic geo re-tagging (settlement/region gazetteer) — no LLM. Picks up
+    # already-stored 'unassigned' posts that now match an expanded gazetteer entry.
     try:
-        tagging.retag_unassigned(session)
+        tagging.retag_unassigned_geo(session)
     except Exception:
-        log.exception("intel retag failed (skipped)")
+        log.exception("intel geo retag failed (skipped)")
+        session.rollback()
     dir_ids = [d for (d,) in session.query(IntelMention.direction_id)
                .filter(IntelMention.incident_id.is_(None), IntelMention.direction_id.isnot(None)).distinct().all() if d]
     for did in dir_ids:

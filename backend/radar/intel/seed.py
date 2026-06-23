@@ -2,11 +2,24 @@ import os
 from .models import IntelDirection
 
 DEFAULT_DIRECTIONS = [
-    ("kursk", "Курское"),
+    # RU border regions + Crimea
+    ("bryansk",      "Брянская обл."),
+    ("belgorod",     "Белгородская обл."),
+    ("kursk",        "Курская обл."),
+    ("voronezh",     "Воронежская обл."),
+    ("oryol",        "Орловская обл."),
+    ("rostov",       "Ростовская обл."),
+    ("crimea",       "Крым"),
+    # UA directions / fronts
+    ("sumy",         "Сумское"),
+    ("chernihiv",    "Черниговское"),
+    ("kharkiv",      "Харьковское"),
+    ("luhansk",      "Луганское (ЛНР)"),
+    ("donetsk",      "Донецкое (ДНР)"),
     ("zaporizhzhia", "Запорожское"),
-    ("kharkiv", "Харьковское"),
-    ("donetsk", "Донецкое"),
-    ("kherson", "Херсонское"),
+    ("kherson",      "Херсонское"),
+    ("dnipro",       "Днепропетровское"),
+    ("kyiv",         "Киевское"),
 ]
 
 

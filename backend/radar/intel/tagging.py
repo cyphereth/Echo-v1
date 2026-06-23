@@ -12,6 +12,26 @@ def resolve_direction_id(session, key: str | None) -> int:
     return seed.ensure_unassigned_direction(session).id
 
 
+def retag_unassigned_geo(session, limit: int = 4000) -> int:
+    """Re-tag 'unassigned' mentions using the (expanded) geo gazetteer — deterministic,
+    no LLM. Run after the gazetteer grows so already-stored posts that now match a
+    settlement/region get their direction set. Returns the number re-tagged."""
+    from .models import IntelMention
+    from .geo import detect_direction
+    uid = seed.ensure_unassigned_direction(session).id
+    rows = (session.query(IntelMention).filter(IntelMention.direction_id == uid)
+            .order_by(IntelMention.id.desc()).limit(limit).all())
+    changed = 0
+    for m in rows:
+        key = detect_direction(m.text)
+        if key:
+            m.direction_id = resolve_direction_id(session, key)
+            changed += 1
+    if changed:
+        session.commit()
+    return changed
+
+
 def _llm_classify(text: str, keys: list[str], glossary: str) -> str | None:
     """Ask the LLM which direction key the text belongs to, or None. Raises
     LLMNotConfigured if no key — caller treats that as 'skip'."""

@@ -21,14 +21,25 @@ export const DIRECTIONS_TAXONOMY = [
 ];
 
 export const DIRECTION_NAMES = {
-  kursk: 'Курское направление',
-  zaporizhzhia: 'Запорожское направление',
-  kharkiv: 'Харьковское направление',
-  donetsk: 'Донецкое направление',
-  kherson: 'Херсонское направление',
-  belgorod: 'Белгородское направление',
+  // RU border regions + Crimea
+  bryansk: 'Брянская обл.',
+  belgorod: 'Белгородская обл.',
+  kursk: 'Курская обл.',
+  voronezh: 'Воронежская обл.',
+  oryol: 'Орловская обл.',
+  rostov: 'Ростовская обл.',
   crimea: 'Крым',
-  sumy: 'Сумское направление',
+  // UA directions / fronts
+  sumy: 'Сумское',
+  chernihiv: 'Черниговское',
+  kharkiv: 'Харьковское',
+  luhansk: 'Луганское (ЛНР)',
+  donetsk: 'Донецкое (ДНР)',
+  zaporizhzhia: 'Запорожское',
+  kherson: 'Херсонское',
+  dnipro: 'Днепропетровское',
+  kyiv: 'Киевское',
+  unassigned: 'Без направления',
 };
 
 const CRED = ['verified', 'likely', 'verified', 'likely', 'unverified', 'fake'];

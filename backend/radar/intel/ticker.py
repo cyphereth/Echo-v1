@@ -51,8 +51,13 @@ class IntelTicker:
             try:
                 from ..brand.api import _get_tg_provider
                 tg = _get_tg_provider()
+                # Heal a dropped connection (e.g. after the Mac slept) so polling AND
+                # the realtime update stream resume within one tick instead of staying
+                # frozen until the next manual restart.
+                if tg is not None and hasattr(tg, "ensure_connected"):
+                    tg.ensure_connected()
             except Exception:
-                log.exception("intel ticker: could not get TG provider (process-only)")
+                log.exception("intel ticker: could not get/heal TG provider (process-only)")
             session = get_session()
             try:
                 run_intel_tick(session, tg_provider=tg)  # poll due sources + process

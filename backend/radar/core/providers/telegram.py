@@ -137,6 +137,28 @@ class TelegramProvider(SearchProvider):
                                           flood_sleep_threshold=self._FLOOD_THRESHOLD)
             self._await(self._client.connect())
 
+    def ensure_connected(self) -> bool:
+        """Reconnect the client if the socket dropped (e.g. after the Mac sleeps the
+        Telethon connection dies as 'Cannot send requests while disconnected' and does
+        not always self-heal). Cheap to call often — no-op when already connected.
+        Returns True if connected after the attempt. Test clients (no loop) are no-ops."""
+        if self._loop is None:
+            return True
+        try:
+            if self._client.is_connected():
+                return True
+        except Exception:
+            pass
+        try:
+            asyncio.run_coroutine_threadsafe(self._client.connect(), self._loop).result(timeout=30)
+            ok = self._client.is_connected()
+            if ok:
+                log.info("Telegram client reconnected")
+            return ok
+        except Exception:
+            log.warning("Telegram reconnect attempt failed")
+            return False
+
     def _throttle(self):
         """Block until at least _MIN_CALL_INTERVAL has passed since the previous call,
         so the provider never bursts into a flood-wait."""

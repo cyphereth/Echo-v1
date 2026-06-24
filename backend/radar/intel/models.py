@@ -92,3 +92,17 @@ class IntelLexicon(Base):
     meaning:    Mapped[str]      = mapped_column(Text, default="")
     category:   Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class IntelAlert(Base):
+    __tablename__ = "intel_alerts"
+    id:              Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scope:           Mapped[str]      = mapped_column(Text, nullable=False)   # "story" | "direction"
+    direction_id:    Mapped[Optional[int]] = mapped_column(ForeignKey("intel_directions.id"))
+    story_id:        Mapped[Optional[int]] = mapped_column(ForeignKey("intel_stories.id"))
+    kind:            Mapped[str]      = mapped_column(Text, nullable=False)   # spike|sentiment|source_influx|direction_burst
+    magnitude:       Mapped[float]    = mapped_column(default=0.0)            # SQLAlchemy infers Float from Mapped[float]
+    title:           Mapped[str]      = mapped_column(Text, default="")
+    message:         Mapped[str]      = mapped_column(Text, default="")
+    fired_at:        Mapped[datetime] = mapped_column(default=_now)
+    acknowledged_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)

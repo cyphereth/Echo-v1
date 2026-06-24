@@ -34,9 +34,17 @@ export function streamLiveEvents({ afterId = 0, direction, onEvent }) {
   if (INTEL_USE_MOCK) return () => {};
   let stopped = false;
   let lastId = afterId || 0;
+  let currentCtrl = null;
+  // The server pings every ~1s, so healthy traffic means a chunk at least that often.
+  // If nothing arrives for STALL_MS the stream is dead (e.g. it silently stopped
+  // yielding after the Mac slept) → abort and reconnect, resuming from lastId.
+  const STALL_MS = 15000;
 
   async function loop() {
     while (!stopped) {
+      const ctrl = new AbortController();
+      currentCtrl = ctrl;
+      let watchdog = setTimeout(() => ctrl.abort(), STALL_MS);
       try {
         const token = getToken();
         const params = { after_id: String(lastId) };
@@ -44,6 +52,7 @@ export function streamLiveEvents({ afterId = 0, direction, onEvent }) {
         const qs = new URLSearchParams(params).toString();
         const res = await fetch(`/intel/stream/live?${qs}`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: ctrl.signal,
         });
         if (!res.ok || !res.body) throw new Error('sse ' + res.status);
         const reader = res.body.getReader();
@@ -52,6 +61,8 @@ export function streamLiveEvents({ afterId = 0, direction, onEvent }) {
         while (!stopped) {
           const { value, done } = await reader.read();
           if (done) break;
+          clearTimeout(watchdog);                          // got data → reset watchdog
+          watchdog = setTimeout(() => ctrl.abort(), STALL_MS);
           buf += decoder.decode(value, { stream: true });
           let sep;
           while ((sep = buf.indexOf('\n\n')) >= 0) {
@@ -71,12 +82,26 @@ export function streamLiveEvents({ afterId = 0, direction, onEvent }) {
         }
       } catch {
         if (stopped) return;
+      } finally {
+        clearTimeout(watchdog);
       }
       if (!stopped) await new Promise(r => setTimeout(r, 2000));  // backoff, then resume
     }
   }
+
+  // When the tab becomes visible again (returning from sleep / background), force an
+  // immediate reconnect instead of waiting for the watchdog — recovers fastest.
+  const onVisible = () => {
+    if (!stopped && document.visibilityState === 'visible' && currentCtrl) currentCtrl.abort();
+  };
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible);
+
   loop();
-  return () => { stopped = true; };
+  return () => {
+    stopped = true;
+    if (currentCtrl) currentCtrl.abort();
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
+  };
 }
 
 // ── Витринные форматтеры ────────────────────────────────────────────────────

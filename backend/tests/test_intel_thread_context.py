@@ -76,3 +76,72 @@ def test_collector_stores_reply_to_tg_id():
     assert n == 1
     m = s.query(IntelMention).one()
     assert m.reply_to_tg_id == "199"
+
+def test_enrich_context_stores_parent_and_sibling():
+    from types import SimpleNamespace
+    from datetime import datetime, timezone
+    from radar.intel import seed
+    from radar.intel.models import IntelMention, IntelThreadContext, IntelLexicon
+    from radar.intel.context_pass import enrich_context
+
+    s = _sess()
+    seed.ensure_default_directions(s)
+    from radar.intel.models import IntelDirection
+    d = s.query(IntelDirection).first()
+
+    m = IntelMention(
+        direction_id=d.id, platform="telegram", post_id="grp/300",
+        author="@x", text="БПЛА сбили", created_at=datetime.now(timezone.utc),
+        reply_to_tg_id="299",
+    )
+    s.add(m); s.commit()
+
+    fake_parent = {"tg_msg_id": "299", "depth": 0, "author": "@root",
+                   "text": "что тут?", "created_at": datetime.now(timezone.utc)}
+    fake_sibling = {"tg_msg_id": "301", "author": "@sis",
+                    "text": "подтверждаем", "created_at": datetime.now(timezone.utc)}
+
+    fake_provider = SimpleNamespace(
+        fetch_thread_context=lambda handle, reply_to_tg_id, current_tg_id, **kw: {
+            "parents": [fake_parent],
+            "siblings": [fake_sibling],
+        }
+    )
+
+    n = enrich_context(s, fake_provider, batch_size=10)
+    assert n == 1
+
+    ctx_rows = s.query(IntelThreadContext).all()
+    roles = {r.role for r in ctx_rows}
+    assert "parent" in roles
+    assert "sibling" in roles
+
+    m2 = s.get(IntelMention, m.id)
+    assert m2.context_fetched is True
+
+def test_enrich_context_skips_already_fetched():
+    from types import SimpleNamespace
+    from datetime import datetime, timezone
+    from radar.intel import seed
+    from radar.intel.models import IntelMention
+    from radar.intel.context_pass import enrich_context
+
+    s = _sess()
+    seed.ensure_default_directions(s)
+    from radar.intel.models import IntelDirection
+    d = s.query(IntelDirection).first()
+
+    m = IntelMention(
+        direction_id=d.id, platform="telegram", post_id="grp/400",
+        author="@x", text="test", created_at=datetime.now(timezone.utc),
+        reply_to_tg_id="399", context_fetched=True,
+    )
+    s.add(m); s.commit()
+
+    calls = []
+    fake_provider = SimpleNamespace(
+        fetch_thread_context=lambda *a, **kw: calls.append(1) or {"parents": [], "siblings": []}
+    )
+    n = enrich_context(s, fake_provider, batch_size=10)
+    assert n == 0
+    assert len(calls) == 0

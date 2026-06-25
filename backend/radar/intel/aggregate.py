@@ -76,7 +76,9 @@ def event(m) -> dict:
     return {"id": m.id, "platform": m.platform, "author": m.author, "side": m.side,
             "text": m.text, "url": m.url, "created_at": _aware(m.created_at).isoformat(),
             "verified": bool(m.verified), "direction": m.direction_id,
-            "sig": content_sig(m.text)}
+            "sig": content_sig(m.text),
+            "is_reply": bool(getattr(m, "reply_to_tg_id", None)),
+            "reply_to_tg_id": getattr(m, "reply_to_tg_id", None)}
 
 def story_detail(session, story) -> dict:
     base = story_summary(session, story)

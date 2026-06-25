@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from ..core.db import get_session
 from ..core.auth import decode_token
 from ..models import User
-from .models import IntelDirection, IntelMention, IntelStory, IntelProbe, IntelAlert
+from .models import IntelDirection, IntelMention, IntelStory, IntelProbe, IntelAlert, IntelThreadContext
 from ..models import _now
 from . import aggregate
 from . import credibility
@@ -520,3 +520,33 @@ def intel_alert_ack(
         a.acknowledged_at = _now()
         session.commit()
     return {"ok": True}
+
+
+@router.get("/intel/mention/{mention_id}/context")
+def intel_mention_context(
+    mention_id: int,
+    session: Session = Depends(db),
+    user: User = Depends(current_user),
+):
+    mention = session.get(IntelMention, mention_id)
+    if mention is None:
+        raise HTTPException(404, "Mention not found")
+
+    rows = (session.query(IntelThreadContext)
+            .filter(IntelThreadContext.mention_id == mention_id)
+            .order_by(IntelThreadContext.role, IntelThreadContext.depth.asc())
+            .all())
+
+    reply_chain = sorted(
+        [{"tg_msg_id": r.tg_msg_id, "depth": r.depth,
+          "author": r.author, "text": r.text,
+          "created_at": aggregate._aware(r.created_at).isoformat()}
+         for r in rows if r.role == "parent"],
+        key=lambda x: x["depth"],
+    )
+    siblings = [
+        {"tg_msg_id": r.tg_msg_id, "author": r.author,
+         "text": r.text, "created_at": aggregate._aware(r.created_at).isoformat()}
+        for r in rows if r.role == "sibling"
+    ]
+    return {"mention_id": mention_id, "reply_chain": reply_chain, "siblings": siblings}

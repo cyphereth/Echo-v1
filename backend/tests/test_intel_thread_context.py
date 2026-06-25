@@ -145,3 +145,61 @@ def test_enrich_context_skips_already_fetched():
     n = enrich_context(s, fake_provider, batch_size=10)
     assert n == 0
     assert len(calls) == 0
+
+
+def test_context_api_endpoint_returns_reply_chain():
+    from types import SimpleNamespace
+    from datetime import datetime, timezone
+    from fastapi.testclient import TestClient
+    from fastapi import FastAPI
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from radar.models import Base
+    import radar.intel.models  # noqa
+
+    eng = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(eng)
+    s = Session(eng)
+
+    from radar.intel import seed
+    seed.ensure_default_directions(s)
+    from radar.intel.models import IntelDirection, IntelMention, IntelThreadContext
+
+    d = s.query(IntelDirection).first()
+    m = IntelMention(
+        direction_id=d.id, platform="telegram", post_id="grp/500",
+        author="@x", text="test", created_at=datetime.now(timezone.utc),
+        reply_to_tg_id="499", context_fetched=True,
+    )
+    s.add(m); s.commit()
+    ctx = IntelThreadContext(
+        mention_id=m.id, tg_msg_id="499", role="parent", depth=0,
+        author="@root", text="корень", created_at=datetime.now(timezone.utc),
+    )
+    s.add(ctx); s.commit()
+
+    app = FastAPI()
+    from radar.intel.api import router
+    app.include_router(router)
+
+    def override_db():
+        yield s
+
+    from radar.intel.api import db
+    app.dependency_overrides[db] = override_db
+
+    # Bypass auth
+    from radar.intel.api import current_user
+    from radar.models import User
+    fake_user = User(email="t@t.com", password_hash="x")
+    app.dependency_overrides[current_user] = lambda: fake_user
+
+    client = TestClient(app)
+    resp = client.get(f"/intel/mention/{m.id}/context")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["mention_id"] == m.id
+    assert len(data["reply_chain"]) == 1
+    assert data["reply_chain"][0]["tg_msg_id"] == "499"
+    assert data["reply_chain"][0]["depth"] == 0
+    assert data["siblings"] == []

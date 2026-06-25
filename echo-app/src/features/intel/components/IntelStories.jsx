@@ -154,7 +154,7 @@ function ThreadContext({ mentionId }) {
     setLoading(true);
     intelApi.mentionContext(mentionId)
       .then(data => { setCtx(data); setOpen(true); })
-      .catch(() => setCtx({ reply_chain: [], siblings: [] }))
+      .catch(() => { setCtx({ reply_chain: [], siblings: [] }); setOpen(true); })
       .finally(() => setLoading(false));
   }
 

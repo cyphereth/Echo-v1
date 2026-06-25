@@ -54,3 +54,25 @@ def test_intel_thread_context_stores_parent():
     assert row.role == "parent"
     assert row.depth == 0
     assert row.tg_msg_id == "99"
+
+def test_collector_stores_reply_to_tg_id():
+    from types import SimpleNamespace
+    from radar.intel import seed, collector
+    from radar.intel.models import IntelProbe, IntelMention, IntelLexicon
+    s = _sess()
+    seed.ensure_default_directions(s)
+    s.add(IntelLexicon(term="БПЛА", meaning="drone", category="military"))
+    s.commit()
+    probe = IntelProbe(platform="telegram", kind="chat", query="@grp", side="ru")
+    s.add(probe); s.commit()
+
+    posts = [SimpleNamespace(
+        post_id="grp/200", author="@alice", text="БПЛА сбили над Херсоном",
+        followers=0, created_at=datetime.now(timezone.utc),
+        hashtags=[], likes=0, reply_to_tg_id="199",
+    )]
+    prov = SimpleNamespace(search_chat=lambda h, term, limit, min_id: posts)
+    n = collector.collect_probe(s, probe, prov)
+    assert n == 1
+    m = s.query(IntelMention).one()
+    assert m.reply_to_tg_id == "199"

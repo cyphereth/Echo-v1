@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from .models import IntelLexicon, IntelMention, IntelProbe
 from .geo import detect_direction
 from .tagging import resolve_direction_id
+from .translate import maybe_translate
 from ..core.spam import looks_like_ad_cheap
 
 log = logging.getLogger(__name__)
@@ -208,12 +209,9 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
             log.warning("intel lexicon is empty — channel posts kept only on geo match (run lexicon seed)")
 
         if probe.kind == "chat":
-            # Normalize the stored query to a clean @handle (or detect invite links)
-            if _is_invite_link(probe.query):
-                log.warning("intel chat needs join, skipping: %s", probe.query)
-                return 0
-
-            handle = _clean_handle(probe.query)
+            # After _ensure_joined() in passes.py the session is already a member.
+            # For invite links the handle is the link itself (provider resolves it).
+            handle = probe.query if _is_invite_link(probe.query) else _clean_handle(probe.query)
 
             # Determine min_id from watermark (if it is a numeric string)
             wm = probe.watermark or ""
@@ -233,7 +231,7 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                 if created is not None and created < cutoff:
                     continue
 
-                text = post.text or ""
+                text = maybe_translate(post.text or "")
                 author = post.author or ""
 
                 # Hard noise filter for chat
@@ -251,6 +249,7 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                     url=getattr(post, "url", None),
                     views=getattr(post, "likes", 0) or 0,
                     created_at=post.created_at,
+                    reply_to_tg_id=getattr(post, "reply_to_tg_id", None),
                 )
                 sp = session.begin_nested()
                 try:
@@ -303,7 +302,7 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
 
                     # Keyword relevance gate — keep only military-relevant posts
                     # (geo is used for tagging below, not as an admit path).
-                    text = post.text or ""
+                    text = maybe_translate(post.text or "")
                     if not keyword_relevant(text, lexicon_terms):
                         continue
 

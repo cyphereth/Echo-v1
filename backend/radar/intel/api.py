@@ -136,6 +136,7 @@ INTEL_SSE_INTERVAL = 1.0
 @router.get("/intel/stream/live")
 async def intel_stream_live(
     after_id: int = 0,
+    after_alert_id: int = 0,
     direction: Optional[str] = None,
     authorization: str = Header(None),
 ):
@@ -163,6 +164,13 @@ async def intel_stream_live(
                 last_id = s.query(func.max(IntelMention.id)).scalar() or 0
             finally:
                 s.close()
+        last_alert_id = after_alert_id
+        if last_alert_id < 0:
+            s = get_session()
+            try:
+                last_alert_id = s.query(func.max(IntelAlert.id)).scalar() or 0
+            finally:
+                s.close()
         # Open the stream immediately so the client knows it's connected.
         yield ": connected\n\n"
         while True:
@@ -178,6 +186,17 @@ async def intel_stream_live(
             for mid, payload in payloads:
                 last_id = mid
                 yield f"data: {payload}\n\n"
+            s = get_session()
+            try:
+                arows = (s.query(IntelAlert).filter(IntelAlert.id > last_alert_id)
+                         .order_by(IntelAlert.id.asc()).limit(50).all())
+                apayloads = [(a.id, json.dumps(aggregate.alert_payload(s, a), ensure_ascii=False))
+                             for a in arows]
+            finally:
+                s.close()
+            for aid, payload in apayloads:
+                last_alert_id = aid
+                yield f"event: alert\ndata: {payload}\n\n"
             # Heartbeat keeps the connection alive through proxies between bursts.
             yield ": ping\n\n"
             await asyncio.sleep(INTEL_SSE_INTERVAL)

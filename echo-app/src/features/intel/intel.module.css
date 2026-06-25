@@ -736,3 +736,42 @@
   color: #FF7A87;
   letter-spacing: 0.04em;
 }
+
+/* ── Alert Bell ─────────────────────────────────────────────────────────────── */
+.bellWrap { position: relative; }
+.bellBtn { position: relative; display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: 8px; background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08); color: #9FB3C8; cursor: pointer; }
+.bellBtn:hover { background: rgba(255,255,255,0.08); }
+.bellBadge { position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px;
+  padding: 0 4px; border-radius: 8px; background: #FF4D5E; color: #fff;
+  font-size: 10px; line-height: 16px; text-align: center; font-weight: 700; }
+.bellMenu { position: absolute; top: 40px; right: 0; width: 320px; max-height: 60vh; overflow-y: auto;
+  background: #0E1622; border: 1px solid rgba(255,255,255,0.10); border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5); z-index: 50; }
+.bellHead { display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.08);
+  font-size: 12px; color: #C7D6E5; font-weight: 600; }
+.bellAckAll { background: none; border: none; color: #57D2E2; font-size: 11px; cursor: pointer; }
+.bellEmpty { padding: 18px 12px; color: #7E91A6; font-size: 12px; text-align: center; }
+.bellItem { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left;
+  padding: 9px 12px; background: none; border: none; border-bottom: 1px solid rgba(255,255,255,0.05);
+  cursor: pointer; }
+.bellItem:hover { background: rgba(255,255,255,0.05); }
+.bellItem[data-unread="1"] { border-left: 2px solid #FF4D5E; }
+.bellItemMsg { font-size: 12px; color: #DCE7F2; }
+.bellItemMeta { font-size: 10px; color: #7E91A6; }
+
+/* ── Alert Toast ────────────────────────────────────────────────────────────── */
+.toastStack { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column;
+  gap: 8px; z-index: 60; }
+.toast { display: flex; align-items: flex-start; gap: 8px; width: 320px; padding: 10px 12px;
+  background: #14202E; border: 1px solid rgba(255,77,94,0.45); border-left: 3px solid #FF4D5E;
+  border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); color: #DCE7F2; cursor: pointer;
+  animation: toastIn 160ms ease-out; }
+.toastBody { flex: 1; min-width: 0; }
+.toastTitle { font-size: 12px; font-weight: 700; color: #FF8A95; }
+.toastMsg { font-size: 12px; color: #C7D6E5; overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.toastClose { background: none; border: none; color: #7E91A6; cursor: pointer; padding: 0; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }

@@ -162,3 +162,15 @@ def test_scan_direction_alerts_emits_and_dedups():
     assert len(out) == 1
     assert s.query(IntelAlert).filter_by(scope="direction", kind="direction_burst").count() == 1
     assert alerts.scan_direction_alerts(s) == []  # cooldown
+
+
+def test_run_intel_tick_emits_alerts(monkeypatch):
+    """The tick runs alert scanning after clustering; an anomalous story yields a row."""
+    from radar.intel import passes
+    from radar.intel.models import IntelAlert
+    s = _mem()
+    d = _direction(s)
+    _anomalous_story(s, d.id)
+    s.commit()
+    passes.run_intel_tick(s, tg_provider=None)
+    assert s.query(IntelAlert).filter_by(scope="story").count() == 1

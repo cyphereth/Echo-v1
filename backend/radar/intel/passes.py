@@ -55,3 +55,11 @@ def run_intel_tick(session, tg_provider, web_provider=None, embed=None) -> None:
         except Exception:
             log.exception("intel clustering failed for direction %s", did)
             session.rollback()
+
+    from . import alerts
+    try:
+        alerts.scan(session)
+        session.commit()
+    except Exception:
+        log.exception("intel alert scan failed")
+        session.rollback()

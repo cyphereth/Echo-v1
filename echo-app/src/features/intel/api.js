@@ -22,6 +22,9 @@ export const intelApi = {
   sources:   (params)         => passthrough('sources', params),
   addSource: (body)           => request('/intel/sources', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }),
   deleteSource: (id)          => request('/intel/sources/' + id, { method: 'DELETE' }),
+  alerts:    (params)         => INTEL_USE_MOCK ? Promise.resolve([]) : passthrough('alerts', params),
+  ackAlert:  (id)             => request(`/intel/alerts/${id}/ack`, { method: 'POST' }),
+  ackAllAlerts: ()            => request('/intel/alerts/ack-all', { method: 'POST' }),
 };
 
 // ── Live event stream (SSE) ─────────────────────────────────────────────────
@@ -30,10 +33,11 @@ export const intelApi = {
 // fetch (not EventSource) so the Bearer token rides in the Authorization header.
 // Auto-reconnects, resuming from the last id seen so no event is missed/duplicated.
 // Returns a stop() function. No-op in mock mode.
-export function streamLiveEvents({ afterId = 0, direction, onEvent }) {
+export function streamLiveEvents({ afterId = 0, afterAlertId = 0, direction, onEvent, onAlert }) {
   if (INTEL_USE_MOCK) return () => {};
   let stopped = false;
   let lastId = afterId || 0;
+  let lastAlertId = afterAlertId || 0;
   let currentCtrl = null;
   // The server pings every ~1s, so healthy traffic means a chunk at least that often.
   // If nothing arrives for STALL_MS the stream is dead (e.g. it silently stopped
@@ -47,7 +51,7 @@ export function streamLiveEvents({ afterId = 0, direction, onEvent }) {
       let watchdog = setTimeout(() => ctrl.abort(), STALL_MS);
       try {
         const token = getToken();
-        const params = { after_id: String(lastId) };
+        const params = { after_id: String(lastId), after_alert_id: String(lastAlertId) };
         if (direction) params.direction = direction;
         const qs = new URLSearchParams(params).toString();
         const res = await fetch(`/intel/stream/live?${qs}`, {
@@ -68,16 +72,23 @@ export function streamLiveEvents({ afterId = 0, direction, onEvent }) {
           while ((sep = buf.indexOf('\n\n')) >= 0) {
             const frame = buf.slice(0, sep);
             buf = buf.slice(sep + 2);
+            let eventType = 'message';
+            let dataRaw = '';
             for (const line of frame.split('\n')) {
-              if (!line.startsWith('data:')) continue;       // skip ": ping" heartbeats
-              const raw = line.slice(5).trim();
-              if (!raw) continue;
-              try {
-                const ev = JSON.parse(raw);
-                if (ev && ev.id) lastId = Math.max(lastId, ev.id);
-                onEvent(ev);
-              } catch { /* ignore malformed frame */ }
+              if (line.startsWith('event:')) eventType = line.slice(6).trim();
+              else if (line.startsWith('data:')) dataRaw += line.slice(5).trim();
             }
+            if (!dataRaw) continue;
+            try {
+              const ev = JSON.parse(dataRaw);
+              if (eventType === 'alert') {
+                if (ev && ev.id) lastAlertId = Math.max(lastAlertId, ev.id);
+                if (onAlert) onAlert(ev);
+              } else {
+                if (ev && ev.id) lastId = Math.max(lastId, ev.id);
+                if (onEvent) onEvent(ev);
+              }
+            } catch { /* ignore malformed frame */ }
           }
         }
       } catch {

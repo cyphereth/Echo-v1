@@ -17,6 +17,7 @@ class Post:
     comments:   int
     shares:     int
     sound_id:   Optional[str] = None
+    reply_to_tg_id: Optional[str] = None
 
 @dataclass
 class SearchPage:

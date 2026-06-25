@@ -68,19 +68,21 @@ def _parse_tg_chat_message(msg, namespace: str, fallback_author: str) -> Post:
     uname  = getattr(sender, "username", None) if sender else None
     author = f"@{uname}" if uname else fallback_author
     ns     = str(namespace).lstrip("@")
+    raw_reply = getattr(msg, "reply_to_msg_id", None)
     return Post(
-        post_id    = f"{ns}/{msg.id}",
-        platform   = "telegram",
-        author     = author,
-        followers  = 0,
-        text       = text,
-        hashtags   = _HASHTAG_RE.findall(text),
-        created_at = msg.date,
-        likes      = _sum_reactions(msg),
-        views      = int(getattr(msg, "views", 0) or 0),
-        comments   = 0,
-        shares     = int(getattr(msg, "forwards", 0) or 0),
-        sound_id   = None,
+        post_id        = f"{ns}/{msg.id}",
+        platform       = "telegram",
+        author         = author,
+        followers      = 0,
+        text           = text,
+        hashtags       = _HASHTAG_RE.findall(text),
+        created_at     = msg.date,
+        likes          = _sum_reactions(msg),
+        views          = int(getattr(msg, "views", 0) or 0),
+        comments       = 0,
+        shares         = int(getattr(msg, "forwards", 0) or 0),
+        sound_id       = None,
+        reply_to_tg_id = str(raw_reply) if raw_reply is not None else None,
     )
 
 
@@ -355,17 +357,18 @@ class TelegramProvider(SearchProvider):
             log.warning("Telegram join failed (%s): %s", h, type(e).__name__)
             return False
 
-    def join_invite(self, link: str) -> bool:
-        """Join a private chat via its invite link (t.me/+HASH or t.me/joinchat/HASH)
-        so its messages arrive on the realtime stream. Idempotent. Returns True on
-        success (or already-member); raises TelegramFloodWait on flood."""
-        from telethon.tl.functions.messages import ImportChatInviteRequest
+    def join_invite(self, link: str) -> str | None:
+        """Join a private chat via its invite link (t.me/+HASH or t.me/joinchat/HASH).
+
+        Returns the resolved @username (if the group has one) or '#{peer_id}' so the
+        caller can replace the probe.query with a stable searchable identifier.
+        Returns None on hard failure (expired/invalid link). Raises TelegramFloodWait."""
+        from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest
         from telethon.errors import (
             FloodWaitError, UserAlreadyParticipantError, InviteHashExpiredError,
             InviteHashInvalidError,
         )
         raw = (link or "").strip()
-        # Extract the invite hash from t.me/+HASH or t.me/joinchat/HASH
         if "/+" in raw:
             invite_hash = raw.split("/+", 1)[1]
         elif "joinchat/" in raw:
@@ -374,21 +377,37 @@ class TelegramProvider(SearchProvider):
             invite_hash = raw.lstrip("+")
         invite_hash = invite_hash.strip("/").split("?", 1)[0]
         if not invite_hash:
-            return False
+            return None
+
+        def _resolve_handle(chat) -> str:
+            """Extract @username or fall back to #{id}."""
+            uname = getattr(chat, "username", None)
+            if uname:
+                return f"@{uname}"
+            return f"#{getattr(chat, 'id', 0)}"
+
         try:
-            self._await(self._client(ImportChatInviteRequest(invite_hash)))
-            return True
+            updates = self._await(self._client(ImportChatInviteRequest(invite_hash)))
+            # updates.chats contains the joined group entity
+            chats = getattr(updates, "chats", [])
+            return _resolve_handle(chats[0]) if chats else f"#{invite_hash}"
         except UserAlreadyParticipantError:
-            return True
+            # Already a member — resolve via CheckChatInvite to get the entity
+            try:
+                info = self._await(self._client(CheckChatInviteRequest(invite_hash)))
+                chat = getattr(info, "chat", None)
+                return _resolve_handle(chat) if chat else None
+            except Exception:
+                return None
         except FloodWaitError as e:
             log.warning("Telegram flood wait %ds", e.seconds)
             raise TelegramFloodWait(e.seconds)
         except (InviteHashExpiredError, InviteHashInvalidError) as e:
             log.warning("Telegram invite invalid (%s): %s", raw, type(e).__name__)
-            return False
+            return None
         except Exception as e:
             log.warning("Telegram invite join failed (%s): %s", raw, type(e).__name__)
-            return False
+            return None
 
     def search_chat(self, handle: str, term: str, limit: int = 20, min_id: int = 0) -> list[Post]:
         """Server-side search inside one public group for `term`, newest first.
@@ -396,7 +415,14 @@ class TelegramProvider(SearchProvider):
         already-seen messages aren't re-fetched. Returns [] if the chat is private,
         gone, or has no new matches."""
         from telethon.errors import FloodWaitError, ChannelPrivateError, UsernameNotOccupiedError
-        h = handle if handle.startswith("@") else f"@{handle}"
+        # #{peer_id} — numeric id from a joined private group (no public username)
+        if handle.startswith("#"):
+            try:
+                h = int(handle[1:])
+            except ValueError:
+                return []
+        else:
+            h = handle if handle.startswith("@") else f"@{handle}"
         try:
             entity = self._await(self._client.get_entity(h))
             msgs = self._await(self._client.get_messages(entity, search=term, limit=limit, min_id=min_id))

@@ -113,3 +113,52 @@ def test_scan_story_alerts_skips_non_anomalous():
                      first_seen_at=base, last_seen_at=base))
     s.flush()
     assert alerts.scan_story_alerts(s) == []
+
+
+def _mention(s, direction_id, when, post_id):
+    from radar.intel.models import IntelMention
+    s.add(IntelMention(direction_id=direction_id, platform="tg", post_id=post_id,
+                       author="@x", text="t", created_at=when, first_seen=when))
+
+
+def test_detect_direction_burst_fires_on_latest_hour_spike():
+    from radar.intel import alerts
+    s = _mem()
+    d = _direction(s)
+    base = datetime(2026, 6, 20, 0, 0, tzinfo=timezone.utc)
+    n = 0
+    for h in range(3):
+        _mention(s, d.id, base + timedelta(hours=h, minutes=1), f"b{n}"); n += 1
+    for i in range(9):
+        _mention(s, d.id, base + timedelta(hours=3, minutes=i), f"s{n}"); n += 1
+    s.flush()
+    mag = alerts.detect_direction_burst(s, d.id)
+    assert mag is not None and mag > 0
+
+
+def test_detect_direction_burst_none_without_baseline():
+    from radar.intel import alerts
+    s = _mem()
+    d = _direction(s)
+    base = datetime(2026, 6, 20, 0, 0, tzinfo=timezone.utc)
+    _mention(s, d.id, base, "a"); _mention(s, d.id, base + timedelta(hours=1), "b")
+    s.flush()
+    assert alerts.detect_direction_burst(s, d.id) is None
+
+
+def test_scan_direction_alerts_emits_and_dedups():
+    from radar.intel import alerts
+    from radar.intel.models import IntelAlert
+    s = _mem()
+    d = _direction(s)
+    base = datetime(2026, 6, 20, 0, 0, tzinfo=timezone.utc)
+    n = 0
+    for h in range(3):
+        _mention(s, d.id, base + timedelta(hours=h, minutes=1), f"b{n}"); n += 1
+    for i in range(9):
+        _mention(s, d.id, base + timedelta(hours=3, minutes=i), f"s{n}"); n += 1
+    s.flush()
+    out = alerts.scan_direction_alerts(s); s.commit()
+    assert len(out) == 1
+    assert s.query(IntelAlert).filter_by(scope="direction", kind="direction_burst").count() == 1
+    assert alerts.scan_direction_alerts(s) == []  # cooldown

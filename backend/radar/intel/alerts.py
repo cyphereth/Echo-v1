@@ -79,3 +79,61 @@ def scan_story_alerts(session) -> list:
         if alert is not None:
             out.append(alert)
     return out
+
+
+def _direction_hourly_counts(session, direction_id) -> list:
+    rows = (session.query(IntelMention.created_at)
+            .filter(IntelMention.direction_id == direction_id).all())
+    buckets: dict = {}
+    for (created_at,) in rows:
+        if created_at is None:
+            continue
+        ts = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+        key = ts.replace(minute=0, second=0, microsecond=0)
+        buckets[key] = buckets.get(key, 0) + 1
+    return [buckets[k] for k in sorted(buckets)]
+
+
+def detect_direction_burst(session, direction_id):
+    """Spike pct if the latest hour bursts vs the mean of prior hours, else None."""
+    series = _direction_hourly_counts(session, direction_id)
+    if len(series) <= MIN_BUCKETS:
+        return None
+    base = series[:-1]
+    last = series[-1]
+    base_mean = sum(base) / max(1, len(base))
+    spike = last >= MIN_VOLUME and (last >= base_mean * VOLUME_FACTOR if base_mean > 0 else True)
+    if not spike:
+        return None
+    return round((last - base_mean) / base_mean * 100, 1) if base_mean > 0 else 100.0
+
+
+def scan_direction_alerts(session) -> list:
+    out = []
+    for d in session.query(IntelDirection).all():
+        if d.key == "unassigned":
+            continue
+        magnitude = detect_direction_burst(session, d.id)
+        if magnitude is None:
+            continue
+        alert = _emit(session, "direction", "direction_burst",
+                      title=d.name or d.key,
+                      message=f"Всплеск активности +{int(magnitude)}% по направлению {d.name or d.key}",
+                      magnitude=magnitude, direction_id=d.id)
+        if alert is not None:
+            out.append(alert)
+    return out
+
+
+def scan(session) -> list:
+    """Tick entrypoint: emit story + direction alerts. Never raises."""
+    out = []
+    try:
+        out += scan_story_alerts(session)
+    except Exception:
+        log.exception("intel story alert scan failed")
+    try:
+        out += scan_direction_alerts(session)
+    except Exception:
+        log.exception("intel direction alert scan failed")
+    return out

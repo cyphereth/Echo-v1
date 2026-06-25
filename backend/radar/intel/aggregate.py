@@ -44,9 +44,14 @@ def _sides(session, story_id) -> list:
 def _points(session, story_id):
     return session.query(IntelStoryPoint).filter_by(story_id=story_id).all()
 
-def story_summary(session, story) -> dict:
+def _points_since(session, story_id, since_naive):
+    return (session.query(IntelStoryPoint)
+            .filter(IntelStoryPoint.story_id == story_id,
+                    IntelStoryPoint.bucket_start >= since_naive).all())
+
+def story_summary(session, story, since=None) -> dict:
     d = session.get(IntelDirection, story.direction_id)
-    pts = _points(session, story.id)
+    pts = _points(session, story.id) if since is None else _points_since(session, story.id, since)
     return {
         "id": story.id, "title": story.title, "direction": d.key if d else None,
         "sides": _sides(session, story.id),
@@ -104,14 +109,25 @@ def direction_card(session, direction, window_h=24) -> dict:
 
 def compute_overview(session, window_h=24) -> dict:
     since = datetime.now(timezone.utc) - timedelta(hours=window_h)
-    events = session.query(func.count(IntelMention.id)).filter(IntelMention.created_at >= since).scalar() or 0
+    # IntelStoryPoint.bucket_start is stored as naive UTC — strip tz for SQL comparison.
+    since_naive = since.replace(tzinfo=None)
+    events = session.query(func.count(IntelMention.id)).filter(IntelMention.created_at >= since_naive).scalar() or 0
     # Only stories that had activity within the window.
     stories = (session.query(IntelStory)
-               .filter(IntelStory.status == "active", IntelStory.last_seen_at >= since).all())
-    summaries = [story_summary(session, st) for st in stories]
-    summary_by_id = {st.id: s for st, s in zip(stories, summaries)}
+               .filter(IntelStory.status == "active", IntelStory.last_seen_at >= since_naive).all())
+    # Mention count per story WITHIN the window (from timeline buckets — fast indexed query).
+    window_counts: dict[int, int] = {}
+    if stories:
+        rows = (session.query(IntelStoryPoint.story_id,
+                              func.sum(IntelStoryPoint.mention_count))
+                .filter(IntelStoryPoint.story_id.in_([st.id for st in stories]),
+                        IntelStoryPoint.bucket_start >= since_naive)
+                .group_by(IntelStoryPoint.story_id).all())
+        window_counts = {sid: int(cnt or 0) for sid, cnt in rows}
+    summaries = [story_summary(session, st, since=since_naive) for st in stories]
+    # "Горит сейчас" — highest spike rate within window; "Крупнейшие" — highest volume within window.
     hot = sorted(summaries, key=lambda x: x["spike_pct"], reverse=True)[:8]
-    top = sorted(summaries, key=lambda x: x["post_count"], reverse=True)[:8]
+    top = sorted(summaries, key=lambda x: window_counts.get(x["id"], 0), reverse=True)[:8]
     alert_rows = (session.query(IntelAlert)
                   .filter(IntelAlert.acknowledged_at.is_(None))
                   .order_by(IntelAlert.id.desc()).limit(20).all())

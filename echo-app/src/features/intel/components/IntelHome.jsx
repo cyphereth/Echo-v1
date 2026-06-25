@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../../core/components/icons';
 import { IntelSparkline } from './IntelSparkline';
-import { intelApi, streamLiveEvents, CREDIBILITY, DIRECTION_NAMES, spikeLevel, agoStrShort, SIDE } from '../api';
+import { intelApi, CREDIBILITY, DIRECTION_NAMES, spikeLevel, agoStrShort, SIDE } from '../api';
 import styles from '../intel.module.css';
 
 // KPI / hot / alerts refresh — not latency-critical, so a slow poll is fine. The event
@@ -12,7 +12,7 @@ const KPI_POLL_MS = 15000;
 const STREAM_MAX  = 40;   // cap the in-memory feed so it can't grow unbounded
 const FLASH_MS    = 2600; // how long a freshly arrived row stays highlighted
 
-export function IntelHome({ window: win, onOpenStory }) {
+export function IntelHome({ window: win, liveEvents = [], onOpenStory }) {
   const [data, setData]         = useState(null);
   const [stream, setStream]     = useState([]);
   const [flashIds, setFlashIds] = useState(() => new Set());
@@ -21,38 +21,40 @@ export function IntelHome({ window: win, onOpenStory }) {
   useEffect(() => {
     let alive = true;
     seenRef.current = new Set();
-    let stopStream = () => {};
 
     intelApi.overview(win).then(d => { if (alive) setData(d); }).catch(() => {});
 
-    // Initial snapshot, then resume the live push stream from the newest id we have.
+    // Initial snapshot seeds the feed; live events arrive via props from IntelApp.
     intelApi.stream({ window: win, limit: 18 }).then(events => {
       if (!alive) return;
       const arr = Array.isArray(events) ? events : [];
       seenRef.current = new Set(arr.map(e => e.id));
       setStream(arr);
-      const maxId = arr.reduce((m, e) => Math.max(m, e.id || 0), 0);
-      stopStream = streamLiveEvents({
-        afterId: maxId,
-        onEvent: (e) => {
-          if (!alive || !e || e.id == null || seenRef.current.has(e.id)) return;
-          seenRef.current.add(e.id);
-          setStream(prev => [e, ...prev].slice(0, STREAM_MAX));
-          setFlashIds(prev => { const n = new Set(prev); n.add(e.id); return n; });
-          setTimeout(() => {
-            if (!alive) return;
-            setFlashIds(prev => { const n = new Set(prev); n.delete(e.id); return n; });
-          }, FLASH_MS);
-        },
-      });
     }).catch(() => {});
 
     const kpiTimer = setInterval(() => {
       intelApi.overview(win).then(d => { if (alive) setData(d); }).catch(() => {});
     }, KPI_POLL_MS);
 
-    return () => { alive = false; stopStream(); clearInterval(kpiTimer); };
+    return () => { alive = false; clearInterval(kpiTimer); };
   }, [win]);
+
+  // Merge live events arriving from IntelApp's unified stream.
+  useEffect(() => {
+    if (!liveEvents.length) return;
+    setStream(prev => {
+      const seen = new Set(prev.map(e => e.id));
+      const add = liveEvents.filter(e => e && e.id != null && !seen.has(e.id));
+      if (!add.length) return prev;
+      add.forEach(e => {
+        setFlashIds(f => { const n = new Set(f); n.add(e.id); return n; });
+        setTimeout(() => {
+          setFlashIds(f => { const n = new Set(f); n.delete(e.id); return n; });
+        }, FLASH_MS);
+      });
+      return [...prev, ...add].slice(-200);
+    });
+  }, [liveEvents]);
 
   // Collapse verbatim cross-channel reposts: events sharing a content signature become
   // one row (the newest), with a count of how many channels carried it. Keeps the feed

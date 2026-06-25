@@ -1,13 +1,15 @@
 // Intel closed contour — shell + 3 экрана.
 // Situational Center (home) / Stories / Operational Board.
 // Витринная тема «военный диспетчер»: темнее, координатная сетка, моно-данные.
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon } from '../../core/components/icons';
 import { IntelHome } from './components/IntelHome';
 import { IntelStories } from './components/IntelStories';
 import { IntelBoard } from './components/IntelBoard';
 import { IntelSources } from './components/IntelSources';
-import { intelApi } from './api';
+import { AlertBell } from './components/AlertBell';
+import { AlertToast } from './components/AlertToast';
+import { intelApi, streamLiveEvents } from './api';
 import { INTEL_USE_MOCK } from './data/mock';
 import styles from './intel.module.css';
 
@@ -33,6 +35,49 @@ export function IntelApp({ onExit }) {
   const [window, setWindow]   = useState('24h');
   const [search, setSearch]   = useState('');
   const [searchResults, setSearchResults] = useState(null);
+  const [liveEvents, setLiveEvents] = useState([]);
+  const [alerts, setAlerts]         = useState([]);
+  const [toasts, setToasts]         = useState([]);
+  const seenAlert = useRef(new Set());
+
+  useEffect(() => {
+    let alive = true;
+    intelApi.alerts({ unread: true, limit: 50 }).then(rows => {
+      if (!alive || !Array.isArray(rows)) return;
+      rows.forEach(a => seenAlert.current.add(a.id));
+      setAlerts(rows);
+    }).catch(() => {});
+
+    const stop = streamLiveEvents({
+      onEvent: (e) => {
+        if (!alive || !e || e.id == null) return;
+        setLiveEvents(prev => [...prev, e].slice(-200));
+      },
+      onAlert: (a) => {
+        if (!alive || !a || a.id == null || seenAlert.current.has(a.id)) return;
+        seenAlert.current.add(a.id);
+        setAlerts(prev => [a, ...prev]);
+        setToasts(prev => [...prev, a]);
+      },
+    });
+    return () => { alive = false; stop(); };
+  }, []);
+
+  const dismissToast = useCallback((id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  const ackAlert = useCallback(async (id) => {
+    setAlerts(prev => prev.map(a => a.id === id ? { ...a, acknowledged: true } : a));
+    try { await intelApi.ackAlert(id); } catch { /* optimistic */ }
+  }, []);
+
+  const ackAll = useCallback(async () => {
+    setAlerts(prev => prev.map(a => ({ ...a, acknowledged: true })));
+    try { await intelApi.ackAllAlerts(); } catch { /* optimistic */ }
+  }, []);
+
+  const unreadCount = alerts.filter(a => !a.acknowledged).length;
 
   async function runSearch(q) {
     if (!q.trim()) { setSearchResults(null); return; }
@@ -76,6 +121,8 @@ export function IntelApp({ onExit }) {
             </div>
           </div>
           <div className={styles.topgrow} />
+          <AlertBell alerts={alerts} unreadCount={unreadCount} onAck={ackAlert} onAckAll={ackAll}
+                     onOpen={(a) => setScreen(a.scope === 'story' ? 'stories' : 'board')} />
           <div className={styles.windowSel}>
             {['1h', '24h', '7d'].map(w => (
               <button key={w} className={styles.windowBtn} data-active={window === w ? '1' : '0'} onClick={() => setWindow(w)}>
@@ -99,7 +146,7 @@ export function IntelApp({ onExit }) {
             <SearchResults results={searchResults} query={search} onOpenStory={() => { setScreen('stories'); setSearchResults(null); }} />
           </div>
         ) : screen === 'home' ? (
-          <IntelHome window={window} onOpenStory={() => setScreen('stories')} />
+          <IntelHome window={window} liveEvents={liveEvents} onOpenStory={() => setScreen('stories')} />
         ) : screen === 'stories' ? (
           <IntelStories window={window} />
         ) : screen === 'board' ? (
@@ -107,6 +154,8 @@ export function IntelApp({ onExit }) {
         ) : (
           <IntelSources />
         )}
+        <AlertToast toasts={toasts} onDismiss={dismissToast}
+                    onOpen={(a) => { setScreen(a.scope === 'story' ? 'stories' : 'board'); dismissToast(a.id); }} />
       </div>
     </div>
   );

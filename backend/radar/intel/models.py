@@ -43,6 +43,10 @@ class IntelMention(Base):
     incident_id:  Mapped[Optional[int]] = mapped_column(ForeignKey("intel_incidents.id"))
     verified:     Mapped[bool]     = mapped_column(Boolean, default=False)
     first_seen:   Mapped[datetime] = mapped_column(default=_now)
+    reply_to_tg_id:  Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reply_to_id:     Mapped[Optional[int]] = mapped_column(ForeignKey("intel_mentions.id"), nullable=True)
+    thread_root_id:  Mapped[Optional[int]] = mapped_column(ForeignKey("intel_mentions.id"), nullable=True)
+    context_fetched: Mapped[bool]          = mapped_column(Boolean, default=False, server_default="0")
 
 
 class IntelIncident(Base):
@@ -106,3 +110,16 @@ class IntelAlert(Base):
     message:         Mapped[str]      = mapped_column(Text, default="")
     fired_at:        Mapped[datetime] = mapped_column(default=_now)
     acknowledged_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+
+
+class IntelThreadContext(Base):
+    __tablename__ = "intel_thread_context"
+    __table_args__ = (UniqueConstraint("mention_id", "tg_msg_id"),)
+    id:         Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
+    mention_id: Mapped[int]      = mapped_column(ForeignKey("intel_mentions.id"), nullable=False)
+    tg_msg_id:  Mapped[str]      = mapped_column(Text, nullable=False)
+    role:       Mapped[str]      = mapped_column(Text, nullable=False)   # "parent" | "sibling"
+    depth:      Mapped[int]      = mapped_column(Integer, default=0)
+    author:     Mapped[str]      = mapped_column(Text, default="")
+    text:       Mapped[str]      = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(nullable=False)

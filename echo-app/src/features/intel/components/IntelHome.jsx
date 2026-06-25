@@ -22,6 +22,8 @@ export function IntelHome({ window: win, liveEvents = [], onOpenStory }) {
     let alive = true;
     seenRef.current = new Set();
 
+    setStream([]);   // clear stale feed immediately on window change
+    setFlashIds(new Set());
     intelApi.overview(win).then(d => { if (alive) setData(d); }).catch(() => {});
 
     // Initial snapshot seeds the feed; live events arrive via props from IntelApp.
@@ -40,11 +42,18 @@ export function IntelHome({ window: win, liveEvents = [], onOpenStory }) {
   }, [win]);
 
   // Merge live events arriving from IntelApp's unified stream.
+  // Filter by window so switching to 1h doesn't show 2-day-old posts that
+  // were just ingested by the collector.
   useEffect(() => {
     if (!liveEvents.length) return;
+    const windowMs = win === '1h' ? 3600000 : win === '7d' ? 7 * 86400000 : 86400000;
+    const cutoff = Date.now() - windowMs;
     setStream(prev => {
       const seen = new Set(prev.map(e => e.id));
-      const add = liveEvents.filter(e => e && e.id != null && !seen.has(e.id));
+      const add = liveEvents.filter(e =>
+        e && e.id != null && !seen.has(e.id) &&
+        (!e.created_at || Date.parse(e.created_at) >= cutoff)
+      );
       if (!add.length) return prev;
       add.forEach(e => {
         setFlashIds(f => { const n = new Set(f); n.add(e.id); return n; });
@@ -54,7 +63,7 @@ export function IntelHome({ window: win, liveEvents = [], onOpenStory }) {
       });
       return [...prev, ...add].slice(-200);
     });
-  }, [liveEvents]);
+  }, [liveEvents, win]);
 
   // Collapse verbatim cross-channel reposts: events sharing a content signature become
   // one row (the newest), with a count of how many channels carried it. Keeps the feed

@@ -105,7 +105,9 @@ def direction_card(session, direction, window_h=24) -> dict:
 def compute_overview(session, window_h=24) -> dict:
     since = datetime.now(timezone.utc) - timedelta(hours=window_h)
     events = session.query(func.count(IntelMention.id)).filter(IntelMention.created_at >= since).scalar() or 0
-    stories = session.query(IntelStory).filter_by(status="active").all()
+    # Only stories that had activity within the window.
+    stories = (session.query(IntelStory)
+               .filter(IntelStory.status == "active", IntelStory.last_seen_at >= since).all())
     summaries = [story_summary(session, st) for st in stories]
     summary_by_id = {st.id: s for st, s in zip(stories, summaries)}
     hot = sorted(summaries, key=lambda x: x["spike_pct"], reverse=True)[:8]

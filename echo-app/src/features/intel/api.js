@@ -28,6 +28,7 @@ export const intelApi = {
   alerts:    (params)         => INTEL_USE_MOCK ? Promise.resolve([]) : passthrough('alerts', params),
   ackAlert:  (id)             => request(`/intel/alerts/${id}/ack`, { method: 'POST' }),
   ackAllAlerts: ()            => request('/intel/alerts/ack-all', { method: 'POST' }),
+  mentionContext: (id)        => request(`/intel/mention/${id}/context`),
 };
 
 // ── Live event stream (SSE) ─────────────────────────────────────────────────

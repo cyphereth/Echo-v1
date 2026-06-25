@@ -143,6 +143,53 @@ function CollapsibleSection({ title, icon, count, children, defaultOpen = true }
   );
 }
 
+function ThreadContext({ mentionId }) {
+  const [open, setOpen] = useState(false);
+  const [ctx, setCtx] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  function toggle() {
+    if (open) { setOpen(false); return; }
+    if (ctx) { setOpen(true); return; }
+    setLoading(true);
+    intelApi.mentionContext(mentionId)
+      .then(data => { setCtx(data); setOpen(true); })
+      .catch(() => setCtx({ reply_chain: [], siblings: [] }))
+      .finally(() => setLoading(false));
+  }
+
+  const borderStyle = { borderLeft: '2px solid #2BB3C7', paddingLeft: 8, margin: '4px 0' };
+
+  return (
+    <div style={{ marginBottom: 4 }}>
+      <button
+        onClick={toggle}
+        style={{ background: 'none', border: 'none', color: '#4A6378', fontSize: 10,
+                 fontFamily: 'var(--font-mono)', cursor: 'pointer', padding: '0 0 2px' }}>
+        {loading ? '…' : open ? '↓ свернуть тред' : '↑ контекст'}
+      </button>
+      {open && ctx && (
+        <div style={borderStyle}>
+          {[...ctx.reply_chain].reverse().map((p, i) => (
+            <div key={p.tg_msg_id} style={{ color: '#4A6378', fontSize: 11, marginBottom: 2,
+                                            paddingLeft: i * 8 }}>
+              <span style={{ color: '#3A5368', marginRight: 4 }}>{p.author}</span>
+              {p.text}
+            </div>
+          ))}
+          {ctx.siblings.map(s => (
+            <div key={s.tg_msg_id} style={{ color: '#4A6378', fontSize: 11, marginBottom: 2,
+                                            paddingLeft: (ctx.reply_chain.length) * 8 }}>
+              <span style={{ color: '#3A5368', marginRight: 4 }}>{s.author}</span>
+              {s.text}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StoryDetail({ detail }) {
   const cr = CREDIBILITY[detail.credibility] || CREDIBILITY.unrated;
   const sp = spikeLevel(detail.spike_pct);
@@ -235,6 +282,7 @@ function StoryDetail({ detail }) {
                 <div className={styles.eventBody}>
                   <div className={styles.eventText}>{e.text}</div>
                   <div className={styles.eventMeta}>{e.author}{e.verified ? ' · ✓' : ''}</div>
+                  {e.is_reply && <ThreadContext mentionId={e.id} />}
                 </div>
                 <span className={styles.eventTime}>{agoStrShort(e.created_at)}</span>
               </div>

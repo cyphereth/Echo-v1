@@ -164,6 +164,57 @@ def test_scan_direction_alerts_emits_and_dedups():
     assert alerts.scan_direction_alerts(s) == []  # cooldown
 
 
+def _mem_threadsafe():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as _S
+    from sqlalchemy.pool import StaticPool
+    from radar.models import Base
+    import radar.intel.models
+    eng = create_engine("sqlite:///:memory:",
+                        connect_args={"check_same_thread": False},
+                        poolclass=StaticPool)
+    Base.metadata.create_all(eng)
+    return _S(eng)
+
+
+def _client(session):
+    from fastapi import FastAPI
+    from radar.intel import api as intel_api
+    from radar.models import User
+    app = FastAPI()
+    app.include_router(intel_api.router)
+    def _db_override():
+        yield session
+    app.dependency_overrides[intel_api.db] = _db_override
+    app.dependency_overrides[intel_api.current_user] = lambda: User(id=1, email="t@t", password_hash="x")
+    from fastapi.testclient import TestClient
+    return TestClient(app)
+
+
+def test_alerts_list_and_ack():
+    from radar.intel import alerts
+    s = _mem_threadsafe()
+    d = _direction(s)
+    alerts._emit(s, "direction", "direction_burst", title="Курское",
+                 message="Всплеск", magnitude=300.0, direction_id=d.id)
+    s.commit()
+    c = _client(s)
+
+    listed = c.get("/intel/alerts?unread=true").json()
+    assert len(listed) == 1
+    aid = listed[0]["id"]
+    assert listed[0]["direction"] == "kursk"
+    assert listed[0]["acknowledged"] is False
+
+    assert c.post(f"/intel/alerts/{aid}/ack").json()["ok"] is True
+    assert c.get("/intel/alerts?unread=true").json() == []
+
+    alerts._emit(s, "story", "spike", title="t", message="m", magnitude=1.0, story_id=9)
+    s.commit()
+    assert c.post("/intel/alerts/ack-all").json()["count"] == 1
+    assert c.get("/intel/alerts?unread=true").json() == []
+
+
 def test_run_intel_tick_emits_alerts(monkeypatch):
     """The tick runs alert scanning after clustering; an anomalous story yields a row."""
     from radar.intel import passes

@@ -3,7 +3,7 @@ import hashlib
 import re
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import func
-from .models import IntelDirection, IntelMention, IntelIncident, IntelStory, IntelStoryPoint
+from .models import IntelDirection, IntelMention, IntelIncident, IntelStory, IntelStoryPoint, IntelAlert
 
 def _aware(dt):
     return dt if dt is None or dt.tzinfo else dt.replace(tzinfo=timezone.utc)
@@ -117,3 +117,12 @@ def compute_overview(session, window_h=24) -> dict:
     spiking_dirs = len({s["direction"] for s in summaries if s["spike_pct"] >= 50})
     return {"kpis": {"events": events, "active_stories": len(stories), "spiking_dirs": spiking_dirs},
             "hot": hot, "alerts": alerts, "top_stories": top}
+
+
+def alert_payload(session, a) -> dict:
+    d = session.get(IntelDirection, a.direction_id) if a.direction_id else None
+    return {"id": a.id, "scope": a.scope, "story_id": a.story_id,
+            "direction": d.key if d else None, "kind": a.kind,
+            "magnitude": a.magnitude, "title": a.title, "message": a.message,
+            "at": _aware(a.fired_at).isoformat() if a.fired_at else None,
+            "acknowledged": a.acknowledged_at is not None}

@@ -23,7 +23,8 @@ from sqlalchemy.orm import Session
 from ..core.db import get_session
 from ..core.auth import decode_token
 from ..models import User
-from .models import IntelDirection, IntelMention, IntelStory, IntelProbe
+from .models import IntelDirection, IntelMention, IntelStory, IntelProbe, IntelAlert
+from ..models import _now
 from . import aggregate
 from . import credibility
 
@@ -412,3 +413,44 @@ def intel_sources_delete(
     session.delete(probe)
     session.commit()
     return {"deleted": True}
+
+
+@router.get("/intel/alerts")
+def intel_alerts(
+    unread: bool = False,
+    limit: int = 50,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    q = session.query(IntelAlert)
+    if unread:
+        q = q.filter(IntelAlert.acknowledged_at.is_(None))
+    rows = q.order_by(IntelAlert.id.desc()).limit(limit).all()
+    return [aggregate.alert_payload(session, a) for a in rows]
+
+
+@router.post("/intel/alerts/ack-all")
+def intel_alert_ack_all(
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    rows = session.query(IntelAlert).filter(IntelAlert.acknowledged_at.is_(None)).all()
+    for a in rows:
+        a.acknowledged_at = _now()
+    session.commit()
+    return {"ok": True, "count": len(rows)}
+
+
+@router.post("/intel/alerts/{alert_id}/ack")
+def intel_alert_ack(
+    alert_id: int,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    a = session.get(IntelAlert, alert_id)
+    if a is None:
+        raise HTTPException(404, "Alert not found")
+    if a.acknowledged_at is None:
+        a.acknowledged_at = _now()
+        session.commit()
+    return {"ok": True}

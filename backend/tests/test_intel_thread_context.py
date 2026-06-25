@@ -203,3 +203,85 @@ def test_context_api_endpoint_returns_reply_chain():
     assert data["reply_chain"][0]["tg_msg_id"] == "499"
     assert data["reply_chain"][0]["depth"] == 0
     assert data["siblings"] == []
+
+def test_context_api_endpoint_reply_chain_depth_order_and_siblings_by_created_at():
+    """Test that reply_chain is sorted root-first (descending depth) and siblings by created_at asc."""
+    from datetime import datetime, timedelta, timezone
+    from fastapi.testclient import TestClient
+    from fastapi import FastAPI
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from radar.models import Base
+    import radar.intel.models  # noqa
+
+    eng = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(eng)
+    s = Session(eng)
+
+    from radar.intel import seed
+    seed.ensure_default_directions(s)
+    from radar.intel.models import IntelDirection, IntelMention, IntelThreadContext
+
+    d = s.query(IntelDirection).first()
+    m = IntelMention(
+        direction_id=d.id, platform="telegram", post_id="grp/600",
+        author="@x", text="test", created_at=datetime.now(timezone.utc),
+        reply_to_tg_id="598", context_fetched=True,
+    )
+    s.add(m); s.commit()
+
+    # Create 3 parents with increasing depth: depth=0 (direct parent), depth=1 (root)
+    now = datetime.now(timezone.utc)
+    ctx_parent_direct = IntelThreadContext(
+        mention_id=m.id, tg_msg_id="598", role="parent", depth=0,
+        author="@parent", text="direct parent", created_at=now,
+    )
+    ctx_parent_root = IntelThreadContext(
+        mention_id=m.id, tg_msg_id="597", role="parent", depth=1,
+        author="@root", text="root ancestor", created_at=now - timedelta(hours=1),
+    )
+    s.add(ctx_parent_direct); s.add(ctx_parent_root); s.commit()
+
+    # Create 1 sibling
+    ctx_sibling = IntelThreadContext(
+        mention_id=m.id, tg_msg_id="599", role="sibling", depth=None,
+        author="@sibling", text="sibling message", created_at=now + timedelta(minutes=5),
+    )
+    s.add(ctx_sibling); s.commit()
+
+    app = FastAPI()
+    from radar.intel.api import router
+    app.include_router(router)
+
+    def override_db():
+        yield s
+
+    from radar.intel.api import db
+    app.dependency_overrides[db] = override_db
+
+    # Bypass auth
+    from radar.intel.api import current_user
+    from radar.models import User
+    fake_user = User(email="t@t.com", password_hash="x")
+    app.dependency_overrides[current_user] = lambda: fake_user
+
+    client = TestClient(app)
+    resp = client.get(f"/intel/mention/{m.id}/context")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    # Check mention_id
+    assert data["mention_id"] == m.id
+
+    # Check reply_chain: should be sorted root-first (depth descending)
+    # reply_chain[0] should have depth=1 (root)
+    # reply_chain[1] should have depth=0 (direct parent)
+    assert len(data["reply_chain"]) == 2
+    assert data["reply_chain"][0]["depth"] == 1, f"Expected root (depth=1) first, got {data['reply_chain'][0]}"
+    assert data["reply_chain"][0]["tg_msg_id"] == "597"
+    assert data["reply_chain"][1]["depth"] == 0, f"Expected direct parent (depth=0) second, got {data['reply_chain'][1]}"
+    assert data["reply_chain"][1]["tg_msg_id"] == "598"
+
+    # Check siblings: should have 1 sibling
+    assert len(data["siblings"]) == 1
+    assert data["siblings"][0]["tg_msg_id"] == "599"

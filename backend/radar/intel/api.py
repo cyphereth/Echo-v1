@@ -543,10 +543,12 @@ def intel_mention_context(
           "created_at": aggregate._aware(r.created_at).isoformat()}
          for r in rows if r.role == "parent"],
         key=lambda x: x["depth"],
+        reverse=True,
     )
-    siblings = [
-        {"tg_msg_id": r.tg_msg_id, "author": r.author,
-         "text": r.text, "created_at": aggregate._aware(r.created_at).isoformat()}
-        for r in rows if r.role == "sibling"
-    ]
+    siblings = sorted(
+        [{"tg_msg_id": r.tg_msg_id, "author": r.author,
+          "text": r.text, "created_at": aggregate._aware(r.created_at).isoformat()}
+         for r in rows if r.role == "sibling"],
+        key=lambda x: x["created_at"],
+    )
     return {"mention_id": mention_id, "reply_chain": reply_chain, "siblings": siblings}

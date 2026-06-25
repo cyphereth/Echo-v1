@@ -434,6 +434,99 @@ class TelegramProvider(SearchProvider):
             return []
         return [_parse_tg_chat_message(m, h, h) for m in msgs if getattr(m, "id", None)]
 
+    def fetch_thread_context(self, handle: str, reply_to_tg_id: Optional[str],
+                             current_tg_id: str, depth_limit: int = 5,
+                             sibling_limit: int = 10) -> dict:
+        """Fetch parent chain and siblings for a reply message.
+
+        Returns:
+          {"parents": [{tg_msg_id, depth, author, text, created_at}],
+           "siblings": [{tg_msg_id, author, text, created_at}]}
+
+        Raises TelegramFloodWait so callers can back off.
+        Parents are ordered depth=0 (direct parent) -> depth=N (root).
+        Siblings are messages that share the same root parent (excl. current_tg_id).
+        """
+        from telethon.errors import FloodWaitError
+        if reply_to_tg_id is None:
+            return {"parents": [], "siblings": []}
+
+        h = handle if (not handle or handle.startswith("@") or handle.startswith("#")) else f"@{handle}"
+
+        def _author(msg) -> str:
+            sender = getattr(msg, "sender", None)
+            uname = getattr(sender, "username", None) if sender else None
+            return f"@{uname}" if uname else str(getattr(msg, "sender_id", "") or "")
+
+        def _get_one(entity, msg_id: int):
+            try:
+                msgs = self._await(self._client.get_messages(entity, ids=msg_id))
+                return msgs[0] if msgs else None
+            except FloodWaitError:
+                raise
+            except Exception:
+                return None
+
+        try:
+            entity = self._await(self._client.get_entity(h))
+        except FloodWaitError:
+            raise
+        except Exception:
+            return {"parents": [], "siblings": []}
+
+        # Walk up the parent chain
+        parents = []
+        depth = 0
+        next_id = int(reply_to_tg_id)
+        root_tg_id: Optional[int] = None
+
+        while next_id and depth < depth_limit:
+            try:
+                msg = _get_one(entity, next_id)
+            except FloodWaitError:
+                raise
+            if msg is None:
+                break
+            parents.append({
+                "tg_msg_id": str(msg.id),
+                "depth": depth,
+                "author": _author(msg),
+                "text": getattr(msg, "message", "") or "",
+                "created_at": msg.date,
+            })
+            parent_of_parent = getattr(msg, "reply_to_msg_id", None)
+            if parent_of_parent:
+                next_id = int(parent_of_parent)
+                depth += 1
+            else:
+                root_tg_id = msg.id
+                break
+
+        if root_tg_id is None and parents:
+            root_tg_id = int(parents[-1]["tg_msg_id"])
+
+        # Fetch siblings (other replies to root, excluding current message)
+        siblings = []
+        if root_tg_id:
+            try:
+                sibling_msgs = self._await(self._client.get_messages(
+                    entity, reply_to=root_tg_id, limit=sibling_limit))
+                for m in (sibling_msgs or []):
+                    if str(m.id) == current_tg_id:
+                        continue
+                    siblings.append({
+                        "tg_msg_id": str(m.id),
+                        "author": _author(m),
+                        "text": getattr(m, "message", "") or "",
+                        "created_at": m.date,
+                    })
+            except FloodWaitError:
+                raise
+            except Exception:
+                pass  # siblings are best-effort
+
+        return {"parents": parents, "siblings": siblings}
+
     def search_linked_chat(self, parent_handle: str, term: str, limit: int = 20, min_id: int = 0) -> list[Post]:
         """Search the discussion group LINKED to a (public) channel, for groups that have
         no public @username. The parent channel is always resolvable, so we reach the

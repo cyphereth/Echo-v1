@@ -215,6 +215,19 @@ def test_alerts_list_and_ack():
     assert c.get("/intel/alerts?unread=true").json() == []
 
 
+def test_compute_overview_alerts_come_from_intel_alert_table():
+    from radar.intel import aggregate, alerts
+    s = _mem()
+    d = _direction(s)
+    alerts._emit(s, "direction", "direction_burst", title="Курское",
+                 message="Всплеск ×4", magnitude=300.0, direction_id=d.id)
+    s.commit()
+    ov = aggregate.compute_overview(s, 24)
+    assert len(ov["alerts"]) == 1
+    assert ov["alerts"][0]["message"] == "Всплеск ×4"
+    assert ov["alerts"][0]["direction"] == "kursk"
+
+
 def test_run_intel_tick_emits_alerts(monkeypatch):
     """The tick runs alert scanning after clustering; an anomalous story yields a row."""
     from radar.intel import passes

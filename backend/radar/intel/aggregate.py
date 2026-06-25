@@ -110,10 +110,10 @@ def compute_overview(session, window_h=24) -> dict:
     summary_by_id = {st.id: s for st, s in zip(stories, summaries)}
     hot = sorted(summaries, key=lambda x: x["spike_pct"], reverse=True)[:8]
     top = sorted(summaries, key=lambda x: x["post_count"], reverse=True)[:8]
-    alerts = [{"id": st.id, "story_id": st.id, "direction": summary_by_id[st.id]["direction"],
-               "kind": "spike", "magnitude": summary_by_id[st.id]["spike_pct"],
-               "message": st.title, "at": _aware(st.last_seen_at).isoformat() if st.last_seen_at else None}
-              for st in stories if st.is_anomaly][:20]
+    alert_rows = (session.query(IntelAlert)
+                  .filter(IntelAlert.acknowledged_at.is_(None))
+                  .order_by(IntelAlert.id.desc()).limit(20).all())
+    alerts = [alert_payload(session, a) for a in alert_rows]
     spiking_dirs = len({s["direction"] for s in summaries if s["spike_pct"] >= 50})
     return {"kpis": {"events": events, "active_stories": len(stories), "spiking_dirs": spiking_dirs},
             "hot": hot, "alerts": alerts, "top_stories": top}

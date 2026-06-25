@@ -82,22 +82,44 @@ def _hours(window: str) -> int:
 @router.get("/intel/overview")
 def intel_overview(
     window: str = "24h",
+    from_dt: Optional[str] = None,
+    to_dt: Optional[str] = None,
     user: User = Depends(current_user),
     session: Session = Depends(db),
 ):
+    if from_dt or to_dt:
+        try:
+            frm = datetime.fromisoformat(from_dt).replace(tzinfo=timezone.utc) if from_dt else None
+            tod = datetime.fromisoformat(to_dt).replace(tzinfo=timezone.utc) if to_dt else datetime.now(timezone.utc)
+        except ValueError:
+            raise HTTPException(400, "Invalid from_dt/to_dt ISO format")
+        return aggregate.compute_overview_range(session, frm, tod)
     return aggregate.compute_overview(session, _hours(window))
 
 
 @router.get("/intel/stream")
 def intel_stream(
     window: str = "24h",
+    from_dt: Optional[str] = None,
+    to_dt: Optional[str] = None,
     direction: Optional[str] = None,
     limit: int = 50,
     user: User = Depends(current_user),
     session: Session = Depends(db),
 ):
-    since = datetime.now(timezone.utc) - timedelta(hours=_hours(window))
-    q = session.query(IntelMention).filter(IntelMention.created_at >= since)
+    if from_dt or to_dt:
+        try:
+            since = datetime.fromisoformat(from_dt).replace(tzinfo=timezone.utc) if from_dt else None
+            until = datetime.fromisoformat(to_dt).replace(tzinfo=timezone.utc) if to_dt else datetime.now(timezone.utc)
+        except ValueError:
+            raise HTTPException(400, "Invalid from_dt/to_dt ISO format")
+        q = session.query(IntelMention)
+        if since:
+            q = q.filter(IntelMention.created_at >= since.replace(tzinfo=None))
+        q = q.filter(IntelMention.created_at <= until.replace(tzinfo=None))
+    else:
+        since = datetime.now(timezone.utc) - timedelta(hours=_hours(window))
+        q = session.query(IntelMention).filter(IntelMention.created_at >= since.replace(tzinfo=None))
     if direction:
         d = session.query(IntelDirection).filter_by(key=direction).first()
         if d:
@@ -174,26 +196,34 @@ async def intel_stream_live(
         # Open the stream immediately so the client knows it's connected.
         yield ": connected\n\n"
         while True:
-            s = get_session()
+            # Wrap each DB poll in its own try/except so a transient SQLite lock or
+            # serialisation error doesn't kill the generator — we just skip the tick
+            # and send a ping to keep the connection alive.
+            payloads: list = []
+            apayloads: list = []
             try:
-                q = s.query(IntelMention).filter(IntelMention.id > last_id)
-                if direction_id is not None:
-                    q = q.filter(IntelMention.direction_id == direction_id)
-                rows = q.order_by(IntelMention.id.asc()).limit(100).all()
-                payloads = [(m.id, json.dumps(aggregate.event(m), ensure_ascii=False)) for m in rows]
-            finally:
-                s.close()
+                s = get_session()
+                try:
+                    q = s.query(IntelMention).filter(IntelMention.id > last_id)
+                    if direction_id is not None:
+                        q = q.filter(IntelMention.direction_id == direction_id)
+                    rows = q.order_by(IntelMention.id.asc()).limit(100).all()
+                    payloads = [(m.id, json.dumps(aggregate.event(m), ensure_ascii=False)) for m in rows]
+                finally:
+                    s.close()
+                s = get_session()
+                try:
+                    arows = (s.query(IntelAlert).filter(IntelAlert.id > last_alert_id)
+                             .order_by(IntelAlert.id.asc()).limit(50).all())
+                    apayloads = [(a.id, json.dumps(aggregate.alert_payload(s, a), ensure_ascii=False))
+                                 for a in arows]
+                finally:
+                    s.close()
+            except Exception as exc:
+                log.warning("SSE tick db error (skipping): %s", exc)
             for mid, payload in payloads:
                 last_id = mid
                 yield f"data: {payload}\n\n"
-            s = get_session()
-            try:
-                arows = (s.query(IntelAlert).filter(IntelAlert.id > last_alert_id)
-                         .order_by(IntelAlert.id.asc()).limit(50).all())
-                apayloads = [(a.id, json.dumps(aggregate.alert_payload(s, a), ensure_ascii=False))
-                             for a in arows]
-            finally:
-                s.close()
             for aid, payload in apayloads:
                 last_alert_id = aid
                 yield f"event: alert\ndata: {payload}\n\n"
@@ -219,10 +249,27 @@ def intel_stories(
     verified: Optional[bool] = None,
     sort: str = "recency",
     limit: int = 50,
+    from_dt: Optional[str] = None,
+    to_dt: Optional[str] = None,
+    window: str = "24h",
     user: User = Depends(current_user),
     session: Session = Depends(db),
 ):
     q = session.query(IntelStory)
+    # Time range filter
+    if from_dt or to_dt:
+        try:
+            frm = datetime.fromisoformat(from_dt).replace(tzinfo=None) if from_dt else None
+            tod = datetime.fromisoformat(to_dt).replace(tzinfo=None) if to_dt else datetime.now(timezone.utc).replace(tzinfo=None)
+        except ValueError:
+            raise HTTPException(400, "Invalid from_dt/to_dt")
+        if frm:
+            q = q.filter(IntelStory.last_seen_at >= frm)
+        q = q.filter(IntelStory.last_seen_at <= tod)
+    else:
+        since = datetime.now(timezone.utc) - timedelta(hours=_hours(window))
+        since_naive = since.replace(tzinfo=None)
+        q = q.filter(IntelStory.last_seen_at >= since_naive, IntelStory.created_at >= since_naive)
     if direction:
         d = session.query(IntelDirection).filter_by(key=direction).first()
         if d:

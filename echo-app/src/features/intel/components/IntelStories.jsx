@@ -14,18 +14,41 @@ const C = { bar: '#2BB3C7', line: '#34D8A0', grid: 'rgba(43,179,199,.10)', fg3: 
 const tooltipStyle = { background: '#0A0F16', border: '1px solid rgba(43,179,199,.20)', borderRadius: '6px', color: '#D8E4F0', fontSize: '11px' };
 const DIRECTION_OPTS = Object.keys(DIRECTION_NAMES);
 
-export function IntelStories() {
+export function IntelStories({ timeRange, openStoryId, openDirection, navToken }) {
   const [list, setList]         = useState([]);
   const [selectedId, setSel]    = useState(null);
   const [detail, setDetail]     = useState(null);
-  const [filters, setFilters]   = useState({ direction: '', side: '', verified: false });
+  const [filters, setFilters]   = useState({ direction: openDirection || '', side: '', verified: false });
   const [sort, setSort]         = useState('activity');
 
+  // When navigated here from home with a specific story, select it immediately.
   useEffect(() => {
-    intelApi.stories({ ...filters, verified: filters.verified ? 'true' : '', sort, limit: 30 })
-      .then(l => { setList(l); if (l.length && !l.find(s => s.id === selectedId)) setSel(l[0].id); })
+    if (openStoryId != null) setSel(openStoryId);
+  }, [openStoryId]);
+
+  // When navigated here from board with a direction, apply it as a filter.
+  // navToken changes on every navigation so this fires even if direction is the same.
+  useEffect(() => {
+    if (openDirection != null) setFilters(f => ({ ...f, direction: openDirection }));
+    else if (openDirection === null) setFilters(f => ({ ...f, direction: '' }));
+  }, [openDirection, navToken]);
+
+  useEffect(() => {
+    const rangeParams = timeRange?.from_dt || timeRange?.to_dt
+      ? { from_dt: timeRange.from_dt, to_dt: timeRange.to_dt }
+      : { window: timeRange?.window || '24h' };
+    intelApi.stories({ ...filters, ...rangeParams, verified: filters.verified ? 'true' : '', sort, limit: 30 })
+      .then(l => {
+        setList(l);
+        // If navigated here with a specific story, keep that selection; otherwise pick first.
+        setSel(cur => {
+          if (openStoryId != null) return openStoryId;
+          if (cur != null && l.find(s => s.id === cur)) return cur;
+          return l.length ? l[0].id : null;
+        });
+      })
       .catch(() => setList([]));
-  }, [filters, sort]);  // eslint-disable-line
+  }, [filters, sort, timeRange, openStoryId]);  // eslint-disable-line
 
   useEffect(() => {
     if (!selectedId) { setDetail(null); return; }
@@ -99,6 +122,27 @@ export function IntelStories() {
   );
 }
 
+function CollapsibleSection({ title, icon, count, children, defaultOpen = true }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className={styles.section}>
+      <div
+        className={styles.sectionHead}
+        onClick={() => setOpen(o => !o)}
+        style={{ cursor: 'pointer', userSelect: 'none' }}
+      >
+        <span className={styles.sectionTitle}>
+          <Icon name={icon} size={12} color="#57D2E2" />
+          {title}
+          {count != null && <span className={styles.sectionCount}>{count}</span>}
+        </span>
+        <span style={{ marginLeft: 'auto', color: '#4A6378', fontSize: 11, fontFamily: 'var(--font-mono)', transition: 'transform .2s', display: 'inline-block', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}>▾</span>
+      </div>
+      {open && children}
+    </div>
+  );
+}
+
 function StoryDetail({ detail }) {
   const cr = CREDIBILITY[detail.credibility] || CREDIBILITY.unrated;
   const sp = spikeLevel(detail.spike_pct);
@@ -162,13 +206,7 @@ function StoryDetail({ detail }) {
       )}
 
       {/* sources by side */}
-      <div className={styles.section}>
-        <div className={styles.sectionHead}>
-          <span className={styles.sectionTitle}>
-            <Icon name="radio" size={12} color="#57D2E2" />
-            Источники · {detail.sources?.length || 0}
-          </span>
-        </div>
+      <CollapsibleSection icon="radio" title="Источники" count={detail.sources?.length || 0}>
         <div style={{ padding: '4px 16px 8px' }}>
           {(detail.sources || []).map((src, i) => {
             const sd = SIDE[src.side] || SIDE.ru;
@@ -184,17 +222,11 @@ function StoryDetail({ detail }) {
             );
           })}
         </div>
-      </div>
+      </CollapsibleSection>
 
       {/* constituent events */}
       {detail.events?.length > 0 && (
-        <div className={styles.section}>
-          <div className={styles.sectionHead}>
-            <span className={styles.sectionTitle}>
-              <Icon name="bar3" size={12} color="#57D2E2" />
-              События · {detail.events.length}
-            </span>
-          </div>
+        <CollapsibleSection icon="bar3" title="События" count={detail.events.length} defaultOpen={false}>
           {detail.events.map(e => {
             const sd = SIDE[e.side] || SIDE.ru;
             return (
@@ -208,7 +240,7 @@ function StoryDetail({ detail }) {
               </div>
             );
           })}
-        </div>
+        </CollapsibleSection>
       )}
     </>
   );

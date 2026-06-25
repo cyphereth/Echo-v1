@@ -100,11 +100,14 @@ def enrich_context(session: Session, provider, batch_size: int = 50) -> int:
                 sp.rollback()
 
         # Resolve reply_to_id and thread_root_id from index
+        # Extract namespace from mention.post_id (format: "namespace/msgid")
+        namespace = mention.post_id.rsplit("/", 1)[0]
+
         if mention.reply_to_tg_id:
-            parent_post_id_suffix = f"/{mention.reply_to_tg_id}"
+            parent_post_id = f"{namespace}/{mention.reply_to_tg_id}"
             parent_in_index = (
                 session.query(IntelMention)
-                .filter(IntelMention.post_id.endswith(parent_post_id_suffix))
+                .filter(IntelMention.post_id == parent_post_id)
                 .first()
             )
             if parent_in_index:
@@ -113,10 +116,10 @@ def enrich_context(session: Session, provider, batch_size: int = 50) -> int:
         parents = result.get("parents", [])
         if parents:
             root_tg_id = parents[-1]["tg_msg_id"]
-            root_suffix = f"/{root_tg_id}"
+            root_post_id = f"{namespace}/{root_tg_id}"
             root_in_index = (
                 session.query(IntelMention)
-                .filter(IntelMention.post_id.endswith(root_suffix))
+                .filter(IntelMention.post_id == root_post_id)
                 .first()
             )
             if root_in_index:

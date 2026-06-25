@@ -9,6 +9,7 @@ import { IntelBoard } from './components/IntelBoard';
 import { IntelSources } from './components/IntelSources';
 import { AlertBell } from './components/AlertBell';
 import { AlertToast } from './components/AlertToast';
+import { DateRangePicker } from './components/DateRangePicker';
 import { intelApi, streamLiveEvents } from './api';
 import { INTEL_USE_MOCK } from './data/mock';
 import styles from './intel.module.css';
@@ -31,8 +32,11 @@ function NavItem({ item, active, onClick }) {
 }
 
 export function IntelApp({ onExit }) {
-  const [screen, setScreen]   = useState('home');
-  const [window, setWindow]   = useState('24h');
+  const [screen, setScreen]       = useState('home');
+  const [timeRange, setTimeRange] = useState({ window: '24h' });
+  const [openStoryId, setOpenStoryId] = useState(null);
+  const [openDirection, setOpenDirection] = useState(null);
+  const [navToken, setNavToken] = useState(0);
   const [search, setSearch]   = useState('');
   const [searchResults, setSearchResults] = useState(null);
   const [liveEvents, setLiveEvents] = useState([]);
@@ -95,7 +99,7 @@ export function IntelApp({ onExit }) {
         </div>
         <nav className={styles.nav}>
           {SCREENS.map(s => (
-            <NavItem key={s.key} item={s} active={screen === s.key} onClick={() => { setScreen(s.key); setSearchResults(null); }} />
+            <NavItem key={s.key} item={s} active={screen === s.key} onClick={() => { setScreen(s.key); setSearchResults(null); setOpenStoryId(null); setOpenDirection(null); }} />
           ))}
         </nav>
         <div className={styles.sidebarBottom}>
@@ -123,13 +127,7 @@ export function IntelApp({ onExit }) {
           <div className={styles.topgrow} />
           <AlertBell alerts={alerts} unreadCount={unreadCount} onAck={ackAlert} onAckAll={ackAll}
                      onOpen={(a) => setScreen(a.scope === 'story' ? 'stories' : 'board')} />
-          <div className={styles.windowSel}>
-            {['1h', '24h', '7d'].map(w => (
-              <button key={w} className={styles.windowBtn} data-active={window === w ? '1' : '0'} onClick={() => setWindow(w)}>
-                {w}
-              </button>
-            ))}
-          </div>
+          <DateRangePicker value={timeRange} onChange={setTimeRange} />
           <div className={styles.searchBox}>
             <Icon name="search" size={13} color="#4A6378" />
             <input
@@ -146,11 +144,11 @@ export function IntelApp({ onExit }) {
             <SearchResults results={searchResults} query={search} onOpenStory={() => { setScreen('stories'); setSearchResults(null); }} />
           </div>
         ) : screen === 'home' ? (
-          <IntelHome window={window} liveEvents={liveEvents} onOpenStory={() => setScreen('stories')} />
+          <IntelHome timeRange={timeRange} liveEvents={liveEvents} onOpenStory={(id) => { setOpenStoryId(id ?? null); setOpenDirection(null); setNavToken(t => t + 1); setScreen('stories'); }} />
         ) : screen === 'stories' ? (
-          <IntelStories window={window} />
+          <IntelStories timeRange={timeRange} openStoryId={openStoryId} openDirection={openDirection} navToken={navToken} />
         ) : screen === 'board' ? (
-          <IntelBoard window={window} onOpenDir={() => setScreen('stories')} />
+          <IntelBoard timeRange={timeRange} onOpenDir={(dirKey) => { setOpenDirection(dirKey ?? null); setOpenStoryId(null); setNavToken(t => t + 1); setScreen('stories'); }} />
         ) : (
           <IntelSources />
         )}

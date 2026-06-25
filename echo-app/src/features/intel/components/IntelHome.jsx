@@ -12,41 +12,51 @@ const KPI_POLL_MS = 15000;
 const STREAM_MAX  = 40;   // cap the in-memory feed so it can't grow unbounded
 const FLASH_MS    = 2600; // how long a freshly arrived row stays highlighted
 
-export function IntelHome({ window: win, liveEvents = [], onOpenStory }) {
+export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
   const [data, setData]         = useState(null);
   const [stream, setStream]     = useState([]);
   const [flashIds, setFlashIds] = useState(() => new Set());
   const seenRef                 = useRef(new Set());
 
+  // Derive a simple window string for SSE feed cutoff filtering
+  const win = timeRange?.window || '24h';
+  const isCustom = !!(timeRange?.from_dt || timeRange?.to_dt);
+
   useEffect(() => {
     let alive = true;
     seenRef.current = new Set();
 
-    setStream([]);   // clear stale feed immediately on window change
+    setStream([]);
     setFlashIds(new Set());
-    intelApi.overview(win).then(d => { if (alive) setData(d); }).catch(() => {});
+    intelApi.overview(timeRange).then(d => { if (alive) setData(d); }).catch(() => {});
 
-    // Initial snapshot seeds the feed; live events arrive via props from IntelApp.
-    intelApi.stream({ window: win, limit: 18 }).then(events => {
+    const streamParams = isCustom
+      ? { from_dt: timeRange.from_dt, to_dt: timeRange.to_dt, limit: 18 }
+      : { window: win, limit: 18 };
+    intelApi.stream(streamParams).then(events => {
       if (!alive) return;
       const arr = Array.isArray(events) ? events : [];
       seenRef.current = new Set(arr.map(e => e.id));
       setStream(arr);
     }).catch(() => {});
 
-    const kpiTimer = setInterval(() => {
-      intelApi.overview(win).then(d => { if (alive) setData(d); }).catch(() => {});
-    }, KPI_POLL_MS);
+    // Only poll KPIs in live mode; custom range is static
+    let kpiTimer;
+    if (!isCustom) {
+      kpiTimer = setInterval(() => {
+        intelApi.overview(timeRange).then(d => { if (alive) setData(d); }).catch(() => {});
+      }, KPI_POLL_MS);
+    }
 
     return () => { alive = false; clearInterval(kpiTimer); };
-  }, [win]);
+  }, [timeRange]);
 
   // Merge live events arriving from IntelApp's unified stream.
   // Filter by window so switching to 1h doesn't show 2-day-old posts that
   // were just ingested by the collector.
   useEffect(() => {
-    if (!liveEvents.length) return;
-    const windowMs = win === '1h' ? 3600000 : win === '7d' ? 7 * 86400000 : 86400000;
+    if (!liveEvents.length || isCustom) return;
+    const windowMs = win === '1h' ? 3600000 : win === '7d' ? 7 * 86400000 : win === '30d' ? 30 * 86400000 : 86400000;
     const cutoff = Date.now() - windowMs;
     setStream(prev => {
       const seen = new Set(prev.map(e => e.id));
@@ -63,7 +73,7 @@ export function IntelHome({ window: win, liveEvents = [], onOpenStory }) {
       });
       return [...prev, ...add].slice(-200);
     });
-  }, [liveEvents, win]);
+  }, [liveEvents, win, isCustom]);
 
   // Collapse verbatim cross-channel reposts: events sharing a content signature become
   // one row (the newest), with a count of how many channels carried it. Keeps the feed
@@ -99,7 +109,7 @@ export function IntelHome({ window: win, liveEvents = [], onOpenStory }) {
       {/* KPI strip */}
       <div className={styles.kpis}>
         <div className={styles.kpi}>
-          <span className={styles.kpiLabel}>Событий / 24ч</span>
+          <span className={styles.kpiLabel}>Событий / {isCustom ? 'период' : win}</span>
           <span className={styles.kpiValue}>{kpis.events}</span>
         </div>
         <div className={styles.kpi}>
@@ -126,7 +136,7 @@ export function IntelHome({ window: win, liveEvents = [], onOpenStory }) {
             const sp = spikeLevel(s.spike_pct);
             const cr = CREDIBILITY[s.credibility] || CREDIBILITY.unrated;
             return (
-              <div key={s.id} className={styles.hotRow} onClick={onOpenStory}>
+              <div key={s.id} className={styles.hotRow} onClick={() => onOpenStory(s.id)}>
                 <span className={styles.spikeTag} style={{ color: sp.color, background: sp.color + '22' }}>
                   +{s.spike_pct}%
                 </span>
@@ -181,7 +191,7 @@ export function IntelHome({ window: win, liveEvents = [], onOpenStory }) {
           {top_stories.map(s => {
             const cr = CREDIBILITY[s.credibility] || CREDIBILITY.unrated;
             return (
-              <div key={s.id} className={styles.hotRow} onClick={onOpenStory}>
+              <div key={s.id} className={styles.hotRow} onClick={() => onOpenStory(s.id)}>
                 <span className={styles.hotTitle}>{s.title}</span>
                 <IntelSparkline data={s.sparkline} color="#57D2E2" w={56} h={18} />
                 <span className={styles.hotMeta}>{s.post_count} упом.</span>
@@ -198,13 +208,19 @@ export function IntelHome({ window: win, liveEvents = [], onOpenStory }) {
               Лента событий
               <span className={styles.sectionCount}>{feed.length}</span>
             </span>
-            <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 10, color: '#34D8A0', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              {flashIds.size > 0 && (
-                <span style={{ color: '#34D8A0', fontWeight: 700 }}>+{flashIds.size}</span>
-              )}
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#34D8A0', animation: 'erpulse 2.4s var(--ease-in-out) infinite' }} />
-              LIVE
-            </span>
+            {isCustom ? (
+              <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 10, color: '#6A8499' }}>
+                АРХИВ
+              </span>
+            ) : (
+              <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 10, color: '#34D8A0', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                {flashIds.size > 0 && (
+                  <span style={{ color: '#34D8A0', fontWeight: 700 }}>+{flashIds.size}</span>
+                )}
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#34D8A0', animation: 'erpulse 2.4s var(--ease-in-out) infinite' }} />
+                LIVE
+              </span>
+            )}
           </div>
           {feed.map(e => {
             const sd = SIDE[e.side] || SIDE.ru;

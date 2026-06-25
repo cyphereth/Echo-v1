@@ -62,12 +62,13 @@ def run_intel_tick(session, tg_provider, web_provider=None, embed=None) -> None:
     from .models import IntelMention
     run_intel_collect(session, tg_provider)
     # Enrich reply mentions with parent chain + siblings (separate pass, non-blocking).
-    try:
-        from .context_pass import enrich_context
-        enrich_context(session, tg_provider, batch_size=50)
-    except Exception:
-        log.exception("intel context enrichment failed (skipped)")
-        session.rollback()
+    if tg_provider is not None:
+        try:
+            from .context_pass import enrich_context
+            enrich_context(session, tg_provider, batch_size=50)
+        except Exception:
+            log.exception("intel context enrichment failed (skipped)")
+            session.rollback()
     # Deterministic geo re-tagging (settlement/region gazetteer) — no LLM. Picks up
     # already-stored 'unassigned' posts that now match an expanded gazetteer entry.
     try:

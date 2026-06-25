@@ -88,6 +88,7 @@ def test_fetch_thread_context_siblings():
     siblings = result["siblings"]
     # 301 replies to 298 (same root), excluding current msg 300
     assert any(s["tg_msg_id"] == "301" for s in siblings)
+    assert not any(s["tg_msg_id"] == "300" for s in siblings)  # current msg excluded
 
 def test_fetch_thread_context_no_reply():
     provider = TelegramProvider(client=_FakeClient())

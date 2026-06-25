@@ -522,8 +522,8 @@ class TelegramProvider(SearchProvider):
                     })
             except FloodWaitError:
                 raise
-            except Exception:
-                pass  # siblings are best-effort
+            except Exception as e:
+                log.warning("fetch_thread_context: siblings fetch failed for %s: %s", handle, type(e).__name__)
 
         return {"parents": parents, "siblings": siblings}
 

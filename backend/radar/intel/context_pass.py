@@ -63,6 +63,12 @@ def enrich_context(session: Session, provider, batch_size: int = 50) -> int:
             session.commit()
             continue
 
+        if result is None:
+            log.warning("context_pass: fetch returned None for mention %s — skipping", mention.id)
+            mention.context_fetched = True
+            session.commit()
+            continue
+
         for p in result.get("parents", []):
             ctx = IntelThreadContext(
                 mention_id=mention.id,

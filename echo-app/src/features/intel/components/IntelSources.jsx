@@ -82,8 +82,12 @@ export function IntelSources() {
     const next = src.kind === 'chat' ? 'channel' : 'chat';
     setToggling(src.id);
     try {
-      await intelApi.updateSource(src.id, { kind: next });
-      await load();
+      const updated = await intelApi.updateSource(src.id, { kind: next });
+      // Обновляем элемент на месте, без load() — иначе список перерисуется
+      // и скролл прыгнет наверх, теряя позицию пользователя.
+      setSources(prev => prev.map(s =>
+        s.id === src.id ? { ...s, ...(updated && updated.id ? updated : { kind: next }) } : s
+      ));
     } catch (e) {
       setErr(e.message || 'Ошибка смены типа');
     } finally {

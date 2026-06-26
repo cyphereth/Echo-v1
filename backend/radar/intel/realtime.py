@@ -121,6 +121,7 @@ def store_realtime_post(session, post, side, kind, lexicon_terms,
         views=getattr(post, "views", 0) or 0,
         created_at=post.created_at,
         reply_to_tg_id=getattr(post, "reply_to_tg_id", None),
+        media=getattr(post, "media", None),
     )
     sp = session.begin_nested()
     try:

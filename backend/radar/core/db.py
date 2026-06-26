@@ -61,6 +61,7 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
     },
     "intel_mentions": {
         "hidden": "BOOLEAN NOT NULL DEFAULT 0",
+        "media":  "TEXT",
     },
     "stories": {
         "topic_id":         "INTEGER",

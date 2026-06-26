@@ -61,6 +61,25 @@ def test_parse_tg_message_extracts_reply_to():
     assert p.reply_to_tg_id == "4242"
 
 
+def test_media_kind_classifies_attachments():
+    from radar.core.providers.telegram import _media_kind
+    assert _media_kind(_Msg()) is None  # plain text, no media attrs
+    photo = _Msg(); photo.photo = object()
+    assert _media_kind(photo) == "photo"
+    video = _Msg(); video.video = object()
+    assert _media_kind(video) == "video"
+    class _Doc: mime_type = "video/mp4"
+    doc = _Msg(); doc.document = _Doc()
+    assert _media_kind(doc) == "video"
+    other = _Msg(); other.media = object()
+    assert _media_kind(other) == "file"
+
+def test_parse_tg_message_marks_media():
+    m = _Msg(); m.photo = object()
+    p = _parse_tg_message(m, "@x", followers=0)
+    assert p.media == "photo"
+
+
 def test_search_keyword_calls_global(monkeypatch):
     from radar.core.providers.telegram import TelegramProvider
     calls = {}

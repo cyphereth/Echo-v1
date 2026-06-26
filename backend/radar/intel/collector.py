@@ -285,6 +285,7 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                     views=getattr(post, "likes", 0) or 0,
                     created_at=post.created_at,
                     reply_to_tg_id=getattr(post, "reply_to_tg_id", None),
+                    media=getattr(post, "media", None),
                 ))
 
         else:
@@ -348,6 +349,7 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                         url=getattr(post, "url", None),
                         views=getattr(post, "likes", 0) or 0,
                         created_at=post.created_at,
+                        media=getattr(post, "media", None),
                     ))
 
                 next_cursor = getattr(page, "next_cursor", None) or getattr(page, "cursor", None)

@@ -48,6 +48,7 @@ class IntelMention(Base):
     thread_root_id:  Mapped[Optional[int]] = mapped_column(ForeignKey("intel_mentions.id"), nullable=True)
     context_fetched: Mapped[bool]          = mapped_column(Boolean, default=False, server_default="0")
     hidden:          Mapped[bool]          = mapped_column(Boolean, default=False, server_default="0")  # soft-hide: куратор скинул в спам
+    media:           Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # "photo"|"video"|"file" если к посту приложено вложение
 
 
 class IntelIncident(Base):

@@ -219,6 +219,38 @@ def test_enrich_context_resolves_channel_reply_locally():
     assert [c.tg_msg_id for c in chain] == ["900"]
 
 
+def test_enrich_context_floodwait_leaves_reply_for_retry():
+    """A TelegramFloodWait while fetching context must NOT mark the reply done — it has
+    to stay context_fetched=False so it's retried once the flood clears. Previously a raw
+    telethon FloodWaitError slipped past the handler and the reply was burned forever
+    (показывалось «Родительское сообщение ещё не подгружено» навсегда)."""
+    from types import SimpleNamespace
+    from datetime import datetime, timezone
+    from radar.intel import seed
+    from radar.intel.models import IntelMention, IntelDirection
+    from radar.intel.context_pass import enrich_context
+    from radar.core.providers.telegram import TelegramFloodWait
+
+    s = _sess()
+    seed.ensure_default_directions(s)
+    d = s.query(IntelDirection).first()
+    m = IntelMention(
+        direction_id=d.id, platform="telegram", post_id="grp/800",
+        author="@x", text="test", created_at=datetime.now(timezone.utc),
+        reply_to_tg_id="799",
+    )
+    s.add(m); s.commit()
+
+    def _boom(*a, **kw):
+        raise TelegramFloodWait(61000)
+    fake_provider = SimpleNamespace(fetch_thread_context=_boom)
+
+    n = enrich_context(s, fake_provider, batch_size=10)
+    assert n == 0
+    m2 = s.get(IntelMention, m.id)
+    assert m2.context_fetched is False  # not burned — will retry after the flood clears
+
+
 def test_enrich_context_skips_already_fetched():
     from types import SimpleNamespace
     from datetime import datetime, timezone

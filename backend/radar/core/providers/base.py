@@ -18,6 +18,7 @@ class Post:
     shares:     int
     sound_id:   Optional[str] = None
     reply_to_tg_id: Optional[str] = None
+    media:      Optional[str] = None   # "photo"|"video"|"file" если к посту есть вложение
 
 @dataclass
 class SearchPage:

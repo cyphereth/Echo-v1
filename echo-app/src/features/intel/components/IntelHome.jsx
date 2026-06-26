@@ -259,7 +259,16 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
                   {sd.label}
                 </span>
                 <div className={styles.eventBody}>
-                  <div className={styles.eventText}>{snippet(e.text)}</div>
+                  <div className={styles.eventText}>
+                    {e.media && (
+                      <span title={e.media === 'video' ? 'Прикреплено видео'
+                                  : e.media === 'photo' ? 'Прикреплено фото' : 'Прикреплён файл'}
+                            style={{ marginRight: 4 }}>
+                        {e.media === 'video' ? '🎬' : e.media === 'photo' ? '📷' : '📎'}
+                      </span>
+                    )}
+                    {snippet(e.text)}
+                  </div>
                   <div className={styles.eventMeta}>
                     {e.author} · {DIRECTION_NAMES[e.direction]?.split(' ')[0] || e.direction}
                     {dups > 1 ? ` · ${dups} канал.` : ''}

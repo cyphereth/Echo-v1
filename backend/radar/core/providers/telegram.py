@@ -37,6 +37,32 @@ def _sum_reactions(msg) -> int:
     return sum(int(getattr(r, "count", 0) or 0) for r in results)
 
 
+def _media_kind(msg) -> Optional[str]:
+    """Classify any attachment on a Telethon message → "photo"|"video"|"file"|None.
+
+    Used to mark posts in the feed that carry a photo/video (the text alone hides that
+    a strike photo / damage video was attached). Robust to missing attrs so it never
+    raises during parsing."""
+    try:
+        if getattr(msg, "photo", None):
+            return "photo"
+        if getattr(msg, "video", None) or getattr(msg, "gif", None) or getattr(msg, "video_note", None):
+            return "video"
+        doc = getattr(msg, "document", None)
+        if doc is not None:
+            mime = getattr(doc, "mime_type", "") or ""
+            if mime.startswith("image/"):
+                return "photo"
+            if mime.startswith("video/"):
+                return "video"
+            return "file"
+        if getattr(msg, "media", None):
+            return "file"
+    except Exception:
+        return None
+    return None
+
+
 def _parse_tg_message(msg, author_handle: str, followers: int) -> Post:
     """Map a Telethon Message to a Post. `author_handle` is the channel @username,
     `followers` the channel participant count (both resolved by the caller)."""
@@ -57,6 +83,7 @@ def _parse_tg_message(msg, author_handle: str, followers: int) -> Post:
         shares     = int(getattr(msg, "forwards", 0) or 0),
         sound_id   = None,
         reply_to_tg_id = str(raw_reply) if raw_reply is not None else None,
+        media      = _media_kind(msg),
     )
 
 
@@ -85,6 +112,7 @@ def _parse_tg_chat_message(msg, namespace: str, fallback_author: str) -> Post:
         shares         = int(getattr(msg, "forwards", 0) or 0),
         sound_id       = None,
         reply_to_tg_id = str(raw_reply) if raw_reply is not None else None,
+        media          = _media_kind(msg),
     )
 
 
@@ -124,6 +152,10 @@ class TelegramProvider(SearchProvider):
     def __init__(self, client=None):
         self._call_lock = threading.Lock()
         self._last_call = 0.0
+        # When a long flood-wait hits, park a cooldown so the WHOLE provider backs off
+        # until it expires. Repeatedly retrying ResolveUsername during a wait can extend
+        # the ban (that's how we earned a ~17h one that silently killed reply-context).
+        self._flood_until = 0.0
         if client is not None:
             # Test injection: methods return plain values, no loop/thread needed.
             self._client = client
@@ -174,10 +206,27 @@ class TelegramProvider(SearchProvider):
 
     def _await(self, result):
         """Real client methods return coroutines — drive them on the dedicated loop
-        thread and block for the result. Injected test clients return plain values."""
+        thread and block for the result. Injected test clients return plain values.
+
+        Centralises flood handling: a long FloodWaitError is converted to the domain
+        TelegramFloodWait (so every caller's `except TelegramFloodWait` actually fires —
+        a raw telethon error used to slip past those handlers) and parks a cooldown so
+        we stop hammering the API until the wait elapses."""
         if self._loop is not None:
+            from telethon.errors import FloodWaitError
+            now = time.monotonic()
+            if now < self._flood_until:
+                # Still inside a parked flood window — fail fast without spending a call.
+                getattr(result, "close", lambda: None)()
+                raise TelegramFloodWait(int(self._flood_until - now))
             self._throttle()
-            return asyncio.run_coroutine_threadsafe(result, self._loop).result(timeout=60)
+            try:
+                return asyncio.run_coroutine_threadsafe(result, self._loop).result(timeout=60)
+            except FloodWaitError as e:
+                secs = int(getattr(e, "seconds", 0) or 0)
+                if secs > self._FLOOD_THRESHOLD:
+                    self._flood_until = time.monotonic() + secs
+                raise TelegramFloodWait(secs)
         return result
 
     def search(self, query: str, kind: str, cursor: Optional[str], platform: str = "telegram") -> SearchPage:
@@ -449,7 +498,9 @@ class TelegramProvider(SearchProvider):
         Parents are ordered depth=0 (direct parent) -> depth=N (root).
         Siblings are messages that share the same root parent (excl. current_tg_id).
         """
-        from telethon.errors import FloodWaitError
+        # _await converts long floods to TelegramFloodWait; catch that (not the raw
+        # telethon error) so a flood aborts the enrich batch instead of being swallowed
+        # by the generic `except Exception` and permanently marking the reply done.
         if reply_to_tg_id is None:
             return {"parents": [], "siblings": []}
 
@@ -467,7 +518,7 @@ class TelegramProvider(SearchProvider):
                 # always yields a list (with None for a missing id).
                 msgs = self._await(self._client.get_messages(entity, ids=[msg_id]))
                 return msgs[0] if msgs else None
-            except FloodWaitError:
+            except TelegramFloodWait:
                 raise
             except Exception as e:
                 log.warning("fetch_thread_context: _get_one(%s, %s) failed: %s", h, msg_id, type(e).__name__)
@@ -475,7 +526,7 @@ class TelegramProvider(SearchProvider):
 
         try:
             entity = self._await(self._client.get_entity(h))
-        except FloodWaitError:
+        except TelegramFloodWait:
             raise
         except Exception as e:
             log.warning("fetch_thread_context: get_entity(%s) failed: %s", h, type(e).__name__)
@@ -490,7 +541,7 @@ class TelegramProvider(SearchProvider):
         while next_id and depth < depth_limit:
             try:
                 msg = _get_one(entity, next_id)
-            except FloodWaitError:
+            except TelegramFloodWait:
                 raise
             if msg is None:
                 break
@@ -527,7 +578,7 @@ class TelegramProvider(SearchProvider):
                         "text": getattr(m, "message", "") or "",
                         "created_at": m.date,
                     })
-            except FloodWaitError:
+            except TelegramFloodWait:
                 raise
             except Exception as e:
                 log.warning("fetch_thread_context: siblings fetch failed for %s: %s", handle, type(e).__name__)

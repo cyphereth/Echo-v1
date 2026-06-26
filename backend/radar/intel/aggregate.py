@@ -106,7 +106,8 @@ def event(m) -> dict:
             "verified": bool(m.verified), "direction": m.direction_id,
             "sig": content_sig(m.text),
             "is_reply": bool(getattr(m, "reply_to_tg_id", None)),
-            "reply_to_tg_id": getattr(m, "reply_to_tg_id", None)}
+            "reply_to_tg_id": getattr(m, "reply_to_tg_id", None),
+            "media": getattr(m, "media", None)}
 
 def story_detail(session, story) -> dict:
     base = story_summary(session, story)

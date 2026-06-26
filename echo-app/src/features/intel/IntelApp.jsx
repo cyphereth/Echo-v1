@@ -55,6 +55,9 @@ export function IntelApp({ onExit }) {
     }).catch(() => {});
 
     const stop = streamLiveEvents({
+      // -1 → сервер стартует с max(alert.id): шлёт ТОЛЬКО новые сигналы, появившиеся
+      // после подключения. Иначе при перезаходе все старые алерты летят тостами.
+      afterAlertId: -1,
       onEvent: (e) => {
         if (!alive || !e || e.id == null) return;
         setLiveEvents(prev => [...prev, e].slice(-200));

@@ -107,6 +107,7 @@ def store_realtime_post(session, post, side, kind, lexicon_terms) -> bool:
         url=getattr(post, "url", None),
         views=getattr(post, "views", 0) or 0,
         created_at=post.created_at,
+        reply_to_tg_id=getattr(post, "reply_to_tg_id", None),
     )
     sp = session.begin_nested()
     try:

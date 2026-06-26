@@ -24,7 +24,12 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
     ev.stopPropagation();
     setHiddenIds(prev => { const n = new Set(prev); n.add(e.id); return n; });
     try {
-      await intelApi.addSpam({ kind: 'example', value: e.text || '', author: e.author || null, source_post_id: e.post_id || null });
+      // Запоминаем как пример мусора И мягко скрываем упоминание — чтобы пост ушёл
+      // не только из ленты, но и из сюжетов/агрегатов (soft-hide на бэке).
+      await Promise.all([
+        intelApi.addSpam({ kind: 'example', value: e.text || '', author: e.author || null, source_post_id: e.post_id || null }),
+        intelApi.hideMention(e.id),
+      ]);
     } catch { /* optimistic — keep it hidden anyway */ }
   }
 
@@ -81,7 +86,9 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
           setFlashIds(f => { const n = new Set(f); n.delete(e.id); return n; });
         }, FLASH_MS);
       });
-      return [...prev, ...add].slice(-200);
+      // Лента — newest-first. liveEvents приходят oldest→newest, поэтому разворачиваем
+      // и кладём в НАЧАЛО; slice(0,200) обрезает старые снизу, а не новые сверху.
+      return [...add.reverse(), ...prev].slice(0, 200);
     });
   }, [liveEvents, win, isCustom]);
 

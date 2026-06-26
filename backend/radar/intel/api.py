@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from ..core.db import get_session
 from ..core.auth import decode_token
 from ..models import User
-from .models import IntelDirection, IntelMention, IntelStory, IntelProbe, IntelAlert, IntelThreadContext, IntelSpam
+from .models import IntelDirection, IntelMention, IntelStory, IntelProbe, IntelAlert, IntelThreadContext, IntelSpam, IntelIncident
 from ..models import _now
 from . import aggregate
 from . import credibility
@@ -124,6 +124,7 @@ def intel_stream(
         d = session.query(IntelDirection).filter_by(key=direction).first()
         if d:
             q = q.filter(IntelMention.direction_id == d.id)
+    q = q.filter(IntelMention.hidden == False)  # noqa: E712  — soft-hidden (спам) не показываем
     rows = q.order_by(IntelMention.created_at.desc()).limit(limit).all()
     return [aggregate.event(m) for m in rows]
 
@@ -204,7 +205,8 @@ async def intel_stream_live(
             try:
                 s = get_session()
                 try:
-                    q = s.query(IntelMention).filter(IntelMention.id > last_id)
+                    q = s.query(IntelMention).filter(IntelMention.id > last_id,
+                                                     IntelMention.hidden == False)  # noqa: E712
                     if direction_id is not None:
                         q = q.filter(IntelMention.direction_id == direction_id)
                     rows = q.order_by(IntelMention.id.asc()).limit(100).all()
@@ -374,7 +376,8 @@ def intel_direction_detail(
     stories = session.query(IntelStory).filter_by(direction_id=d.id).all()
     stream_rows = (
         session.query(IntelMention)
-        .filter(IntelMention.direction_id == d.id, IntelMention.created_at >= since)
+        .filter(IntelMention.direction_id == d.id, IntelMention.created_at >= since,
+                IntelMention.hidden == False)  # noqa: E712
         .order_by(IntelMention.created_at.desc())
         .limit(50)
         .all()
@@ -615,6 +618,32 @@ def intel_alert_ack(
         a.acknowledged_at = _now()
         session.commit()
     return {"ok": True}
+
+
+@router.post("/intel/mention/{mention_id}/hide")
+def intel_mention_hide(
+    mention_id: int,
+    session: Session = Depends(db),
+    user: User = Depends(current_user),
+):
+    """Soft-hide одного упоминания (куратор скинул его в спам). Пост остаётся в БД,
+    но пропадает из ленты/сюжетов/агрегатов. Идемпотентно: повторный вызов на уже
+    скрытом ничего не делает (и не двигает post_count повторно)."""
+    m = session.get(IntelMention, mention_id)
+    if m is None:
+        raise HTTPException(404, "Mention not found")
+    if m.hidden:
+        return {"id": m.id, "hidden": True}
+    m.hidden = True
+    # Уменьшаем счётчик владеющего сюжета (best-effort, не ниже 0).
+    if m.incident_id is not None:
+        inc = session.get(IntelIncident, m.incident_id)
+        if inc is not None and inc.story_id is not None:
+            story = session.get(IntelStory, inc.story_id)
+            if story is not None and (story.post_count or 0) > 0:
+                story.post_count -= 1
+    session.commit()
+    return {"id": m.id, "hidden": True}
 
 
 @router.get("/intel/mention/{mention_id}/context")

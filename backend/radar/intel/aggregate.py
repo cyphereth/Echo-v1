@@ -74,7 +74,8 @@ def _spike_pct(points) -> float:
 def _sides(session, story_id) -> list:
     rows = (session.query(IntelMention.side)
             .join(IntelIncident, IntelMention.incident_id == IntelIncident.id)
-            .filter(IntelIncident.story_id == story_id).distinct().all())
+            .filter(IntelIncident.story_id == story_id,
+                    IntelMention.hidden == False).distinct().all())  # noqa: E712
     return sorted({(r[0] or "").strip() for r in rows if (r[0] or "").strip()})
 
 def _points(session, story_id):
@@ -113,7 +114,8 @@ def story_detail(session, story) -> dict:
     src = {}
     rows = (session.query(IntelMention)
             .join(IntelIncident, IntelMention.incident_id == IntelIncident.id)
-            .filter(IntelIncident.story_id == story.id).all())
+            .filter(IntelIncident.story_id == story.id,
+                    IntelMention.hidden == False).all())  # noqa: E712
     for m in rows:
         key = m.author or "—"
         e = src.setdefault(key, {"name": key, "side": m.side, "count": 0, "last_at": None, "url": tg_url(m)})
@@ -133,7 +135,8 @@ def story_detail(session, story) -> dict:
 def direction_card(session, direction, window_h=24) -> dict:
     since = datetime.now(timezone.utc) - timedelta(hours=window_h)
     q = (session.query(IntelMention)
-         .filter(IntelMention.direction_id == direction.id, IntelMention.created_at >= since))
+         .filter(IntelMention.direction_id == direction.id, IntelMention.created_at >= since,
+                 IntelMention.hidden == False))  # noqa: E712
     events_count = q.count()
     stories = session.query(IntelStory).filter_by(direction_id=direction.id).all()
     spike = max([_spike_pct(_points(session, st.id)) for st in stories], default=0.0)
@@ -150,7 +153,8 @@ def compute_overview(session, window_h=24) -> dict:
     since = datetime.now(timezone.utc) - timedelta(hours=window_h)
     # IntelStoryPoint.bucket_start is stored as naive UTC — strip tz for SQL comparison.
     since_naive = since.replace(tzinfo=None)
-    events = session.query(func.count(IntelMention.id)).filter(IntelMention.created_at >= since_naive).scalar() or 0
+    events = session.query(func.count(IntelMention.id)).filter(
+        IntelMention.created_at >= since_naive, IntelMention.hidden == False).scalar() or 0  # noqa: E712
     # Only stories that had activity within the window.
     stories = (session.query(IntelStory)
                .filter(IntelStory.status == "active", IntelStory.last_seen_at >= since_naive).all())
@@ -216,7 +220,7 @@ def compute_overview_range(session, from_dt, to_dt) -> dict:
     """Like compute_overview but for an arbitrary [from_dt, to_dt] range."""
     frm_naive = from_dt.replace(tzinfo=None) if from_dt else None
     to_naive = to_dt.replace(tzinfo=None) if to_dt else datetime.now(timezone.utc).replace(tzinfo=None)
-    q = session.query(func.count(IntelMention.id))
+    q = session.query(func.count(IntelMention.id)).filter(IntelMention.hidden == False)  # noqa: E712
     if frm_naive:
         q = q.filter(IntelMention.created_at >= frm_naive)
     q = q.filter(IntelMention.created_at <= to_naive)

@@ -33,6 +33,7 @@ export const intelApi = {
   ackAlert:  (id)             => request(`/intel/alerts/${id}/ack`, { method: 'POST' }),
   ackAllAlerts: ()            => request('/intel/alerts/ack-all', { method: 'POST' }),
   mentionContext: (id)        => request(`/intel/mention/${id}/context`),
+  hideMention: (id)           => request(`/intel/mention/${id}/hide`, { method: 'POST' }),
 };
 
 // ── Live event stream (SSE) ─────────────────────────────────────────────────

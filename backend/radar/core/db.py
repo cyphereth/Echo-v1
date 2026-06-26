@@ -59,6 +59,9 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
     "incidents": {
         "topic_id": "INTEGER",
     },
+    "intel_mentions": {
+        "hidden": "BOOLEAN NOT NULL DEFAULT 0",
+    },
     "stories": {
         "topic_id":         "INTEGER",
         "source_count":     "INTEGER DEFAULT 0",

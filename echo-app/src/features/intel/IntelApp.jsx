@@ -81,7 +81,9 @@ export function IntelApp({ onExit }) {
     try { await intelApi.ackAllAlerts(); } catch { /* optimistic */ }
   }, []);
 
-  const unreadCount = alerts.filter(a => !a.acknowledged).length;
+  const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+  const visibleAlerts = alerts.filter(a => a.at && (Date.now() - new Date(a.at).getTime()) < TWO_HOURS_MS);
+  const unreadCount = visibleAlerts.filter(a => !a.acknowledged).length;
 
   async function runSearch(q) {
     if (!q.trim()) { setSearchResults(null); return; }
@@ -125,7 +127,7 @@ export function IntelApp({ onExit }) {
             </div>
           </div>
           <div className={styles.topgrow} />
-          <AlertBell alerts={alerts} unreadCount={unreadCount} onAck={ackAlert} onAckAll={ackAll}
+          <AlertBell alerts={visibleAlerts} unreadCount={unreadCount} onAck={ackAlert} onAckAll={ackAll}
                      onOpen={(a) => setScreen(a.scope === 'story' ? 'stories' : 'board')} />
           <DateRangePicker value={timeRange} onChange={setTimeRange} />
           <div className={styles.searchBox}>

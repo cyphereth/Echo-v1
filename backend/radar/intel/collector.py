@@ -20,7 +20,7 @@ from .models import IntelLexicon, IntelMention, IntelProbe
 from .geo import detect_direction
 from .tagging import resolve_direction_id
 from .translate import maybe_translate
-from .spam_filter import load_spam, blocked_by_word, classify_spam_batch, is_exact_spam
+from .spam_filter import load_spam, load_keywords, blocked_by_word, classify_spam_batch, is_exact_spam
 from ..core.spam import looks_like_ad_cheap
 
 log = logging.getLogger(__name__)
@@ -156,7 +156,8 @@ def keyword_relevant(text: str, lexicon_terms) -> bool:
     return True
 
 
-def chat_message_relevant(text: str, author: str, lexicon_terms: tuple = ()) -> bool:
+def chat_message_relevant(text: str, author: str, lexicon_terms: tuple = (),
+                          keywords: tuple = ()) -> bool:
     """Return True if a chat message is worth storing as an IntelMention.
 
     Hard drop conditions (any → False):
@@ -164,7 +165,8 @@ def chat_message_relevant(text: str, author: str, lexicon_terms: tuple = ()) -> 
     - text shorter than MIN_TEXT_LEN after stripping
     - no alphabetic word in the text
 
-    Admit: delegated to keyword_relevant (military keyword present, weather-guarded).
+    Admit: military lexicon term (keyword_relevant, weather-guarded) OR a curator-managed
+    positive keyword (``keywords``). The hard drops above still win regardless.
     """
     stripped = (text or "").strip()
 
@@ -176,7 +178,7 @@ def chat_message_relevant(text: str, author: str, lexicon_terms: tuple = ()) -> 
     if not re.search(r"[a-zA-Zа-яА-ЯёЁ]", stripped):
         return False
 
-    return keyword_relevant(stripped, lexicon_terms)
+    return keyword_relevant(stripped, lexicon_terms) or blocked_by_word(stripped, keywords)
 
 
 # ── Spam-filter store helper ─────────────────────────────────────────────────
@@ -237,6 +239,8 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
 
         # Spam filter: stop-words (fast layer) + examples (LLM layer). Loaded once.
         blocklist, spam_examples = load_spam(session)
+        # Positive admission keywords (curator-managed) — OR'd into the lexicon gate.
+        keywords = load_keywords(session)
         pending: list[IntelMention] = []
 
         if probe.kind == "chat":
@@ -266,7 +270,7 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                 author = post.author or ""
 
                 # Hard noise filter for chat
-                if not chat_message_relevant(text, author, lexicon_terms):
+                if not chat_message_relevant(text, author, lexicon_terms, keywords):
                     continue
 
                 # Spam stop-word layer (fast, deterministic)
@@ -328,10 +332,10 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                     if len(clean) < MIN_TEXT_LEN:
                         continue
 
-                    # Keyword relevance gate — keep only military-relevant posts
-                    # (geo is used for tagging below, not as an admit path).
+                    # Keyword relevance gate — keep posts that hit the military lexicon
+                    # OR a curator-managed positive keyword (geo is for tagging, not admit).
                     text = maybe_translate(post.text or "")
-                    if not keyword_relevant(text, lexicon_terms):
+                    if not (keyword_relevant(text, lexicon_terms) or blocked_by_word(text, keywords)):
                         continue
 
                     # Spam stop-word layer (fast, deterministic)

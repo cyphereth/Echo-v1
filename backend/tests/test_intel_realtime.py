@@ -41,6 +41,28 @@ def test_build_source_map_splits_public_and_invite():
     assert all("+" not in k for k in by_user)
 
 
+def test_store_realtime_curator_keyword_admits_non_lexicon_post():
+    """A realtime channel post that misses the lexicon is admitted when it matches a
+    curator-managed positive keyword passed in."""
+    from radar.intel import seed
+    from radar.intel.realtime import store_realtime_post
+    from radar.intel.models import IntelMention, IntelLexicon
+    s = _sess()
+    seed.ensure_default_directions(s)
+    s.add(IntelLexicon(term="обстрел", meaning="shelling", category="military"))
+    s.commit()
+    lex = ["обстрел"]
+
+    text = "сильное наводнение затопило центральные улицы города сегодня утром"
+    # No keyword → lexicon miss → dropped
+    assert store_realtime_post(s, _post("c/10", text), "ru", "channel", lex) is False
+    # Curator keyword present → admitted
+    assert store_realtime_post(s, _post("c/11", text), "ru", "channel", lex,
+                               keywords=["наводнение"]) is True
+    s.commit()
+    assert s.query(IntelMention).count() == 1
+
+
 def test_store_channel_post_relevance_and_dedup():
     from radar.intel import seed
     from radar.intel.realtime import store_realtime_post

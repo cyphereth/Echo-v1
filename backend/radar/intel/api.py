@@ -510,7 +510,7 @@ def intel_sources_delete(
     return {"deleted": True}
 
 
-_VALID_SPAM_KINDS = {"word", "example"}
+_VALID_SPAM_KINDS = {"word", "example", "keyword"}
 
 
 def _spam_dict(s: IntelSpam) -> dict:

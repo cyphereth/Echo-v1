@@ -36,6 +36,19 @@ def load_spam(session: Session) -> tuple[list[str], list[str]]:
     return words, examples[:MAX_EXAMPLES]
 
 
+def load_keywords(session: Session) -> list[str]:
+    """Return curator-managed positive admission keywords (kind="keyword"), lowercased.
+
+    These are the inverse of stop-words: a post that matches any of them is ADMITTED
+    to the feed even if it would otherwise miss the military lexicon gate. Matching is
+    done with :func:`blocked_by_word` (word-boundary, case-insensitive)."""
+    rows = (session.query(IntelSpam)
+            .filter(IntelSpam.kind == "keyword")
+            .order_by(IntelSpam.id.desc())
+            .all())
+    return [r.value.lower() for r in rows if r.value]
+
+
 def blocked_by_word(text: str, blocklist) -> bool:
     """True if any stop-word/phrase appears in text at a word boundary, case-insensitive.
 

@@ -238,6 +238,11 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
                     {e.author} · {DIRECTION_NAMES[e.direction]?.split(' ')[0] || e.direction}
                     {dups > 1 ? ` · ${dups} канал.` : ''}
                     {e.verified ? ' · ✓' : ''}
+                    {e.url && (
+                      <> · <a href={e.url} target="_blank" rel="noopener noreferrer"
+                             onClick={ev => ev.stopPropagation()}
+                             style={{ color: '#57D2E2', textDecoration: 'none' }}>↗ TG</a></>
+                    )}
                   </div>
                 </div>
                 <span className={styles.eventTime}>{agoStrShort(e.created_at)}</span>

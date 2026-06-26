@@ -24,6 +24,32 @@ def content_sig(text: str) -> str:
     t = _WS_RE.sub(" ", t).strip()[:120]
     return hashlib.md5(t.encode("utf-8")).hexdigest()[:16] if t else ""
 
+def tg_url(m) -> str | None:
+    """Best-effort public Telegram deep link to the exact message.
+
+    Two post_id shapes are produced by the collector:
+    - channel posts: numeric id (e.g. "103985"); the channel handle is the author
+      (e.g. "@warhistory") → https://t.me/warhistory/103985
+    - chat messages: "namespace/msgid" (e.g. "Amvrosiivka/130151") → if the namespace
+      is a public @username we link https://t.me/Amvrosiivka/130151; a numeric
+      namespace (username-less group) has no public link, so we fall back to m.url.
+
+    Returns the stored m.url if a link can't be derived (covers any future shape)."""
+    pid = (m.post_id or "").strip()
+    if not pid:
+        return m.url
+    if "/" in pid:
+        ns, _, msgid = pid.partition("/")
+        ns = ns.lstrip("@")
+        if ns and not ns.isdigit() and msgid.isdigit():
+            return f"https://t.me/{ns}/{msgid}"
+        return m.url
+    # channel post — numeric id, handle comes from author
+    handle = (m.author or "").strip().lstrip("@")
+    if handle and pid.isdigit():
+        return f"https://t.me/{handle}/{pid}"
+    return m.url
+
 def _sparkline(points) -> list:
     return [int(p.mention_count) for p in sorted(points, key=lambda p: p.bucket_start)][-12:]
 
@@ -74,7 +100,7 @@ def story_summary(session, story, since=None) -> dict:
 
 def event(m) -> dict:
     return {"id": m.id, "platform": m.platform, "author": m.author, "side": m.side,
-            "text": m.text, "url": m.url, "created_at": _aware(m.created_at).isoformat(),
+            "text": m.text, "url": tg_url(m), "created_at": _aware(m.created_at).isoformat(),
             "verified": bool(m.verified), "direction": m.direction_id,
             "sig": content_sig(m.text),
             "is_reply": bool(getattr(m, "reply_to_tg_id", None)),
@@ -89,7 +115,7 @@ def story_detail(session, story) -> dict:
             .filter(IntelIncident.story_id == story.id).all())
     for m in rows:
         key = m.author or "—"
-        e = src.setdefault(key, {"name": key, "side": m.side, "count": 0, "last_at": None, "url": m.url})
+        e = src.setdefault(key, {"name": key, "side": m.side, "count": 0, "last_at": None, "url": tg_url(m)})
         e["count"] += 1
         at = _aware(m.created_at)
         if e["last_at"] is None or at.isoformat() > e["last_at"]:

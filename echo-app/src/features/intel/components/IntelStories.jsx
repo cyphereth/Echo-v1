@@ -262,7 +262,14 @@ function StoryDetail({ detail }) {
                 <span className={styles.eventSide} style={{ color: sd.color, background: sd.color + '1A', minWidth: 36 }}>
                   {sd.label}
                 </span>
-                <span className={styles.sourceName}>{src.name}</span>
+                {src.url ? (
+                  <a href={src.url} target="_blank" rel="noopener noreferrer"
+                     className={styles.sourceName} style={{ color: 'inherit', textDecoration: 'none' }}>
+                    {src.name} <span style={{ color: '#57D2E2' }}>↗</span>
+                  </a>
+                ) : (
+                  <span className={styles.sourceName}>{src.name}</span>
+                )}
                 <span className={styles.sourceCount}>{src.count} упом.</span>
                 <span className={styles.sourceCount}>{agoStrShort(src.last_at)}</span>
               </div>
@@ -281,7 +288,13 @@ function StoryDetail({ detail }) {
                 <span className={styles.eventSide} style={{ color: sd.color, background: sd.color + '1A' }}>{sd.label}</span>
                 <div className={styles.eventBody}>
                   <div className={styles.eventText}>{e.text}</div>
-                  <div className={styles.eventMeta}>{e.author}{e.verified ? ' · ✓' : ''}</div>
+                  <div className={styles.eventMeta}>
+                    {e.author}{e.verified ? ' · ✓' : ''}
+                    {e.url && (
+                      <> · <a href={e.url} target="_blank" rel="noopener noreferrer"
+                             style={{ color: '#57D2E2', textDecoration: 'none' }}>↗ TG</a></>
+                    )}
+                  </div>
                   {e.is_reply && <ThreadContext mentionId={e.id} />}
                 </div>
                 <span className={styles.eventTime}>{agoStrShort(e.created_at)}</span>

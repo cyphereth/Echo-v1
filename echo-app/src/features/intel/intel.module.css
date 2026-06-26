@@ -224,6 +224,10 @@
 .homeWorkspace .grid2 {
   flex: 1 1 0;
   min-height: 0;
+  /* force the single grid row to fill the row height (not auto/content) and let
+     sections shrink, and stretch items so each section gets the full column height */
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
 }
 /* sections inside the home grid become flex columns so their body can scroll */
 .homeWorkspace .section {
@@ -726,6 +730,36 @@
 }
 .srcInput:focus { border-color: rgba(43,179,199,.35); }
 .srcInput::placeholder { color: #3A5263; }
+
+/* Search over already-added sources */
+.srcSearch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border-top: 1px solid rgba(43,179,199,.10);
+  border-bottom: 1px solid rgba(43,179,199,.08);
+  background: rgba(0,0,0,.10);
+}
+.srcSearch input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: #D8E4F0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.srcSearch input::placeholder { color: #3A5263; }
+.srcSearchClear {
+  background: none;
+  border: none;
+  color: #6A8499;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+.srcSearchClear:hover { color: #FF4D5E; }
 .srcSelect {
   background: rgba(255,255,255,.03);
   border: 1px solid rgba(255,255,255,.08);

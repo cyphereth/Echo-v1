@@ -34,6 +34,7 @@ export function IntelSources() {
   const [sources, setSources]     = useState([]);
   const [loading, setLoading]     = useState(true);
   const [sideFilter, setSideFilter] = useState('all');
+  const [query, setQuery]         = useState('');
 
   // Add-form state
   const [link, setLink]       = useState('');
@@ -87,9 +88,11 @@ export function IntelSources() {
   }
 
   const sides = ['all', ...Object.keys(SIDE)];
-  const visible = sideFilter === 'all'
-    ? sources
-    : sources.filter(s => s.side === sideFilter);
+  const q = query.trim().toLowerCase();
+  const visible = sources.filter(s =>
+    (sideFilter === 'all' || s.side === sideFilter) &&
+    (!q || String(s.handle || s.id).toLowerCase().includes(q))
+  );
 
   return (
     <div className={styles.workspace}>
@@ -115,39 +118,7 @@ export function IntelSources() {
           </div>
         </div>
 
-        {/* Source list */}
-        <div className={styles.sectionBody}>
-          {loading ? (
-            <div className={styles.empty}>Загрузка…</div>
-          ) : visible.length === 0 ? (
-            <div className={styles.empty}>Источники не найдены.</div>
-          ) : (
-            visible.map(src => (
-              <div key={src.id} className={styles.srcRow}>
-                <SideBadge side={src.side} />
-                <KindBadge kind={src.kind} />
-                <span className={styles.srcHandle}>
-                  {src.handle || src.id}
-                </span>
-                <span className={styles.srcMeta}>
-                  {src.last_collected
-                    ? new Date(src.last_collected).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
-                    : '—'}
-                </span>
-                <button
-                  className={styles.srcDel}
-                  onClick={() => handleDelete(src.id)}
-                  disabled={deleting === src.id}
-                  title="Удалить"
-                >
-                  ✕
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* Add form */}
+        {/* Add form — наверху, чтобы не скроллить вниз после каждого добавления */}
         <form className={styles.srcAddForm} onSubmit={handleAdd}>
           <input
             className={styles.srcInput}
@@ -184,6 +155,51 @@ export function IntelSources() {
           </button>
           {err && <span className={styles.srcError}>{err}</span>}
         </form>
+
+        {/* Search box — найти источник для удаления без листания */}
+        <div className={styles.srcSearch}>
+          <Icon name="search" size={13} color="#4A6378" />
+          <input
+            placeholder="поиск по добавленным источникам…"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+          />
+          {query && (
+            <button type="button" className={styles.srcSearchClear} onClick={() => setQuery('')} title="Очистить">✕</button>
+          )}
+        </div>
+
+        {/* Source list */}
+        <div className={styles.sectionBody}>
+          {loading ? (
+            <div className={styles.empty}>Загрузка…</div>
+          ) : visible.length === 0 ? (
+            <div className={styles.empty}>{q ? 'Ничего не найдено по запросу.' : 'Источники не найдены.'}</div>
+          ) : (
+            visible.map(src => (
+              <div key={src.id} className={styles.srcRow}>
+                <SideBadge side={src.side} />
+                <KindBadge kind={src.kind} />
+                <span className={styles.srcHandle}>
+                  {src.handle || src.id}
+                </span>
+                <span className={styles.srcMeta}>
+                  {src.last_collected
+                    ? new Date(src.last_collected).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+                    : '—'}
+                </span>
+                <button
+                  className={styles.srcDel}
+                  onClick={() => handleDelete(src.id)}
+                  disabled={deleting === src.id}
+                  title="Удалить"
+                >
+                  ✕
+                </button>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   );

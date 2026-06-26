@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../../core/components/icons';
 import { IntelSparkline } from './IntelSparkline';
+import { ThreadContext } from './ThreadContext';
 import { intelApi, CREDIBILITY, DIRECTION_NAMES, spikeLevel, agoStrShort, SIDE } from '../api';
 import styles from '../intel.module.css';
 
@@ -269,6 +270,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
                              style={{ color: '#57D2E2', textDecoration: 'none' }}>↗ TG</a></>
                     )}
                   </div>
+                  {e.is_reply && <ThreadContext mentionId={e.id} />}
                 </div>
                 <span className={styles.eventTime}>{agoStrShort(e.created_at)}</span>
                 <button

@@ -63,8 +63,11 @@ class _FakeClient:
             301: _FakeMsg(301, "подтверждаем", reply_to_msg_id=298),
         }
         if ids is not None:
-            single = ids if isinstance(ids, int) else ids[0]
-            return [db[single]] if single in db else []
+            # Mirror Telethon: a single-id request returns one Message (or None),
+            # a list-of-ids request returns a list (None for any missing id).
+            if isinstance(ids, (list, tuple)):
+                return [db.get(i) for i in ids]
+            return db.get(ids)
         if reply_to is not None:
             return [m for m in db.values()
                     if m.reply_to_msg_id == reply_to and m.id != 300][:limit]

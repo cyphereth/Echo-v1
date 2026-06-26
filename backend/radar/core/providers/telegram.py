@@ -460,18 +460,23 @@ class TelegramProvider(SearchProvider):
 
         def _get_one(entity, msg_id: int):
             try:
-                msgs = self._await(self._client.get_messages(entity, ids=msg_id))
+                # Pass ids as a list: Telethon returns a single Message (not a list)
+                # when ids is a scalar, which would break msgs[0]. A list request
+                # always yields a list (with None for a missing id).
+                msgs = self._await(self._client.get_messages(entity, ids=[msg_id]))
                 return msgs[0] if msgs else None
             except FloodWaitError:
                 raise
-            except Exception:
+            except Exception as e:
+                log.warning("fetch_thread_context: _get_one(%s, %s) failed: %s", h, msg_id, type(e).__name__)
                 return None
 
         try:
             entity = self._await(self._client.get_entity(h))
         except FloodWaitError:
             raise
-        except Exception:
+        except Exception as e:
+            log.warning("fetch_thread_context: get_entity(%s) failed: %s", h, type(e).__name__)
             return {"parents": [], "siblings": []}
 
         # Walk up the parent chain
@@ -525,6 +530,8 @@ class TelegramProvider(SearchProvider):
             except Exception as e:
                 log.warning("fetch_thread_context: siblings fetch failed for %s: %s", handle, type(e).__name__)
 
+        log.info("fetch_thread_context(%s reply=%s): %d parents, %d siblings",
+                 h, reply_to_tg_id, len(parents), len(siblings))
         return {"parents": parents, "siblings": siblings}
 
     def search_linked_chat(self, parent_handle: str, term: str, limit: int = 20, min_id: int = 0) -> list[Post]:

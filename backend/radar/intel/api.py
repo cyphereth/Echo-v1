@@ -467,6 +467,31 @@ def intel_sources_create(
     return {**_probe_dict(probe), "created": True}
 
 
+@router.patch("/intel/sources/{source_id}")
+def intel_sources_update(
+    source_id: int,
+    body: dict,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    probe = session.get(IntelProbe, source_id)
+    if not probe:
+        raise HTTPException(404, "Source not found")
+    if "kind" in body:
+        kind = (body.get("kind") or "").strip().lower()
+        if kind not in _VALID_KINDS:
+            raise HTTPException(400, f"Invalid kind '{kind}'. Must be one of: {sorted(_VALID_KINDS)}")
+        probe.kind = kind
+    if "side" in body:
+        side = (body.get("side") or "").strip().lower()
+        if side not in _VALID_SIDES:
+            raise HTTPException(400, f"Invalid side '{side}'. Must be one of: {sorted(_VALID_SIDES)}")
+        probe.side = side
+    session.commit()
+    session.refresh(probe)
+    return _probe_dict(probe)
+
+
 @router.delete("/intel/sources/{source_id}")
 def intel_sources_delete(
     source_id: int,

@@ -25,6 +25,7 @@ export const intelApi = {
   sources:   (params)         => passthrough('sources', params),
   addSource: (body)           => request('/intel/sources', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }),
   deleteSource: (id)          => request('/intel/sources/' + id, { method: 'DELETE' }),
+  updateSource: (id, body)    => request('/intel/sources/' + id, { method: 'PATCH', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }),
   alerts:    (params)         => INTEL_USE_MOCK ? Promise.resolve([]) : passthrough('alerts', params),
   ackAlert:  (id)             => request(`/intel/alerts/${id}/ack`, { method: 'POST' }),
   ackAllAlerts: ()            => request('/intel/alerts/ack-all', { method: 'POST' }),

@@ -19,13 +19,15 @@ function SideBadge({ side }) {
   );
 }
 
-function KindBadge({ kind }) {
+function KindBadge({ kind, onToggle, busy }) {
   return (
     <span
       className={styles.srcBadge}
-      style={{ color: '#8DA3B8', background: 'rgba(141,163,184,.10)', border: '1px solid rgba(141,163,184,.18)' }}
+      style={{ color: '#8DA3B8', background: 'rgba(141,163,184,.10)', border: '1px solid rgba(141,163,184,.18)', cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.5 : 1 }}
+      onClick={busy ? undefined : onToggle}
+      title="Сменить тип (Канал ⇄ Чат)"
     >
-      {KIND_LABEL[kind] || kind}
+      {busy ? '…' : (KIND_LABEL[kind] || kind)}
     </span>
   );
 }
@@ -42,6 +44,7 @@ export function IntelSources() {
   const [kind, setKind]       = useState('channel');
   const [adding, setAdding]   = useState(false);
   const [deleting, setDeleting] = useState(null); // id being deleted
+  const [toggling, setToggling] = useState(null); // id whose kind is being switched
   const [err, setErr]         = useState('');
 
   async function load() {
@@ -71,6 +74,20 @@ export function IntelSources() {
       setErr(e.message || 'Ошибка добавления');
     } finally {
       setAdding(false);
+    }
+  }
+
+  async function handleToggleKind(src) {
+    if (toggling) return;
+    const next = src.kind === 'chat' ? 'channel' : 'chat';
+    setToggling(src.id);
+    try {
+      await intelApi.updateSource(src.id, { kind: next });
+      await load();
+    } catch (e) {
+      setErr(e.message || 'Ошибка смены типа');
+    } finally {
+      setToggling(null);
     }
   }
 
@@ -179,7 +196,7 @@ export function IntelSources() {
             visible.map(src => (
               <div key={src.id} className={styles.srcRow}>
                 <SideBadge side={src.side} />
-                <KindBadge kind={src.kind} />
+                <KindBadge kind={src.kind} busy={toggling === src.id} onToggle={() => handleToggleKind(src)} />
                 <span className={styles.srcHandle}>
                   {src.handle || src.id}
                 </span>

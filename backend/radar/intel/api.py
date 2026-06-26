@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from ..core.db import get_session
 from ..core.auth import decode_token
 from ..models import User
-from .models import IntelDirection, IntelMention, IntelStory, IntelProbe, IntelAlert, IntelThreadContext
+from .models import IntelDirection, IntelMention, IntelStory, IntelProbe, IntelAlert, IntelThreadContext, IntelSpam
 from ..models import _now
 from . import aggregate
 from . import credibility
@@ -502,6 +502,76 @@ def intel_sources_delete(
     if not probe:
         raise HTTPException(404, "Source not found")
     session.delete(probe)
+    session.commit()
+    return {"deleted": True}
+
+
+_VALID_SPAM_KINDS = {"word", "example"}
+
+
+def _spam_dict(s: IntelSpam) -> dict:
+    return {
+        "id": s.id,
+        "kind": s.kind,
+        "value": s.value,
+        "author": s.author,
+        "source_post_id": s.source_post_id,
+        "note": s.note or "",
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+    }
+
+
+@router.get("/intel/spam")
+def intel_spam_list(
+    kind: Optional[str] = None,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    q = session.query(IntelSpam)
+    if kind:
+        q = q.filter(IntelSpam.kind == kind)
+    rows = q.order_by(IntelSpam.id.desc()).all()
+    return [_spam_dict(s) for s in rows]
+
+
+@router.post("/intel/spam")
+def intel_spam_create(
+    body: dict,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    kind = (body.get("kind") or "").strip().lower()
+    value = (body.get("value") or "").strip()
+    if kind not in _VALID_SPAM_KINDS:
+        raise HTTPException(400, f"Invalid kind '{kind}'. Must be one of: {sorted(_VALID_SPAM_KINDS)}")
+    if not value:
+        raise HTTPException(400, "value is required")
+    existing = session.query(IntelSpam).filter_by(kind=kind, value=value).first()
+    if existing:
+        return _spam_dict(existing)
+    row = IntelSpam(
+        kind=kind,
+        value=value,
+        author=(body.get("author") or None),
+        source_post_id=(body.get("source_post_id") or None),
+        note=(body.get("note") or ""),
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _spam_dict(row)
+
+
+@router.delete("/intel/spam/{spam_id}")
+def intel_spam_delete(
+    spam_id: int,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    row = session.get(IntelSpam, spam_id)
+    if not row:
+        raise HTTPException(404, "Spam entry not found")
+    session.delete(row)
     session.commit()
     return {"deleted": True}
 

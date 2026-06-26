@@ -100,6 +100,7 @@ def story_summary(session, story, since=None) -> dict:
 
 def event(m) -> dict:
     return {"id": m.id, "platform": m.platform, "author": m.author, "side": m.side,
+            "post_id": m.post_id,
             "text": m.text, "url": tg_url(m), "created_at": _aware(m.created_at).isoformat(),
             "verified": bool(m.verified), "direction": m.direction_id,
             "sig": content_sig(m.text),

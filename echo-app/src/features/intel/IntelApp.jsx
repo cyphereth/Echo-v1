@@ -7,6 +7,7 @@ import { IntelHome } from './components/IntelHome';
 import { IntelStories } from './components/IntelStories';
 import { IntelBoard } from './components/IntelBoard';
 import { IntelSources } from './components/IntelSources';
+import { IntelSpam } from './components/IntelSpam';
 import { AlertBell } from './components/AlertBell';
 import { AlertToast } from './components/AlertToast';
 import { DateRangePicker } from './components/DateRangePicker';
@@ -19,6 +20,7 @@ const SCREENS = [
   { key: 'stories', label: 'Сюжеты',             icon: 'activity', hotkey: '2' },
   { key: 'board',   label: 'Оперативная доска',  icon: 'bar3',     hotkey: '3' },
   { key: 'sources', label: 'Источники',           icon: 'link',     hotkey: '4' },
+  { key: 'spam',    label: 'Антиспам',             icon: 'search',   hotkey: '5' },
 ];
 
 function NavItem({ item, active, onClick }) {
@@ -151,8 +153,10 @@ export function IntelApp({ onExit }) {
           <IntelStories timeRange={timeRange} openStoryId={openStoryId} openDirection={openDirection} navToken={navToken} />
         ) : screen === 'board' ? (
           <IntelBoard timeRange={timeRange} onOpenDir={(dirKey) => { setOpenDirection(dirKey ?? null); setOpenStoryId(null); setNavToken(t => t + 1); setScreen('stories'); }} />
-        ) : (
+        ) : screen === 'sources' ? (
           <IntelSources />
+        ) : (
+          <IntelSpam />
         )}
         <AlertToast toasts={toasts} onDismiss={dismissToast}
                     onOpen={(a) => { setScreen(a.scope === 'story' ? 'stories' : 'board'); dismissToast(a.id); }} />

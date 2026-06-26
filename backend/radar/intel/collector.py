@@ -20,6 +20,7 @@ from .models import IntelLexicon, IntelMention, IntelProbe
 from .geo import detect_direction
 from .tagging import resolve_direction_id
 from .translate import maybe_translate
+from .spam_filter import load_spam, blocked_by_word, classify_spam_batch
 from ..core.spam import looks_like_ad_cheap
 
 log = logging.getLogger(__name__)
@@ -178,6 +179,30 @@ def chat_message_relevant(text: str, author: str, lexicon_terms: tuple = ()) -> 
     return keyword_relevant(stripped, lexicon_terms)
 
 
+# ── Spam-filter store helper ─────────────────────────────────────────────────
+
+def _filter_and_store(session: Session, pending: list, examples: list) -> int:
+    """Apply the LLM example-comparison layer to buffered mentions, then persist the
+    survivors. `pending` is a list of unsaved IntelMention objects (already past the
+    stop-word layer). Spam-flagged mentions are never written. Returns stored count."""
+    if not pending:
+        return 0
+    flags = classify_spam_batch([m.text for m in pending], examples)
+    count = 0
+    for mention, is_spam in zip(pending, flags):
+        if is_spam:
+            continue
+        sp = session.begin_nested()
+        try:
+            session.add(mention)
+            session.flush()
+            sp.commit()
+            count += 1
+        except IntegrityError:
+            sp.rollback()  # already stored — skip, keep going
+    return count
+
+
 # ── Core collection ────────────────────────────────────────────────────────────
 
 def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
@@ -207,6 +232,10 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
         lexicon_terms = [t for (t,) in session.query(IntelLexicon.term).all()]
         if not lexicon_terms:
             log.warning("intel lexicon is empty — channel posts kept only on geo match (run lexicon seed)")
+
+        # Spam filter: stop-words (fast layer) + examples (LLM layer). Loaded once.
+        blocklist, spam_examples = load_spam(session)
+        pending: list[IntelMention] = []
 
         if probe.kind == "chat":
             # After _ensure_joined() in passes.py the session is already a member.
@@ -238,8 +267,12 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                 if not chat_message_relevant(text, author, lexicon_terms):
                     continue
 
+                # Spam stop-word layer (fast, deterministic)
+                if blocked_by_word(text, blocklist):
+                    continue
+
                 dir_id = resolve_direction_id(session, detect_direction(text))
-                mention = IntelMention(
+                pending.append(IntelMention(
                     direction_id=dir_id,
                     platform=probe.platform,
                     post_id=post.post_id,
@@ -250,15 +283,7 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                     views=getattr(post, "likes", 0) or 0,
                     created_at=post.created_at,
                     reply_to_tg_id=getattr(post, "reply_to_tg_id", None),
-                )
-                sp = session.begin_nested()
-                try:
-                    session.add(mention)
-                    session.flush()
-                    sp.commit()
-                    count += 1
-                except IntegrityError:
-                    sp.rollback()
+                ))
 
         else:
             # Channel branch — paginated, light filter only
@@ -306,8 +331,12 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                     if not keyword_relevant(text, lexicon_terms):
                         continue
 
+                    # Spam stop-word layer (fast, deterministic)
+                    if blocked_by_word(text, blocklist):
+                        continue
+
                     dir_id = resolve_direction_id(session, detect_direction(text))
-                    mention = IntelMention(
+                    pending.append(IntelMention(
                         direction_id=dir_id,
                         platform=probe.platform,
                         post_id=post.post_id,
@@ -317,21 +346,16 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                         url=getattr(post, "url", None),
                         views=getattr(post, "likes", 0) or 0,
                         created_at=post.created_at,
-                    )
-                    sp = session.begin_nested()
-                    try:
-                        session.add(mention)
-                        session.flush()
-                        sp.commit()
-                        count += 1
-                    except IntegrityError:
-                        sp.rollback()
-                        # Post already stored — skip, but keep going.
+                    ))
 
                 next_cursor = getattr(page, "next_cursor", None) or getattr(page, "cursor", None)
                 if next_cursor is None:
                     break
                 cursor = next_cursor
+
+        # Spam example-comparison layer (LLM, fail-open) over buffered survivors,
+        # then persist the non-spam ones. Spam is never written to the DB.
+        count = _filter_and_store(session, pending, spam_examples)
 
         if new_watermark:
             probe.watermark = new_watermark

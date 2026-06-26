@@ -16,7 +16,17 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
   const [data, setData]         = useState(null);
   const [stream, setStream]     = useState([]);
   const [flashIds, setFlashIds] = useState(() => new Set());
+  const [hiddenIds, setHiddenIds] = useState(() => new Set());
   const seenRef                 = useRef(new Set());
+
+  // Throw a post into the spam filter (kind="example") and hide it from the feed.
+  async function handleSpam(e, ev) {
+    ev.stopPropagation();
+    setHiddenIds(prev => { const n = new Set(prev); n.add(e.id); return n; });
+    try {
+      await intelApi.addSpam({ kind: 'example', value: e.text || '', author: e.author || null, source_post_id: e.post_id || null });
+    } catch { /* optimistic — keep it hidden anyway */ }
+  }
 
   // Derive a simple window string for SSE feed cutoff filtering
   const win = timeRange?.window || '24h';
@@ -82,6 +92,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
     const out = [];
     const bySig = new Map();
     for (const e of stream) {
+      if (hiddenIds.has(e.id)) continue;
       const key = e.sig || `id:${e.id}`;
       if (bySig.has(key)) {
         const item = out[bySig.get(key)];
@@ -93,7 +104,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
       out.push({ ...e, _dups: 1, _srcs: new Set(e.author ? [e.author] : []) });
     }
     return out;
-  }, [stream]);
+  }, [stream, hiddenIds]);
 
   if (!data) return <div className={styles.workspace}><div className={styles.empty}>Загрузка обстановки…</div></div>;
 
@@ -253,6 +264,11 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
                   </div>
                 </div>
                 <span className={styles.eventTime}>{agoStrShort(e.created_at)}</span>
+                <button
+                  className={styles.eventSpam}
+                  onClick={(ev) => handleSpam(e, ev)}
+                  title="В спам (скрыть и запомнить как мусор)"
+                >✕</button>
               </div>
             );
           })}

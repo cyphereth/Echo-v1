@@ -112,6 +112,23 @@ class IntelAlert(Base):
     acknowledged_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
 
+class IntelSpam(Base):
+    """Curator-managed spam filter. Two kinds of rows:
+    - kind="word":    a stop-word/phrase; posts containing it are dropped (fast layer).
+    - kind="example": a junk post the curator threw in; used as a reference for the
+                      LLM example-comparison layer (classify_spam_batch).
+    """
+    __tablename__ = "intel_spam"
+    __table_args__ = (UniqueConstraint("kind", "value"),)
+    id:             Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind:           Mapped[str]      = mapped_column(Text, nullable=False)   # "word" | "example"
+    value:          Mapped[str]      = mapped_column(Text, nullable=False)   # stop-word or example text
+    author:         Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source_post_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    note:           Mapped[str]      = mapped_column(Text, default="")
+    created_at:     Mapped[datetime] = mapped_column(default=_now)
+
+
 class IntelThreadContext(Base):
     __tablename__ = "intel_thread_context"
     __table_args__ = (UniqueConstraint("mention_id", "tg_msg_id"),)

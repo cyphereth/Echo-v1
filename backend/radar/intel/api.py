@@ -23,10 +23,11 @@ from sqlalchemy.orm import Session
 from ..core.db import get_session
 from ..core.auth import decode_token
 from ..models import User
-from .models import IntelDirection, IntelMention, IntelStory, IntelProbe, IntelAlert, IntelThreadContext, IntelSpam, IntelIncident
+from .models import IntelDirection, IntelMention, IntelStory, IntelProbe, IntelAlert, IntelThreadContext, IntelSpam, IntelIncident, IntelStoryPoint
 from ..models import _now
 from . import aggregate
 from . import credibility
+from .spam_filter import _norm, is_exact_spam
 
 _VALID_SIDES = {"ru", "ua", "by", "mx", "ge", "md", "pmr"}
 _VALID_KINDS = {"channel", "chat"}
@@ -560,9 +561,23 @@ def intel_spam_create(
         note=(body.get("note") or ""),
     )
     session.add(row)
+    # Куратор скинул в спам конкретный пост → прячем уже лежащие в БД дословные дубли,
+    # чтобы они немедленно пропали из ленты/сюжетов (а не только фильтровались впредь).
+    hidden_now = 0
+    if kind == "example":
+        target = _norm(value)
+        candidates = (session.query(IntelMention)
+                      .filter(IntelMention.hidden == False)  # noqa: E712
+                      .all())
+        for m in candidates:
+            if _norm(m.text) == target:
+                _hide_mention(session, m)
+                hidden_now += 1
     session.commit()
     session.refresh(row)
-    return _spam_dict(row)
+    out = _spam_dict(row)
+    out["hidden_now"] = hidden_now
+    return out
 
 
 @router.delete("/intel/spam/{spam_id}")
@@ -620,6 +635,57 @@ def intel_alert_ack(
     return {"ok": True}
 
 
+def _hide_mention(session: Session, m: IntelMention) -> None:
+    """Soft-hide одного упоминания + best-effort декремент счётчика владеющего сюжета
+    (не ниже 0). Не коммитит — это делает вызывающий. Идемпотентность проверяет caller."""
+    if m.hidden:
+        return
+    m.hidden = True
+    if m.incident_id is not None:
+        inc = session.get(IntelIncident, m.incident_id)
+        if inc is not None and inc.story_id is not None:
+            story = session.get(IntelStory, inc.story_id)
+            if story is not None and (story.post_count or 0) > 0:
+                story.post_count -= 1
+
+
+@router.delete("/intel/stories/{story_id}")
+def intel_story_delete(
+    story_id: int,
+    session: Session = Depends(db),
+    user: User = Depends(current_user),
+):
+    """Удалить сюжет целиком (куратор: «это спам / мусорный кластер»). Прячем все его
+    упоминания (hidden=True — они уже привязаны к инцидентам, так что повторно НЕ
+    кластеризуются), затем удаляем точки/инциденты/алерты/сам сюжет. Возвращает число
+    скрытых упоминаний."""
+    story = session.get(IntelStory, story_id)
+    if story is None:
+        raise HTTPException(404, "Story not found")
+
+    incidents = session.query(IntelIncident).filter_by(story_id=story_id).all()
+    inc_ids = [i.id for i in incidents]
+
+    hidden = 0
+    if inc_ids:
+        mentions = (session.query(IntelMention)
+                    .filter(IntelMention.incident_id.in_(inc_ids),
+                            IntelMention.hidden == False)  # noqa: E712
+                    .all())
+        for m in mentions:
+            m.hidden = True
+            hidden += 1
+
+    # Чистим связанные строки, чтобы сюжет не «всплыл» обратно и не оставил висячих FK.
+    session.query(IntelStoryPoint).filter_by(story_id=story_id).delete()
+    session.query(IntelAlert).filter_by(story_id=story_id).update({"story_id": None})
+    for inc in incidents:
+        session.delete(inc)
+    session.delete(story)
+    session.commit()
+    return {"deleted": True, "hidden_mentions": hidden}
+
+
 @router.post("/intel/mention/{mention_id}/hide")
 def intel_mention_hide(
     mention_id: int,
@@ -634,14 +700,7 @@ def intel_mention_hide(
         raise HTTPException(404, "Mention not found")
     if m.hidden:
         return {"id": m.id, "hidden": True}
-    m.hidden = True
-    # Уменьшаем счётчик владеющего сюжета (best-effort, не ниже 0).
-    if m.incident_id is not None:
-        inc = session.get(IntelIncident, m.incident_id)
-        if inc is not None and inc.story_id is not None:
-            story = session.get(IntelStory, inc.story_id)
-            if story is not None and (story.post_count or 0) > 0:
-                story.post_count -= 1
+    _hide_mention(session, m)
     session.commit()
     return {"id": m.id, "hidden": True}
 

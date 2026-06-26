@@ -74,7 +74,7 @@ def test_collect_uses_clean_handle():
 
 # ── invite-link chat probe is skipped cleanly ─────────────────────────────────
 
-def test_invite_chat_skipped():
+def test_invite_chat_collected_via_link():
     from radar.intel import seed, collector
     from radar.intel.models import IntelProbe, IntelMention
 
@@ -94,6 +94,9 @@ def test_invite_chat_skipped():
     prov = SimpleNamespace(search_chat=mock_search_chat)
     n = collector.collect_probe(s, p, prov)
 
+    # После авто-join (passes._ensure_joined) invite-чат собирается как обычный:
+    # ссылка передаётся в search_chat как handle — провайдер её резолвит.
     assert n == 0, f"expected 0 but got {n}"
-    assert search_chat_called == [], "provider.search_chat should NOT be called for invite links"
+    assert search_chat_called == ["https://t.me/+ABC"], \
+        "invite-link chat is now collected: search_chat called with the invite link"
     assert s.query(IntelMention).count() == 0

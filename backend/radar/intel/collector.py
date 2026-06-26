@@ -20,7 +20,7 @@ from .models import IntelLexicon, IntelMention, IntelProbe
 from .geo import detect_direction
 from .tagging import resolve_direction_id
 from .translate import maybe_translate
-from .spam_filter import load_spam, blocked_by_word, classify_spam_batch
+from .spam_filter import load_spam, blocked_by_word, classify_spam_batch, is_exact_spam
 from ..core.spam import looks_like_ad_cheap
 
 log = logging.getLogger(__name__)
@@ -190,7 +190,9 @@ def _filter_and_store(session: Session, pending: list, examples: list) -> int:
     flags = classify_spam_batch([m.text for m in pending], examples)
     count = 0
     for mention, is_spam in zip(pending, flags):
-        if is_spam:
+        # Дословный дубль примера-мусора дропаем всегда — даже если LLM-слой отключён
+        # (нет ключа) и вернул False. Идентичный спам не должен попасть в БД.
+        if is_spam or is_exact_spam(mention.text, examples):
             continue
         sp = session.begin_nested()
         try:

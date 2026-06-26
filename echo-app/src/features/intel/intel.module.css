@@ -511,6 +511,7 @@
 .filterChip[data-active='1'] { background: rgba(43,179,199,.15); color: #57D2E2; border-color: rgba(43,179,199,.30); }
 
 .storyCard {
+  position: relative;
   padding: 12px 14px;
   border-bottom: 1px solid rgba(43,179,199,.06);
   cursor: pointer;

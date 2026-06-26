@@ -38,6 +38,7 @@ from .collector import (
     keyword_relevant,
     chat_message_relevant,
 )
+from .spam_filter import load_spam, is_spam_text
 
 log = logging.getLogger("radar.intel.realtime")
 
@@ -76,12 +77,15 @@ def build_source_map(session):
 
 # ── Persistence ─────────────────────────────────────────────────────────────────
 
-def store_realtime_post(session, post, side, kind, lexicon_terms) -> bool:
+def store_realtime_post(session, post, side, kind, lexicon_terms,
+                        spam_words=None, spam_examples=None) -> bool:
     """Persist one parsed Post as an IntelMention, or skip it.
 
     Applies the same gate the poller uses (chat_message_relevant for chats; length +
-    keyword/geo for channels), tags a direction, and dedups on (platform, post_id) via
-    a savepoint. Returns True if a new row was stored. Caller commits.
+    keyword/geo for channels), drops curator-marked spam (стоп-слово или дословный
+    дубль примера — пост не пишется в БД вообще, не попадает ни в ленту, ни в сюжеты),
+    tags a direction, and dedups on (platform, post_id) via a savepoint. Returns True
+    if a new row was stored. Caller commits.
     """
     text = post.text or ""
     author = post.author or ""
@@ -95,6 +99,10 @@ def store_realtime_post(session, post, side, kind, lexicon_terms) -> bool:
             return False
         if not keyword_relevant(text, lexicon_terms):
             return False
+
+    # Антиспам: дословный дубль примера или стоп-слово — выкидываем до записи.
+    if is_spam_text(text, spam_words, spam_examples):
+        return False
 
     dir_id = resolve_direction_id(session, detect_direction(text))
     mention = IntelMention(
@@ -137,6 +145,8 @@ class IntelRealtime:
         self._by_user: dict[str, dict] = {}
         self._id_map: dict[int, dict] = {}
         self._lexicon: list[str] = []
+        self._spam_words: list[str] = []
+        self._spam_examples: list[str] = []
         self._lex_loaded_at: float = 0.0
 
     def start(self) -> bool:
@@ -152,6 +162,7 @@ class IntelRealtime:
         try:
             self._by_user, join_handles, invite_links = build_source_map(session)
             self._lexicon = [t for (t,) in session.query(IntelLexicon.term).all()]
+            self._spam_words, self._spam_examples = load_spam(session)
         finally:
             session.close()
         self._lex_loaded_at = time.monotonic()
@@ -189,13 +200,14 @@ class IntelRealtime:
     # -- internals --
 
     def _refresh_lexicon(self) -> None:
-        """Reload the keyword lexicon from the DB if the TTL has elapsed, so live edits
-        to the filter take effect without restarting the backend."""
+        """Reload the keyword lexicon AND spam lists from the DB if the TTL has elapsed,
+        so live edits to the filter/antispam take effect without restarting the backend."""
         if time.monotonic() - self._lex_loaded_at < LEXICON_TTL_SEC:
             return
         session = get_session()
         try:
             self._lexicon = [t for (t,) in session.query(IntelLexicon.term).all()]
+            self._spam_words, self._spam_examples = load_spam(session)
         finally:
             session.close()
         self._lex_loaded_at = time.monotonic()
@@ -237,7 +249,8 @@ class IntelRealtime:
 
         session = get_session()
         try:
-            if store_realtime_post(session, post, side, kind, self._lexicon):
+            if store_realtime_post(session, post, side, kind, self._lexicon,
+                                   self._spam_words, self._spam_examples):
                 session.commit()
                 log.info("intel realtime stored %s (%s)", post.post_id, side)
             else:

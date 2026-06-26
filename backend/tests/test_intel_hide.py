@@ -71,3 +71,61 @@ def test_hidden_mention_excluded_from_story_detail():
     texts = [e["text"] for e in detail["events"]]
     assert "видимый" in texts
     assert "спам" not in texts, "hidden mention must not appear in story detail"
+
+
+# ── realtime дропает дословный дубль примера-спама ──────────────────────────
+
+def test_store_realtime_drops_exact_spam_example():
+    from radar.intel import seed, realtime
+    from radar.intel.models import IntelMention
+
+    s = _sess()
+    seed.ensure_default_directions(s)
+    s.commit()
+
+    spam_text = "по данным с места — удар по складу боеприпасов под Суджей"
+    post = SimpleNamespace(
+        platform="telegram", post_id="@chat/9", author="@user",
+        text="  ПО ДАННЫМ с места — удар по складу боеприпасов под Суджей  ",
+        created_at=datetime.now(timezone.utc), views=0, url=None, reply_to_tg_id=None,
+    )
+    stored = realtime.store_realtime_post(
+        s, post, side="ru", kind="chat", lexicon_terms=["удар"],
+        spam_words=[], spam_examples=[spam_text],
+    )
+    assert stored is False, "exact spam-example dupe must be dropped before storing"
+    assert s.query(IntelMention).filter_by(post_id="@chat/9").first() is None
+
+
+# ── удаление сюжета прячет упоминания и убирает сам сюжет ────────────────────
+
+def test_delete_story_hides_mentions_and_removes_story():
+    from radar.intel import seed
+    from radar.intel.api import intel_story_delete
+    from radar.intel.models import (IntelMention, IntelIncident, IntelStory,
+                                     IntelStoryPoint, IntelDirection)
+
+    s = _sess()
+    seed.ensure_default_directions(s)
+    d = s.query(IntelDirection).first()
+    now = datetime.now(timezone.utc)
+    story = IntelStory(direction_id=d.id, title="мусор", first_seen_at=now,
+                       last_seen_at=now, post_count=1)
+    s.add(story); s.flush()
+    s.add(IntelStoryPoint(story_id=story.id, bucket_start=now,
+                          mention_count=1, source_count=1))
+    inc = IntelIncident(direction_id=d.id, story_id=story.id,
+                        first_seen_at=now, last_seen_at=now)
+    s.add(inc); s.flush()
+    m = IntelMention(direction_id=d.id, platform="telegram", post_id="z",
+                     author="@x", side="ru", text="спам-пост", created_at=now,
+                     incident_id=inc.id)
+    s.add(m); s.commit()
+    sid = story.id
+
+    res = intel_story_delete(sid, session=s, user=None)
+    assert res["deleted"] is True
+    assert res["hidden_mentions"] == 1
+    assert s.get(IntelStory, sid) is None
+    assert s.query(IntelStoryPoint).filter_by(story_id=sid).count() == 0
+    assert s.query(IntelMention).filter_by(post_id="z").one().hidden is True

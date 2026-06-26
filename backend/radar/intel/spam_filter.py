@@ -54,6 +54,26 @@ def blocked_by_word(text: str, blocklist) -> bool:
     return False
 
 
+def _norm(text: str) -> str:
+    """Нормализуем текст для сравнения: схлопываем пробелы, lower, без краёв."""
+    return re.sub(r"\s+", " ", (text or "").strip().lower())
+
+
+def is_exact_spam(text: str, examples) -> bool:
+    """True, если text дословно (с точностью до регистра/пробелов) совпадает с одним
+    из примеров-мусора куратора. Дешёво и детерминированно — без сети и без LLM."""
+    n = _norm(text)
+    if not n:
+        return False
+    return any(_norm(e) == n for e in (examples or []))
+
+
+def is_spam_text(text: str, blocklist, examples) -> bool:
+    """Единый дешёвый гейт для realtime-пути: стоп-слово ИЛИ дословный дубль примера.
+    Не зовёт LLM (это делает только батч-путь поллера)."""
+    return blocked_by_word(text, blocklist or []) or is_exact_spam(text, examples)
+
+
 def classify_spam_batch(texts: list, examples: list) -> list:
     """Claude per text: is it the same kind of junk as the curator's examples?
 

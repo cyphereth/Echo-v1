@@ -19,6 +19,7 @@ export const intelApi = {
   stream:    (params)         => INTEL_USE_MOCK ? mockApi.stream(params || {}) : passthrough('stream', params),
   stories:   (params)         => INTEL_USE_MOCK ? mockApi.stories(params || {}) : passthrough('stories', params),
   story:     (id)             => INTEL_USE_MOCK ? mockApi.story(id) : request(`/intel/stories/${id}`),
+  deleteStory: (id)           => request(`/intel/stories/${id}`, { method: 'DELETE' }),
   directions:(window = '24h') => INTEL_USE_MOCK ? mockApi.directions() : passthrough('directions', { window }),
   direction: (key, window)    => INTEL_USE_MOCK ? mockApi.direction(key) : request(`/intel/directions/${key}?window=${window || '24h'}`),
   search:    (q)              => INTEL_USE_MOCK ? mockApi.search(q) : passthrough('search', { q }),

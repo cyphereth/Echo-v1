@@ -56,6 +56,17 @@ export function IntelStories({ timeRange, openStoryId, openDirection, navToken }
     intelApi.story(selectedId).then(setDetail).catch(() => setDetail(null));
   }, [selectedId]);
 
+  function deleteStory(id, ev) {
+    ev.stopPropagation();
+    if (!window.confirm('Удалить сюжет целиком? Все его посты будут скрыты из ленты и сюжетов.')) return;
+    intelApi.deleteStory(id)
+      .then(() => {
+        setList(prev => prev.filter(s => s.id !== id));
+        setSel(cur => (cur === id ? null : cur));
+      })
+      .catch(() => {});
+  }
+
   return (
     <div className={styles.gridSplit} style={{ flex: 1 }}>
       {/* left: list + filters */}
@@ -100,7 +111,14 @@ export function IntelStories({ timeRange, openStoryId, openDirection, navToken }
           return (
             <div key={s.id} className={styles.storyCard} data-active={selectedId === s.id ? '1' : '0'}
               onClick={() => setSel(s.id)}>
-              <div className={styles.storyCardTitle}>{s.title}</div>
+              <button
+                onClick={(ev) => deleteStory(s.id, ev)}
+                title="Удалить сюжет (спам/мусор)"
+                style={{ position: 'absolute', top: 6, right: 6, background: 'none', border: 'none',
+                         color: '#4A6378', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: 2 }}>
+                ✕
+              </button>
+              <div className={styles.storyCardTitle} style={{ paddingRight: 16 }}>{s.title}</div>
               <div className={styles.storyCardMeta}>
                 <span style={{ color: sp.color }}>+{s.spike_pct}%</span>
                 <span style={{ color: cr.color }}>● {cr.label}</span>

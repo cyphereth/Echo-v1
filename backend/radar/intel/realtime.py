@@ -38,6 +38,7 @@ from .collector import (
     keyword_relevant,
     chat_message_relevant,
 )
+from .translate import maybe_translate
 from .spam_filter import load_spam, is_spam_text
 
 log = logging.getLogger("radar.intel.realtime")
@@ -87,7 +88,11 @@ def store_realtime_post(session, post, side, kind, lexicon_terms,
     tags a direction, and dedups on (platform, post_id) via a savepoint. Returns True
     if a new row was stored. Caller commits.
     """
-    text = post.text or ""
+    # Перевод uk→ru ДО гейтов: лексикон/гео-фильтры русскоязычные, а часть
+    # источников (каналы тревог) пишут по-украински. Поллер уже так делает
+    # (collector.py); realtime раньше писал текст как есть — отсюда непереведённые
+    # посты в свежей ленте. Перевод сетевой, но вызывается off-loop (см. _on_message).
+    text = maybe_translate(post.text or "")
     author = post.author or ""
 
     if kind == "chat":
@@ -262,23 +267,42 @@ class IntelRealtime:
             log.exception("intel realtime: failed to parse message")
             return
 
+        # store_realtime_post does a synchronous uk→ru translate (network) before the
+        # relevance gates. Run it off the Telethon event-loop thread so a burst of
+        # translatable posts doesn't stall update processing for everyone else.
+        import asyncio
+        loop = asyncio.get_event_loop()
+        try:
+            stored = await loop.run_in_executor(
+                None, self._store_sync, post, side, kind
+            )
+        except Exception:
+            log.exception("intel realtime: store failed for %s", post.post_id)
+            return
+
+        if stored:
+            log.info("intel realtime stored %s (%s)", post.post_id, side)
+            # If this is a reply whose parent wasn't already local (so
+            # store_realtime_post couldn't assemble the chain offline), pull the
+            # thread from Telegram NOW instead of waiting up to a full tick
+            # (INTEL_TICK_SEC) for the poller's enrich pass.
+            if getattr(post, "reply_to_tg_id", None):
+                self._kick_enrich()
+
+    def _store_sync(self, post, side, kind) -> bool:
+        """Open a short-lived session, store the post (translate + gates + dedup),
+        commit, and report whether a new row landed. Runs in an executor thread."""
         session = get_session()
         try:
             if store_realtime_post(session, post, side, kind, self._lexicon,
                                    self._spam_words, self._spam_examples):
                 session.commit()
-                log.info("intel realtime stored %s (%s)", post.post_id, side)
-                # If this is a reply whose parent wasn't already local (so
-                # store_realtime_post couldn't assemble the chain offline),
-                # pull the thread from Telegram NOW instead of waiting up to a
-                # full tick (INTEL_TICK_SEC) for the poller's enrich pass.
-                if getattr(post, "reply_to_tg_id", None):
-                    self._kick_enrich()
-            else:
-                session.rollback()
+                return True
+            session.rollback()
+            return False
         except Exception:
             session.rollback()
-            log.exception("intel realtime: store failed for %s", post.post_id)
+            raise
         finally:
             session.close()
 

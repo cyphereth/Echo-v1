@@ -63,6 +63,28 @@ def test_store_channel_post_relevance_and_dedup():
     assert s.query(IntelMention).count() == 1
 
 
+def test_store_realtime_translates_ukrainian_before_gates(monkeypatch):
+    # Realtime is the fast path for fresh posts; it must translate uk→ru like the
+    # poller, otherwise Ukrainian posts land untranslated AND the russian lexicon
+    # gate misses them. Mock the translator so the test needs no network.
+    import radar.intel.realtime as rt
+    from radar.intel import seed
+    from radar.intel.models import IntelMention, IntelLexicon
+    s = _sess()
+    seed.ensure_default_directions(s)
+    s.add(IntelLexicon(term="обстрел", meaning="shelling", category="military"))
+    s.commit()
+    lex = ["обстрел"]
+
+    ua = "ворог здійснив обстріл району увечері, є поранені серед мирних мешканців"
+    monkeypatch.setattr(rt, "maybe_translate",
+                        lambda t: "враг совершил обстрел района вечером, есть раненые среди мирных жителей")
+    assert rt.store_realtime_post(s, _post("c/9", ua), "ru", "channel", lex) is True
+    s.commit()
+    row = s.query(IntelMention).filter_by(post_id="c/9").one()
+    assert "обстрел" in row.text and "обстріл" not in row.text
+
+
 def test_store_short_channel_post_dropped():
     from radar.intel import seed
     from radar.intel.realtime import store_realtime_post

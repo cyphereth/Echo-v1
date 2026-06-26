@@ -105,7 +105,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
   };
 
   return (
-    <div className={styles.workspace}>
+    <div className={`${styles.workspace} ${styles.homeWorkspace}`}>
       {/* KPI strip */}
       <div className={styles.kpis}>
         <div className={styles.kpi}>
@@ -132,6 +132,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
               <span className={styles.sectionCount}>{hot.length}</span>
             </span>
           </div>
+          <div className={styles.scrollBody}>
           {hot.map(s => {
             const sp = spikeLevel(s.spike_pct);
             const cr = CREDIBILITY[s.credibility] || CREDIBILITY.unrated;
@@ -148,6 +149,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
               </div>
             );
           })}
+          </div>
         </div>
 
         <div className={styles.section}>
@@ -158,6 +160,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
               <span className={styles.sectionCount}>{alerts.length}</span>
             </span>
           </div>
+          <div className={styles.scrollBody}>
           {alerts.map(a => {
             const isFake = a.kind === 'fake';
             const color = isFake ? '#FF4D5E' : '#FFB23E';
@@ -175,6 +178,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
               </div>
             );
           })}
+          </div>
         </div>
       </div>
 
@@ -188,6 +192,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
               <span className={styles.sectionCount}>{top_stories.length}</span>
             </span>
           </div>
+          <div className={styles.scrollBody}>
           {top_stories.map(s => {
             const cr = CREDIBILITY[s.credibility] || CREDIBILITY.unrated;
             return (
@@ -199,6 +204,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
               </div>
             );
           })}
+          </div>
         </div>
 
         <div className={styles.section}>
@@ -222,6 +228,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
               </span>
             )}
           </div>
+          <div className={styles.scrollBody}>
           {feed.map(e => {
             const sd = SIDE[e.side] || SIDE.ru;
             const isNew = flashIds.has(e.id);
@@ -249,6 +256,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
               </div>
             );
           })}
+          </div>
         </div>
       </div>
     </div>

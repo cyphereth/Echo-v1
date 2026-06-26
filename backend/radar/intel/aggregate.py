@@ -198,8 +198,12 @@ def compute_overview(session, window_h=24) -> dict:
                           if st.created_at and st.created_at >= since_naive
                           and st.id in summary_map]
     top = sorted(top_candidates, key=lambda x: window_counts.get(x["id"], 0), reverse=True)[:8]
+    # Only recent unacknowledged alerts: the "Сигналы" panel mirrors the bell, which
+    # shows a rolling 2h window. Without a time filter day-old alerts pile up forever.
+    alert_since = (datetime.now(timezone.utc) - timedelta(hours=2)).replace(tzinfo=None)
     alert_rows = (session.query(IntelAlert)
-                  .filter(IntelAlert.acknowledged_at.is_(None))
+                  .filter(IntelAlert.acknowledged_at.is_(None),
+                          IntelAlert.fired_at >= alert_since)
                   .order_by(IntelAlert.id.desc()).limit(20).all())
     alerts = [alert_payload(session, a) for a in alert_rows]
     spiking_dirs = len({s["direction"] for s in summaries if s["spike_pct"] >= 50})

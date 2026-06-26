@@ -215,6 +215,31 @@
 }
 .workspace::-webkit-scrollbar { width: 8px; }
 
+/* ── Home workspace: fill height, no page scroll — each column scrolls itself ── */
+.homeWorkspace {
+  overflow: hidden;        /* the page itself never scrolls */
+}
+.homeWorkspace .kpis { flex-shrink: 0; }
+/* the two grid rows share the remaining vertical space */
+.homeWorkspace .grid2 {
+  flex: 1 1 0;
+  min-height: 0;
+}
+/* sections inside the home grid become flex columns so their body can scroll */
+.homeWorkspace .section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex-shrink: 1;
+}
+/* scrollable body wrapper for a home section's row list */
+.scrollBody {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+.scrollBody::-webkit-scrollbar { width: 8px; }
+
 /* ── KPI strip ── */
 .kpis {
   display: grid;

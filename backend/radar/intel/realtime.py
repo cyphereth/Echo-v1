@@ -100,11 +100,15 @@ def store_realtime_post(session, post, side, kind, lexicon_terms,
         if not chat_message_relevant(text, author, lexicon_terms, keywords or ()):
             return False
     else:
-        clean = " ".join(w for w in text.split() if not w.startswith("#")).strip()
-        if len(clean) < MIN_TEXT_LEN:
-            return False
-        if not (keyword_relevant(text, lexicon_terms) or blocked_by_word(text, keywords or ())):
-            return False
+        # Curator-keyword hit overrides the length gate (short replies/comments), same as
+        # the poller. Lexicon admission still requires the post to clear MIN_TEXT_LEN.
+        kw_hit = blocked_by_word(text, keywords or ())
+        if not kw_hit:
+            clean = " ".join(w for w in text.split() if not w.startswith("#")).strip()
+            if len(clean) < MIN_TEXT_LEN:
+                return False
+            if not keyword_relevant(text, lexicon_terms):
+                return False
 
     # Антиспам: дословный дубль примера или стоп-слово — выкидываем до записи.
     if is_spam_text(text, spam_words, spam_examples):

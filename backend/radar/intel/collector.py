@@ -166,19 +166,29 @@ def chat_message_relevant(text: str, author: str, lexicon_terms: tuple = (),
     - no alphabetic word in the text
 
     Admit: military lexicon term (keyword_relevant, weather-guarded) OR a curator-managed
-    positive keyword (``keywords``). The hard drops above still win regardless.
+    positive keyword (``keywords``). A curator-keyword hit is an explicit signal, so it
+    BYPASSES the length gate (replies/comments are usually short — that's why keywords
+    "didn't work for replies"); the ad and alphabetic guards still win regardless.
     """
     stripped = (text or "").strip()
 
-    # Hard drops
-    if looks_like_ad_cheap(stripped, author):
-        return False
-    if len(stripped) < MIN_TEXT_LEN:
+    # Explicit curator-keyword hit — strong signal, overrides the length noise-gate.
+    kw_hit = blocked_by_word(stripped, keywords)
+
+    # Hard drops (apply even to keyword hits — sellers/empty text are never wanted).
+    # looks_like_ad_cheap also drops anything shorter than its own min_len; on a keyword
+    # hit we pass min_len=0 so only the seller-name guard remains (short reply admitted).
+    if kw_hit:
+        if looks_like_ad_cheap(stripped, author, min_len=0):
+            return False
+    elif looks_like_ad_cheap(stripped, author):
         return False
     if not re.search(r"[a-zA-Zа-яА-ЯёЁ]", stripped):
         return False
+    if not kw_hit and len(stripped) < MIN_TEXT_LEN:
+        return False
 
-    return keyword_relevant(stripped, lexicon_terms) or blocked_by_word(stripped, keywords)
+    return kw_hit or keyword_relevant(stripped, lexicon_terms)
 
 
 # ── Spam-filter store helper ─────────────────────────────────────────────────
@@ -324,19 +334,23 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                         found_watermark = True
                         break
 
-                    # Length gate — drop media-only/very-short posts.
-                    clean = " ".join(
-                        w for w in (post.text or "").split()
-                        if not w.startswith("#")
-                    ).strip()
-                    if len(clean) < MIN_TEXT_LEN:
-                        continue
-
                     # Keyword relevance gate — keep posts that hit the military lexicon
                     # OR a curator-managed positive keyword (geo is for tagging, not admit).
                     text = maybe_translate(post.text or "")
-                    if not (keyword_relevant(text, lexicon_terms) or blocked_by_word(text, keywords)):
-                        continue
+                    kw_hit = blocked_by_word(text, keywords)
+
+                    # Length gate — drop media-only/very-short posts, UNLESS a curator
+                    # keyword matched (explicit signal overrides the length noise-gate;
+                    # short replies/comments are why keywords "didn't work for replies").
+                    if not kw_hit:
+                        clean = " ".join(
+                            w for w in (post.text or "").split()
+                            if not w.startswith("#")
+                        ).strip()
+                        if len(clean) < MIN_TEXT_LEN:
+                            continue
+                        if not keyword_relevant(text, lexicon_terms):
+                            continue
 
                     # Spam stop-word layer (fast, deterministic)
                     if blocked_by_word(text, blocklist):

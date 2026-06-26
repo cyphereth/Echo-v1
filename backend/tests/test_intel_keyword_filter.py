@@ -153,6 +153,21 @@ def test_curator_keyword_admits_otherwise_dropped_post():
     assert stored.post_id == "@testchannel/1"
 
 
+def test_curator_keyword_overrides_length_gate_for_chat():
+    """A short chat reply (< MIN_TEXT_LEN) matching a curator keyword is admitted —
+    the keyword hit bypasses the length noise-gate (the reply bug)."""
+    from radar.intel.collector import chat_message_relevant, MIN_TEXT_LEN
+
+    short = "наводнение!"  # < 20 chars — would normally be dropped by the length gate
+    assert len(short) < MIN_TEXT_LEN
+    # Without the keyword → dropped (too short, no lexicon hit)
+    assert chat_message_relevant(short, "@u", [], []) is False
+    # With the curator keyword → admitted despite being short
+    assert chat_message_relevant(short, "@u", [], ["наводнение"]) is True
+    # Text with no alphabetic char is still dropped even on a keyword hit
+    assert chat_message_relevant("123 456", "@u", [], ["123"]) is False
+
+
 def test_load_keywords_returns_only_keyword_kind():
     from radar.intel.models import IntelSpam
     from radar.intel.spam_filter import load_keywords

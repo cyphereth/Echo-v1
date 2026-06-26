@@ -30,6 +30,31 @@ def _parse_handle_and_msg_id(post_id: str) -> tuple[str, str]:
 _MAX_LOCAL_DEPTH = 12
 
 
+def _handle_for(mention: IntelMention) -> str:
+    """The Telegram handle to resolve a mention's thread against.
+
+    Chat messages carry a composite post_id ('namespace/msgid') whose prefix is the
+    handle. Channel posts carry a bare numeric post_id, so the channel @username lives
+    in the author field instead. Either way the result is something get_entity accepts.
+    """
+    if "/" in (mention.post_id or ""):
+        handle = mention.post_id.rsplit("/", 1)[0]
+    else:
+        handle = (mention.author or "").strip()
+    if handle and not handle.startswith("@") and not handle.startswith("#"):
+        handle = f"@{handle}"
+    return handle
+
+
+def _parent_post_id(mention: IntelMention, tg_id: str) -> str:
+    """The post_id a parent/ancestor with Telegram id `tg_id` would have, in the same
+    namespace as `mention`. Chats are namespaced ('ns/id'); channels are bare ('id')."""
+    if "/" in (mention.post_id or ""):
+        namespace = mention.post_id.rsplit("/", 1)[0]
+        return f"{namespace}/{tg_id}"
+    return str(tg_id)
+
+
 def _resolve_locally(session: Session, mention: IntelMention) -> bool:
     """Build the reply chain for `mention` from mentions already in the DB.
 
@@ -40,11 +65,12 @@ def _resolve_locally(session: Session, mention: IntelMention) -> bool:
     thread_root_id. Returns True when the immediate parent was found locally
     (chain fully resolved); False means we must fall back to the network fetch.
 
-    Siblings are intentionally not resolved here — they're secondary and would
-    require a chat scan. The reply chain is what the UI renders prominently.
+    Works for both shapes: chat messages (composite 'ns/msgid' post_id) and channel
+    posts (bare numeric post_id, namespace implied by the author/channel). Siblings are
+    intentionally not resolved here — they're secondary and would require a chat scan.
+    The reply chain is what the UI renders prominently.
     """
-    namespace = mention.post_id.rsplit("/", 1)[0] if "/" in mention.post_id else mention.post_id
-    parent_post_id = f"{namespace}/{mention.reply_to_tg_id}"
+    parent_post_id = _parent_post_id(mention, mention.reply_to_tg_id)
     parent = (
         session.query(IntelMention)
         .filter(IntelMention.post_id == parent_post_id)
@@ -66,7 +92,7 @@ def _resolve_locally(session: Session, mention: IntelMention) -> bool:
         chain.append(node)
         if not node.reply_to_tg_id:
             break
-        next_post_id = f"{namespace}/{node.reply_to_tg_id}"
+        next_post_id = _parent_post_id(mention, node.reply_to_tg_id)
         node = (
             session.query(IntelMention)
             .filter(IntelMention.post_id == next_post_id)
@@ -128,7 +154,8 @@ def enrich_context(session: Session, provider, batch_size: int = 50) -> int:
             log.exception("context_pass: local resolve failed for mention %s — falling back", mention.id)
             session.rollback()
 
-        handle, current_tg_id = _parse_handle_and_msg_id(mention.post_id)
+        _, current_tg_id = _parse_handle_and_msg_id(mention.post_id)
+        handle = _handle_for(mention)
         try:
             result = provider.fetch_thread_context(
                 handle,
@@ -187,12 +214,10 @@ def enrich_context(session: Session, provider, batch_size: int = 50) -> int:
             except IntegrityError:
                 sp.rollback()
 
-        # Resolve reply_to_id and thread_root_id from index
-        # Extract namespace from mention.post_id (format: "namespace/msgid")
-        namespace = mention.post_id.rsplit("/", 1)[0]
-
+        # Resolve reply_to_id and thread_root_id from index. Parent/root post_ids are
+        # built in the mention's own namespace (composite for chats, bare for channels).
         if mention.reply_to_tg_id:
-            parent_post_id = f"{namespace}/{mention.reply_to_tg_id}"
+            parent_post_id = _parent_post_id(mention, mention.reply_to_tg_id)
             parent_in_index = (
                 session.query(IntelMention)
                 .filter(IntelMention.post_id == parent_post_id)
@@ -204,7 +229,7 @@ def enrich_context(session: Session, provider, batch_size: int = 50) -> int:
         parents = result.get("parents", [])
         if parents:
             root_tg_id = parents[-1]["tg_msg_id"]
-            root_post_id = f"{namespace}/{root_tg_id}"
+            root_post_id = _parent_post_id(mention, root_tg_id)
             root_in_index = (
                 session.query(IntelMention)
                 .filter(IntelMention.post_id == root_post_id)

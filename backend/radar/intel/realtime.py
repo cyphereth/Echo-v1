@@ -160,6 +160,9 @@ class IntelRealtime:
         self._spam_words: list[str] = []
         self._spam_examples: list[str] = []
         self._lex_loaded_at: float = 0.0
+        # Single-flight guard so a burst of replies spawns at most one network
+        # context-enrich pass at a time (keeps SQLite writes serialized, avoids floods).
+        self._enrich_lock = threading.Lock()
 
     def start(self) -> bool:
         client = getattr(self.provider, "_client", None)
@@ -265,6 +268,12 @@ class IntelRealtime:
                                    self._spam_words, self._spam_examples):
                 session.commit()
                 log.info("intel realtime stored %s (%s)", post.post_id, side)
+                # If this is a reply whose parent wasn't already local (so
+                # store_realtime_post couldn't assemble the chain offline),
+                # pull the thread from Telegram NOW instead of waiting up to a
+                # full tick (INTEL_TICK_SEC) for the poller's enrich pass.
+                if getattr(post, "reply_to_tg_id", None):
+                    self._kick_enrich()
             else:
                 session.rollback()
         except Exception:
@@ -272,6 +281,35 @@ class IntelRealtime:
             log.exception("intel realtime: store failed for %s", post.post_id)
         finally:
             session.close()
+
+    def _kick_enrich(self) -> None:
+        """Drain pending reply-thread context in a background thread.
+
+        Runs OFF the Telethon event-loop thread on purpose: provider._await blocks on
+        run_coroutine_threadsafe(...).result(), which would deadlock if called from the
+        loop thread itself. The single-flight lock means a burst of replies triggers one
+        pass (it picks up every pending reply via the context_fetched=False query), not
+        one network storm per message.
+        """
+        if not self._enrich_lock.acquire(blocking=False):
+            return  # a pass is already running; it will pick up this reply too
+
+        def _run():
+            try:
+                from .context_pass import enrich_context
+                session = get_session()
+                try:
+                    n = enrich_context(session, self.provider, batch_size=20)
+                    if n:
+                        log.info("intel realtime: enriched %d reply thread(s) on arrival", n)
+                except Exception:
+                    log.exception("intel realtime: on-arrival enrich failed")
+                finally:
+                    session.close()
+            finally:
+                self._enrich_lock.release()
+
+        threading.Thread(target=_run, name="intel-rt-enrich", daemon=True).start()
 
     def _subscribe(self, join_handles: list[str], invite_links: list[tuple]) -> None:
         # Delegate to the shared sweep: it SKIPS already-joined sources (subscribed.json)

@@ -42,6 +42,7 @@ def _parse_tg_message(msg, author_handle: str, followers: int) -> Post:
     `followers` the channel participant count (both resolved by the caller)."""
     text = getattr(msg, "message", None) or ""
     replies = getattr(msg, "replies", None)
+    raw_reply = getattr(msg, "reply_to_msg_id", None)
     return Post(
         post_id    = str(msg.id),
         platform   = "telegram",
@@ -55,6 +56,7 @@ def _parse_tg_message(msg, author_handle: str, followers: int) -> Post:
         comments   = int(getattr(replies, "replies", 0) or 0) if replies else 0,
         shares     = int(getattr(msg, "forwards", 0) or 0),
         sound_id   = None,
+        reply_to_tg_id = str(raw_reply) if raw_reply is not None else None,
     )
 
 

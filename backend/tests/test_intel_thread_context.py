@@ -172,6 +172,53 @@ def test_enrich_context_resolves_locally_without_network():
     assert [c.tg_msg_id for c in chain] == ["701", "700"]
 
 
+def test_enrich_context_resolves_channel_reply_locally():
+    """Channel posts have BARE numeric post_ids (no namespace); the channel handle lives
+    in author. Local resolution must still link parent/root by id within the same channel
+    without a Telegram round-trip."""
+    from types import SimpleNamespace
+    from datetime import datetime, timedelta, timezone
+    from radar.intel import seed
+    from radar.intel.models import IntelMention, IntelThreadContext, IntelDirection
+    from radar.intel.context_pass import enrich_context
+
+    s = _sess()
+    seed.ensure_default_directions(s)
+    d = s.query(IntelDirection).first()
+    now = datetime.now(timezone.utc)
+
+    parent = IntelMention(
+        direction_id=d.id, platform="telegram", post_id="900",
+        author="@warchan", text="канальный родитель", created_at=now - timedelta(minutes=5),
+        context_fetched=True,
+    )
+    s.add(parent); s.commit()
+
+    reply = IntelMention(
+        direction_id=d.id, platform="telegram", post_id="901",
+        author="@warchan", text="канальный ответ", created_at=now, reply_to_tg_id="900",
+    )
+    s.add(reply); s.commit()
+
+    calls = []
+    fake_provider = SimpleNamespace(
+        fetch_thread_context=lambda *a, **kw: calls.append(1) or {"parents": [], "siblings": []}
+    )
+
+    n = enrich_context(s, fake_provider, batch_size=10)
+    assert n == 1
+    assert calls == [], "channel-local resolution must not hit Telegram"
+
+    m2 = s.get(IntelMention, reply.id)
+    assert m2.context_fetched is True
+    assert m2.reply_to_id == parent.id
+    assert m2.thread_root_id == parent.id
+
+    chain = (s.query(IntelThreadContext)
+             .filter_by(mention_id=reply.id, role="parent").all())
+    assert [c.tg_msg_id for c in chain] == ["900"]
+
+
 def test_enrich_context_skips_already_fetched():
     from types import SimpleNamespace
     from datetime import datetime, timezone

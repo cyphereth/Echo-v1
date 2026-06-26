@@ -50,6 +50,16 @@ def test_parse_tg_message_survives_empty_text():
     p = _parse_tg_message(m, "@x", followers=0)
     assert p.text == "" and p.hashtags == [] and p.views == 0
 
+def test_parse_tg_message_no_reply_is_none():
+    p = _parse_tg_message(_Msg(), "@x", followers=0)
+    assert p.reply_to_tg_id is None
+
+def test_parse_tg_message_extracts_reply_to():
+    m = _Msg()
+    m.reply_to_msg_id = 4242
+    p = _parse_tg_message(m, "@x", followers=0)
+    assert p.reply_to_tg_id == "4242"
+
 
 def test_search_keyword_calls_global(monkeypatch):
     from radar.core.providers.telegram import TelegramProvider

@@ -133,25 +133,27 @@ export function IntelSpam() {
           {kwErr && <span className={styles.srcError}>{kwErr}</span>}
         </form>
 
-        <div className={styles.sectionBody}>
-          {loading ? (
-            <div className={styles.empty}>Загрузка…</div>
-          ) : keywords.length === 0 ? (
-            <div className={styles.empty}>Ключевых слов пока нет.</div>
-          ) : (
-            keywords.map(k => (
-              <div key={k.id} className={styles.srcRow}>
-                <span className={styles.srcHandle}>{k.value}</span>
-                <button
-                  className={styles.srcDel}
-                  onClick={() => handleDelete(k.id, 'keyword')}
-                  disabled={busy === k.id}
-                  title="Удалить"
-                >✕</button>
-              </div>
-            ))
-          )}
-        </div>
+        {loading ? (
+          <div className={styles.empty}>Загрузка…</div>
+        ) : keywords.length === 0 ? (
+          <div className={styles.empty}>Ключевых слов пока нет.</div>
+        ) : (
+          <div className={styles.kwScroll}>
+            <div className={styles.kwGrid}>
+              {keywords.map(k => (
+                <span key={k.id} className={styles.kwChip} title={k.value}>
+                  <span className={styles.kwChipText}>{k.value}</span>
+                  <button
+                    className={styles.kwChipDel}
+                    onClick={() => handleDelete(k.id, 'keyword')}
+                    disabled={busy === k.id}
+                    title="Удалить"
+                  >✕</button>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Стоп-слова */}

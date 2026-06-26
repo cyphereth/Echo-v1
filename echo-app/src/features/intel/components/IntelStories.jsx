@@ -22,10 +22,11 @@ export function IntelStories({ timeRange, openStoryId, openDirection, navToken }
   const [filters, setFilters]   = useState({ direction: openDirection || '', side: '', verified: false });
   const [sort, setSort]         = useState('activity');
 
-  // When navigated here from home with a specific story, select it immediately.
+  // When navigated here with a specific story, select it immediately. navToken in the
+  // deps so re-clicking the SAME signal/story re-selects it even if openStoryId is unchanged.
   useEffect(() => {
     if (openStoryId != null) setSel(openStoryId);
-  }, [openStoryId]);
+  }, [openStoryId, navToken]);
 
   // When navigated here from board with a direction, apply it as a filter.
   // navToken changes on every navigation so this fires even if direction is the same.

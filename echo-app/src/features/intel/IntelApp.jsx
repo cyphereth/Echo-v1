@@ -95,6 +95,22 @@ export function IntelApp({ onExit }) {
     setSearchResults(await intelApi.search(q.trim()));
   }
 
+  // Открыть сигнал: ведём к КОНКРЕТНОМУ сюжету (scope=story) или направлению,
+  // а не просто на вкладку «Сюжеты». navToken гарантирует переход даже если экран
+  // уже открыт. Раньше onOpen только переключал screen — клик «не туда».
+  const openAlert = (a) => {
+    if (a.scope === 'story' && a.story_id != null) {
+      setOpenStoryId(a.story_id); setOpenDirection(null);
+    } else if (a.direction) {
+      setOpenDirection(a.direction); setOpenStoryId(null);
+    } else {
+      setScreen(a.scope === 'story' ? 'stories' : 'board');
+      return;
+    }
+    setNavToken(t => t + 1);
+    setScreen('stories');
+  };
+
   return (
     <div className={styles.app}>
       {/* sidebar */}
@@ -133,7 +149,7 @@ export function IntelApp({ onExit }) {
           </div>
           <div className={styles.topgrow} />
           <AlertBell alerts={visibleAlerts} unreadCount={unreadCount} onAck={ackAlert} onAckAll={ackAll}
-                     onOpen={(a) => setScreen(a.scope === 'story' ? 'stories' : 'board')} />
+                     onOpen={openAlert} />
           <DateRangePicker value={timeRange} onChange={setTimeRange} />
           <div className={styles.searchBox}>
             <Icon name="search" size={13} color="#4A6378" />
@@ -162,7 +178,7 @@ export function IntelApp({ onExit }) {
           <IntelSpam />
         )}
         <AlertToast toasts={toasts} onDismiss={dismissToast}
-                    onOpen={(a) => { setScreen(a.scope === 'story' ? 'stories' : 'board'); dismissToast(a.id); }} />
+                    onOpen={(a) => { openAlert(a); dismissToast(a.id); }} />
       </div>
     </div>
   );

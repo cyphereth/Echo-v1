@@ -75,3 +75,35 @@ def test_store_short_channel_post_dropped():
     assert store_realtime_post(s, _post("c/3", "обстрел"), "ru", "channel", ["обстрел"]) is False
     s.commit()
     assert s.query(IntelMention).count() == 0
+
+
+def test_store_realtime_reply_resolves_thread_locally():
+    """A realtime reply whose parent is already in the DB gets its thread chain
+    built immediately (no network), so the «в ответ на» context is ready at once."""
+    from radar.intel import seed
+    from radar.intel.realtime import store_realtime_post
+    from radar.intel.models import IntelMention, IntelThreadContext, IntelLexicon
+    s = _sess()
+    seed.ensure_default_directions(s)
+    s.add(IntelLexicon(term="обстрел", meaning="shelling", category="military"))
+    s.commit()
+    lex = ["обстрел"]
+
+    # Parent already collected from the same chat.
+    assert store_realtime_post(
+        s, _post("grp/199", "сообщают про обстрел района вечером сильный"), "ru", "chat", lex
+    ) is True
+    s.commit()
+
+    # New reply to grp/199.
+    reply = _post("grp/200", "подтверждаю обстрел был очень сильный сегодня", author="@b")
+    reply.reply_to_tg_id = "199"
+    assert store_realtime_post(s, reply, "ru", "chat", lex) is True
+    s.commit()
+
+    r = s.query(IntelMention).filter_by(post_id="grp/200").one()
+    assert r.context_fetched is True
+    parent = s.query(IntelMention).filter_by(post_id="grp/199").one()
+    assert r.reply_to_id == parent.id
+    chain = s.query(IntelThreadContext).filter_by(mention_id=r.id, role="parent").all()
+    assert [c.tg_msg_id for c in chain] == ["199"]

@@ -122,10 +122,22 @@ def store_realtime_post(session, post, side, kind, lexicon_terms,
         session.add(mention)
         session.flush()
         sp.commit()
-        return True
     except IntegrityError:
         sp.rollback()
         return False
+
+    # Мгновенное обогащение треда: если родитель уже в БД, собираем цепочку прямо
+    # сейчас (без сети) — кнопка «в ответ на» появляется в ту же секунду, не ждём
+    # тика. Родителя нет локально → context_fetched остаётся False, подтянет
+    # сетевой enrich_context на следующем тике. Ошибки не валят запись поста.
+    if mention.reply_to_tg_id:
+        from .context_pass import _resolve_locally
+        try:
+            _resolve_locally(session, mention)
+        except Exception:
+            log.exception("realtime: local thread resolve failed for %s", mention.post_id)
+            session.rollback()
+    return True
 
 
 # ── Listener ────────────────────────────────────────────────────────────────────

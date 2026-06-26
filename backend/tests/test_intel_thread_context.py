@@ -119,6 +119,59 @@ def test_enrich_context_stores_parent_and_sibling():
     m2 = s.get(IntelMention, m.id)
     assert m2.context_fetched is True
 
+def test_enrich_context_resolves_locally_without_network():
+    """Parent already in DB → chain built from DB, provider.fetch_thread_context NOT called."""
+    from types import SimpleNamespace
+    from datetime import datetime, timedelta, timezone
+    from radar.intel import seed
+    from radar.intel.models import IntelMention, IntelThreadContext, IntelDirection
+    from radar.intel.context_pass import enrich_context
+
+    s = _sess()
+    seed.ensure_default_directions(s)
+    d = s.query(IntelDirection).first()
+    now = datetime.now(timezone.utc)
+
+    # Root post and its direct parent already collected from the same channel.
+    root = IntelMention(
+        direction_id=d.id, platform="telegram", post_id="grp/700",
+        author="@root", text="корневой пост", created_at=now - timedelta(minutes=10),
+        context_fetched=True,
+    )
+    parent = IntelMention(
+        direction_id=d.id, platform="telegram", post_id="grp/701",
+        author="@mid", text="промежуточный", created_at=now - timedelta(minutes=5),
+        reply_to_tg_id="700", context_fetched=True,
+    )
+    s.add_all([root, parent]); s.commit()
+
+    # The new reply whose parent (701) is already local.
+    reply = IntelMention(
+        direction_id=d.id, platform="telegram", post_id="grp/702",
+        author="@x", text="ответ", created_at=now, reply_to_tg_id="701",
+    )
+    s.add(reply); s.commit()
+
+    calls = []
+    fake_provider = SimpleNamespace(
+        fetch_thread_context=lambda *a, **kw: calls.append(1) or {"parents": [], "siblings": []}
+    )
+
+    n = enrich_context(s, fake_provider, batch_size=10)
+    assert n == 1
+    assert calls == [], "local resolution must not hit Telegram"
+
+    m2 = s.get(IntelMention, reply.id)
+    assert m2.context_fetched is True
+    assert m2.reply_to_id == parent.id
+    assert m2.thread_root_id == root.id
+
+    chain = (s.query(IntelThreadContext)
+             .filter_by(mention_id=reply.id, role="parent")
+             .order_by(IntelThreadContext.depth).all())
+    assert [c.tg_msg_id for c in chain] == ["701", "700"]
+
+
 def test_enrich_context_skips_already_fetched():
     from types import SimpleNamespace
     from datetime import datetime, timezone

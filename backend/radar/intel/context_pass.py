@@ -27,6 +27,79 @@ def _parse_handle_and_msg_id(post_id: str) -> tuple[str, str]:
     return handle, msg_id
 
 
+_MAX_LOCAL_DEPTH = 12
+
+
+def _resolve_locally(session: Session, mention: IntelMention) -> bool:
+    """Build the reply chain for `mention` from mentions already in the DB.
+
+    The parent of a reply is usually a post we already collected from the same
+    channel. When that's true we can assemble the whole chain without a single
+    Telegram round-trip: walk up via reply_to_tg_id within the same namespace,
+    materialise IntelThreadContext "parent" rows, and resolve reply_to_id /
+    thread_root_id. Returns True when the immediate parent was found locally
+    (chain fully resolved); False means we must fall back to the network fetch.
+
+    Siblings are intentionally not resolved here — they're secondary and would
+    require a chat scan. The reply chain is what the UI renders prominently.
+    """
+    namespace = mention.post_id.rsplit("/", 1)[0] if "/" in mention.post_id else mention.post_id
+    parent_post_id = f"{namespace}/{mention.reply_to_tg_id}"
+    parent = (
+        session.query(IntelMention)
+        .filter(IntelMention.post_id == parent_post_id)
+        .first()
+    )
+    if parent is None:
+        return False  # parent not local → caller fetches from Telegram
+
+    mention.reply_to_id = parent.id
+
+    chain: list[IntelMention] = []
+    node = parent
+    seen: set[str] = set()
+    depth = 1
+    while node is not None and depth <= _MAX_LOCAL_DEPTH:
+        if node.post_id in seen:  # guard against malformed self/loop references
+            break
+        seen.add(node.post_id)
+        chain.append(node)
+        if not node.reply_to_tg_id:
+            break
+        next_post_id = f"{namespace}/{node.reply_to_tg_id}"
+        node = (
+            session.query(IntelMention)
+            .filter(IntelMention.post_id == next_post_id)
+            .first()
+        )
+        depth += 1
+
+    for d, anc in enumerate(chain, start=1):
+        _, anc_tg_id = _parse_handle_and_msg_id(anc.post_id)
+        ctx = IntelThreadContext(
+            mention_id=mention.id,
+            tg_msg_id=anc_tg_id,
+            role="parent",
+            depth=d,
+            author=anc.author or "",
+            text=anc.text or "",
+            created_at=anc.created_at,
+        )
+        sp = session.begin_nested()
+        try:
+            session.add(ctx)
+            session.flush()
+            sp.commit()
+        except IntegrityError:
+            sp.rollback()
+
+    # The last node whose own parent was NOT found locally is the resolved root.
+    mention.thread_root_id = chain[-1].id
+    mention.context_fetched = True
+    session.commit()
+    return True
+
+
 def enrich_context(session: Session, provider, batch_size: int = 50) -> int:
     """Fetch and store thread context for unprocessed reply mentions.
 
@@ -46,6 +119,15 @@ def enrich_context(session: Session, provider, batch_size: int = 50) -> int:
 
     enriched = 0
     for mention in pending:
+        # Fast path: parent already in our DB → assemble chain locally, no network.
+        try:
+            if _resolve_locally(session, mention):
+                enriched += 1
+                continue
+        except Exception:
+            log.exception("context_pass: local resolve failed for mention %s — falling back", mention.id)
+            session.rollback()
+
         handle, current_tg_id = _parse_handle_and_msg_id(mention.post_id)
         try:
             result = provider.fetch_thread_context(

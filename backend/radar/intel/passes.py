@@ -8,18 +8,34 @@ from . import collector
 log = logging.getLogger("radar.intel.passes")
 MAX_INTEL_SOURCES_PER_RUN = int(os.getenv("MAX_INTEL_SOURCES_PER_RUN", "12"))
 
-def _ensure_joined(probe: IntelProbe, tg_provider, session: Session) -> None:
+def _ensure_joined(probe: IntelProbe, tg_provider, session: Session) -> bool:
     """Join a channel/chat before collecting if not already a member.
 
     For invite links: join_invite() returns the resolved @username or #{id};
     we overwrite probe.query so future ticks use the stable handle instead of
     the invite link (invite links can expire; @usernames don't).
+
+    Returns False if this probe was a duplicate of an already-tracked source
+    (resolved to the same query as another probe) and was therefore deleted —
+    the caller must then skip collecting it.
     """
     q = probe.query or ""
     try:
         if collector._is_invite_link(q):
             resolved = tg_provider.join_invite(q)
             if resolved and resolved != q:
+                # Different invite links can resolve to the SAME chat (#id) or
+                # @handle. If another probe already tracks the resolved target,
+                # this one is a duplicate — drop it instead of creating a dup row.
+                dup = (session.query(IntelProbe)
+                       .filter(IntelProbe.query == resolved, IntelProbe.id != probe.id)
+                       .first())
+                if dup is not None:
+                    log.info("intel probe %s: invite resolves to %s, already tracked by probe %s — deleting duplicate",
+                             probe.id, resolved, dup.id)
+                    session.delete(probe)
+                    session.commit()
+                    return False
                 log.info("intel probe %s: invite resolved to %s — updating query", probe.id, resolved)
                 probe.query = resolved
                 session.commit()
@@ -29,6 +45,7 @@ def _ensure_joined(probe: IntelProbe, tg_provider, session: Session) -> None:
                 tg_provider.join_channel(handle)
     except Exception:
         log.warning("join failed for probe %s (%s) — will still attempt collect", probe.id, q)
+    return True
 
 
 def run_intel_collect(session: Session, tg_provider) -> None:
@@ -42,7 +59,8 @@ def run_intel_collect(session: Session, tg_provider) -> None:
            .limit(MAX_INTEL_SOURCES_PER_RUN).all())
     for probe in due:
         try:
-            _ensure_joined(probe, tg_provider, session)
+            if not _ensure_joined(probe, tg_provider, session):
+                continue  # duplicate probe was deleted — nothing to collect
             collector.collect_probe(session, probe, tg_provider)
             probe.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=probe.interval_sec or 3600)
             session.commit()

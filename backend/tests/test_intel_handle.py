@@ -35,6 +35,46 @@ def test_clean_handle():
     assert _is_invite_link("https://t.me/x") is False
 
 
+# ── _ensure_joined dedups when an invite resolves to an already-tracked source ─
+
+def test_ensure_joined_drops_duplicate_on_resolve():
+    """Two different invite links resolving to the same #id must not create a dup:
+    the second probe is deleted and _ensure_joined returns False (skip collect)."""
+    from radar.intel import passes
+    from radar.intel.models import IntelProbe
+
+    s = _sess()
+    # Probe A already tracks the resolved chat id.
+    a = IntelProbe(platform="telegram", kind="chat", query="#123", side="ru")
+    # Probe B is a fresh invite link that will resolve to the same #123.
+    b = IntelProbe(platform="telegram", kind="chat", query="https://t.me/+DUP", side="ru")
+    s.add_all([a, b]); s.commit()
+    bid = b.id
+
+    prov = SimpleNamespace(join_invite=lambda link: "#123")
+    kept = passes._ensure_joined(b, prov, s)
+
+    assert kept is False, "duplicate probe must signal skip"
+    assert s.get(IntelProbe, bid) is None, "duplicate probe must be deleted"
+    assert s.query(IntelProbe).filter_by(query="#123").count() == 1
+
+
+def test_ensure_joined_rewrites_query_when_unique():
+    """A fresh invite link resolving to a NOT-yet-tracked handle just rewrites query."""
+    from radar.intel import passes
+    from radar.intel.models import IntelProbe
+
+    s = _sess()
+    b = IntelProbe(platform="telegram", kind="channel", query="https://t.me/+NEW", side="ua")
+    s.add(b); s.commit()
+
+    prov = SimpleNamespace(join_invite=lambda link: "@resolved_handle")
+    kept = passes._ensure_joined(b, prov, s)
+
+    assert kept is True
+    assert s.get(IntelProbe, b.id).query == "@resolved_handle"
+
+
 # ── collect_probe passes clean handle to provider.search ─────────────────────
 
 def test_collect_uses_clean_handle():

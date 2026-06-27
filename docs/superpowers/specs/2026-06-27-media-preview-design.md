@@ -19,8 +19,11 @@
 Поэтому фича = скачивание превью по требованию + дисковый кэш + авторизованный
 байт-эндпоинт + hover-поповер во фронте.
 
-`<img src>` не умеет слать заголовок `Authorization`, поэтому media-эндпоинты
-авторизуются токеном в query-параметре (через тот же `decode_token`, что и live-стрим).
+`<img src>` не умеет слать заголовок `Authorization`, поэтому фронт грузит медиа через
+`fetch` с Bearer-заголовком (тот же паттерн, что у live-стрима — `streamLiveEvents`
+использует `fetch`, а не `EventSource`), получает `blob` и подставляет `URL.createObjectURL`
+в `<img src>`. Так эндпоинты сохраняют стандартную авторизацию `current_user` (Header) без
+токена в URL.
 
 ## Решение (ленивое скачивание + дисковый кэш)
 
@@ -64,12 +67,13 @@ def get_or_fetch(provider, post_id, handle, msg_id, kind) -> Path | None
 
 ### 3. Эндпоинты (`backend/radar/intel/api.py`)
 
-- `GET /intel/mention/{id}/media?token=…` — превью своего вложения упоминания.
-- `GET /intel/mention/{id}/parent-media/{tg_msg_id}?token=…` — превью медиа родителя
+- `GET /intel/mention/{id}/media` — превью своего вложения упоминания.
+- `GET /intel/mention/{id}/parent-media/{tg_msg_id}` — превью медиа родителя
   из треда (tg_msg_id — id родительского сообщения в той же группе/канале).
 
 Общая логика обоих:
-- Auth: `token` query-param → `decode_token`; невалиден/нет → 401.
+- Auth: `user: User = Depends(current_user)` (Bearer-заголовок), как у прочих intel-GET;
+  нет/битый → 401.
 - Найти упоминание (404 если нет). Определить `kind` (`mention.media` для своего;
   `IntelThreadContext.media` для родителя по `tg_msg_id`) и `handle`/`msg_id`
   (используется `_handle_for` / namespace упоминания, как в `context_pass`).
@@ -94,18 +98,20 @@ def get_or_fetch(provider, post_id, handle, msg_id, kind) -> Path | None
 ### 5. Фронт: общий hover-поповер
 
 Новый компонент `echo-app/src/features/intel/components/MediaPreview.jsx`:
-- Пропсы: `kind` (`photo|video`), `src` (URL эндпоинта с токеном), `label`.
-- Рендерит иконку (📷/🎬). На `mouseenter` с задержкой ~200мс лениво монтирует плавающий
-  поповер с `<img src>`; спиннер на время загрузки; «превью недоступно» (`onError`).
-  Для видео — постер + бейдж ▶. На `mouseleave` поповер скрывается. Загруженный blob/URL
-  кэшируется в памяти на время сессии (повторный hover мгновенный).
-- Токен берётся из того же хранилища, что использует live-стрим (query-param).
+- Пропсы: `kind` (`photo|video`), `url` (путь эндпоинта), `label`.
+- Рендерит иконку (📷/🎬). На `mouseenter` с задержкой ~200мс лениво грузит медиа через
+  `fetch(url, { headers: { Authorization: 'Bearer ' + getToken() } })` → `blob` →
+  `URL.createObjectURL` → `<img src>` в плавающем поповере; спиннер на время загрузки;
+  «превью недоступно» при ошибке/не-200. Для видео — постер + бейдж ▶. На `mouseleave`
+  поповер скрывается. objectURL кэшируется в памяти на время сессии (повторный hover
+  мгновенный), освобождается при размонтировании.
+- `getToken` импортируется из `../../core/api/client` (как в `api.js`).
 
 Интеграция:
 - `IntelHome.jsx`: заменить статичный `<span>` иконки на `<MediaPreview>` с
-  `src=/intel/mention/{e.id}/media?token=…`.
+  `url=/intel/mention/{e.id}/media`.
 - `ThreadContext.jsx`: для parent-строки с `media` показать `<MediaPreview>` с
-  `src=/intel/mention/{mentionId}/parent-media/{tg_msg_id}?token=…`.
+  `url=/intel/mention/{mentionId}/parent-media/{tg_msg_id}`.
 
 ### 6. Ошибки и лимиты
 

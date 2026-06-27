@@ -63,6 +63,9 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "hidden": "BOOLEAN NOT NULL DEFAULT 0",
         "media":  "TEXT",
     },
+    "intel_thread_context": {
+        "media": "TEXT",
+    },
     "intel_alerts": {
         "window_start": "DATETIME",
         "window_end":   "DATETIME",

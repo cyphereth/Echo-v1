@@ -142,3 +142,4 @@ class IntelThreadContext(Base):
     author:     Mapped[str]      = mapped_column(Text, default="")
     text:       Mapped[str]      = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(nullable=False)
+    media:      Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # тип вложения родителя: photo|video|file

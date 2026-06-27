@@ -577,6 +577,7 @@ class TelegramProvider(SearchProvider):
                 "author": _author(msg),
                 "text": getattr(msg, "message", "") or "",
                 "created_at": msg.date,
+                "media": _media_kind(msg),
             })
             parent_of_parent = getattr(msg, "reply_to_msg_id", None)
             if parent_of_parent:

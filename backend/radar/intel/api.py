@@ -742,6 +742,30 @@ def intel_mention_media(
     return _preview_or_error(_get_tg_provider(), m.post_id, handle, int(msg_id), m.media or "")
 
 
+@router.get("/intel/mention/{mention_id}/parent-media/{tg_msg_id}")
+def intel_parent_media(
+    mention_id: int,
+    tg_msg_id: str,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    """Превью медиа родительского сообщения треда (tg_msg_id) этого упоминания."""
+    m = session.get(IntelMention, mention_id)
+    if m is None:
+        raise HTTPException(404, "mention not found")
+    ctx = (session.query(IntelThreadContext)
+           .filter(IntelThreadContext.mention_id == mention_id,
+                   IntelThreadContext.tg_msg_id == tg_msg_id,
+                   IntelThreadContext.role == "parent")
+           .first())
+    if ctx is None:
+        raise HTTPException(404, "parent not in thread")
+    handle = _handle_for(m)
+    from .context_pass import _parent_post_id
+    parent_post_id = _parent_post_id(m, tg_msg_id)
+    return _preview_or_error(_get_tg_provider(), parent_post_id, handle, int(tg_msg_id), ctx.media or "")
+
+
 @router.get("/intel/mention/{mention_id}/context")
 def intel_mention_context(
     mention_id: int,
@@ -760,6 +784,7 @@ def intel_mention_context(
     reply_chain = sorted(
         [{"tg_msg_id": r.tg_msg_id, "depth": r.depth,
           "author": r.author, "text": r.text,
+          "media": r.media,
           "created_at": aggregate._aware(r.created_at).isoformat()}
          for r in rows if r.role == "parent"],
         key=lambda x: x["depth"],

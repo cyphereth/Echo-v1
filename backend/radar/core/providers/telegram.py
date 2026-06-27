@@ -87,6 +87,26 @@ def _parse_tg_message(msg, author_handle: str, followers: int) -> Post:
     )
 
 
+def chat_namespace(username, chat_id) -> str:
+    """Канонический namespace составного post_id чата — единый для поллера и realtime.
+
+    Есть @username → он (без '@', lower). Иначе → unmarked peer_id строкой:
+    Telethon отдаёт chat_id супергрупп/каналов в marked-форме ('-100<id>'),
+    а резолв invite даёт '#<id>' (unmarked) — приводим оба к unmarked, чтобы одно
+    сообщение давало один post_id обоими путями. Нечисловой ввод без username
+    возвращаем как есть (не падаем)."""
+    if username:
+        return str(username).lstrip("@").lower()
+    raw = str(chat_id if chat_id is not None else "").strip().lstrip("#")
+    try:
+        from telethon.utils import resolve_id
+        marked = int(raw)
+        real_id, _ = resolve_id(marked)
+        return str(real_id)
+    except (ValueError, TypeError):
+        return raw
+
+
 def _parse_tg_chat_message(msg, namespace: str, fallback_author: str) -> Post:
     """Map a message from inside a group chat to a Post. Unlike a channel post, the
     author is the individual member who wrote it; post_id is namespaced (by the chat's

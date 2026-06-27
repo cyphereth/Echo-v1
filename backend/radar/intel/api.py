@@ -29,7 +29,7 @@ from . import aggregate
 from . import credibility
 from . import media_cache
 from .spam_filter import _norm, is_exact_spam
-from .context_pass import _handle_for, _parse_handle_and_msg_id
+from .context_pass import _handle_for, _parse_handle_and_msg_id, _parent_post_id
 from ..brand.api import _get_tg_provider
 
 _VALID_SIDES = {"ru", "ua", "by", "mx", "ge", "md", "pmr"}
@@ -761,7 +761,6 @@ def intel_parent_media(
     if ctx is None:
         raise HTTPException(404, "parent not in thread")
     handle = _handle_for(m)
-    from .context_pass import _parent_post_id
     parent_post_id = _parent_post_id(m, tg_msg_id)
     return _preview_or_error(_get_tg_provider(), parent_post_id, handle, int(tg_msg_id), ctx.media or "")
 

@@ -16,7 +16,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -27,7 +27,10 @@ from .models import IntelDirection, IntelMention, IntelStory, IntelProbe, IntelA
 from ..models import _now
 from . import aggregate
 from . import credibility
+from . import media_cache
 from .spam_filter import _norm, is_exact_spam
+from .context_pass import _handle_for, _parse_handle_and_msg_id
+from ..brand.api import _get_tg_provider
 
 _VALID_SIDES = {"ru", "ua", "by", "mx", "ge", "md", "pmr"}
 _VALID_KINDS = {"channel", "chat"}
@@ -703,6 +706,40 @@ def intel_mention_hide(
     _hide_mention(session, m)
     session.commit()
     return {"id": m.id, "hidden": True}
+
+
+def _preview_or_error(provider, post_id: str, handle: str, msg_id: int, kind: str):
+    """Общая обвязка кэша+провайдера для media-эндпоинтов. Возвращает FileResponse или
+    HTTPException-совместимый ответ через raise."""
+    from ..core.providers.telegram import TelegramFloodWait
+    if kind not in ("photo", "video"):
+        raise HTTPException(404, "no previewable media")
+    if provider is None:
+        raise HTTPException(503, "provider unavailable")
+    try:
+        res = media_cache.get_or_fetch(provider, post_id, handle, msg_id, kind)
+    except TelegramFloodWait:
+        raise HTTPException(503, "rate-limited, try later")
+    if res is None:
+        raise HTTPException(404, "preview unavailable")
+    path, mime = res
+    return FileResponse(str(path), media_type=mime,
+                        headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.get("/intel/mention/{mention_id}/media")
+def intel_mention_media(
+    mention_id: int,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    """Превью фото/постер видео, прикреплённого к самому упоминанию."""
+    m = session.get(IntelMention, mention_id)
+    if m is None:
+        raise HTTPException(404, "mention not found")
+    handle = _handle_for(m)
+    _, msg_id = _parse_handle_and_msg_id(m.post_id)
+    return _preview_or_error(_get_tg_provider(), m.post_id, handle, int(msg_id), m.media or "")
 
 
 @router.get("/intel/mention/{mention_id}/context")

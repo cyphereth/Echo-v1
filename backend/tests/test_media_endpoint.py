@@ -19,10 +19,13 @@ def _client(tmp_path, monkeypatch):
 
 def _add_mention(media):
     from radar.core.db import get_session
-    from radar.intel.models import IntelMention
+    from radar.intel.models import IntelMention, IntelDirection
     s = get_session()
-    m = IntelMention(platform="telegram", post_id="chan/42", author="@chan", side="ru",
-                     text="t", created_at=datetime.now(timezone.utc), media=media)
+    d = s.query(IntelDirection).first()
+    if d is None:
+        d = IntelDirection(key="kursk", name="Курское"); s.add(d); s.flush()
+    m = IntelMention(direction_id=d.id, platform="telegram", post_id="chan/42", author="@chan",
+                     side="ru", text="t", created_at=datetime.now(timezone.utc), media=media)
     s.add(m); s.commit(); mid = m.id; s.close()
     return mid
 

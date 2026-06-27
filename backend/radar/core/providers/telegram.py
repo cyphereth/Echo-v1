@@ -503,7 +503,8 @@ class TelegramProvider(SearchProvider):
         except (ChannelPrivateError, UsernameNotOccupiedError, ValueError) as e:
             log.warning("Telegram chat unavailable (%s): %s", h, type(e).__name__)
             return []
-        return [_parse_tg_chat_message(m, h, h) for m in msgs if getattr(m, "id", None)]
+        ns = chat_namespace(getattr(entity, "username", None), getattr(entity, "id", None))
+        return [_parse_tg_chat_message(m, ns, h) for m in msgs if getattr(m, "id", None)]
 
     def fetch_thread_context(self, handle: str, reply_to_tg_id: Optional[str],
                              current_tg_id: str, depth_limit: int = 5,

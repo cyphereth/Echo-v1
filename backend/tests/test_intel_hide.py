@@ -73,6 +73,46 @@ def test_hidden_mention_excluded_from_story_detail():
     assert "спам" not in texts, "hidden mention must not appear in story detail"
 
 
+# window signala ogranichivaet story_detail svezhimi postami
+
+def test_story_detail_window_bounds_events_and_sources():
+    """Opened from a signal, story_detail must show only posts inside the burst
+    window."""
+    from datetime import timedelta
+    from radar.intel import seed, aggregate
+    from radar.intel.models import (IntelMention, IntelIncident, IntelStory,
+                                     IntelDirection)
+    s = _sess()
+    seed.ensure_default_directions(s)
+    d = s.query(IntelDirection).first()
+    now = datetime(2026, 6, 20, 15, 0)
+    old = now - timedelta(days=1)
+    story = IntelStory(direction_id=d.id, title="t", first_seen_at=old,
+                       last_seen_at=now, post_count=2)
+    s.add(story); s.flush()
+    inc = IntelIncident(direction_id=d.id, story_id=story.id,
+                        first_seen_at=old, last_seen_at=now)
+    s.add(inc); s.flush()
+    fresh = IntelMention(direction_id=d.id, platform="telegram", post_id="fresh",
+                         author="@fresh", side="ru", text="fresh", created_at=now,
+                         incident_id=inc.id)
+    stale = IntelMention(direction_id=d.id, platform="telegram", post_id="stale",
+                         author="@stale", side="ru", text="stale", created_at=old,
+                         incident_id=inc.id)
+    s.add_all([fresh, stale]); s.commit()
+    since = now - timedelta(hours=1)
+    detail = aggregate.story_detail(s, story, since=since, until=now)
+    texts = [e["text"] for e in detail["events"]]
+    assert "fresh" in texts
+    assert "stale" not in texts
+    src_names = {x["name"] for x in detail["sources"]}
+    assert "@fresh" in src_names and "@stale" not in src_names
+    assert detail["window"] is not None
+    full = aggregate.story_detail(s, story)
+    assert {"fresh", "stale"} <= {e["text"] for e in full["events"]}
+    assert full["window"] is None
+
+
 # ── realtime дропает дословный дубль примера-спама ──────────────────────────
 
 def test_store_realtime_drops_exact_spam_example():

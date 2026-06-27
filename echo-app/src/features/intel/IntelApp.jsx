@@ -38,6 +38,9 @@ export function IntelApp({ onExit }) {
   const [timeRange, setTimeRange] = useState({ window: '24h' });
   const [openStoryId, setOpenStoryId] = useState(null);
   const [openDirection, setOpenDirection] = useState(null);
+  // Burst window carried by a signal: when set, the story detail is bounded to it
+  // ("новости под этот сигнал"). null on manual navigation = full history.
+  const [openWindow, setOpenWindow] = useState(null);
   const [navToken, setNavToken] = useState(0);
   const [search, setSearch]   = useState('');
   const [searchResults, setSearchResults] = useState(null);
@@ -99,10 +102,13 @@ export function IntelApp({ onExit }) {
   // а не просто на вкладку «Сюжеты». navToken гарантирует переход даже если экран
   // уже открыт. Раньше onOpen только переключал screen — клик «не туда».
   const openAlert = (a) => {
+    // A signal carries its burst window — open the story bounded to it so the user
+    // sees the news under this signal, not the whole (day-old) history.
+    const win = a.window_start ? { since: a.window_start, until: a.window_end } : null;
     if (a.scope === 'story' && a.story_id != null) {
-      setOpenStoryId(a.story_id); setOpenDirection(null);
+      setOpenStoryId(a.story_id); setOpenDirection(null); setOpenWindow(win);
     } else if (a.direction) {
-      setOpenDirection(a.direction); setOpenStoryId(null);
+      setOpenDirection(a.direction); setOpenStoryId(null); setOpenWindow(null);
     } else {
       setScreen(a.scope === 'story' ? 'stories' : 'board');
       return;
@@ -122,7 +128,7 @@ export function IntelApp({ onExit }) {
         </div>
         <nav className={styles.nav}>
           {SCREENS.map(s => (
-            <NavItem key={s.key} item={s} active={screen === s.key} onClick={() => { setScreen(s.key); setSearchResults(null); setOpenStoryId(null); setOpenDirection(null); }} />
+            <NavItem key={s.key} item={s} active={screen === s.key} onClick={() => { setScreen(s.key); setSearchResults(null); setOpenStoryId(null); setOpenDirection(null); setOpenWindow(null); }} />
           ))}
         </nav>
         <div className={styles.sidebarBottom}>
@@ -167,11 +173,11 @@ export function IntelApp({ onExit }) {
             <SearchResults results={searchResults} query={search} onOpenStory={() => { setScreen('stories'); setSearchResults(null); }} />
           </div>
         ) : screen === 'home' ? (
-          <IntelHome timeRange={timeRange} liveEvents={liveEvents} onOpenStory={(id) => { setOpenStoryId(id ?? null); setOpenDirection(null); setNavToken(t => t + 1); setScreen('stories'); }} />
+          <IntelHome timeRange={timeRange} liveEvents={liveEvents} onOpenStory={(id) => { setOpenStoryId(id ?? null); setOpenDirection(null); setOpenWindow(null); setNavToken(t => t + 1); setScreen('stories'); }} />
         ) : screen === 'stories' ? (
-          <IntelStories timeRange={timeRange} openStoryId={openStoryId} openDirection={openDirection} navToken={navToken} />
+          <IntelStories timeRange={timeRange} openStoryId={openStoryId} openDirection={openDirection} openWindow={openWindow} navToken={navToken} />
         ) : screen === 'board' ? (
-          <IntelBoard timeRange={timeRange} onOpenDir={(dirKey) => { setOpenDirection(dirKey ?? null); setOpenStoryId(null); setNavToken(t => t + 1); setScreen('stories'); }} />
+          <IntelBoard timeRange={timeRange} onOpenDir={(dirKey) => { setOpenDirection(dirKey ?? null); setOpenStoryId(null); setOpenWindow(null); setNavToken(t => t + 1); setScreen('stories'); }} />
         ) : screen === 'sources' ? (
           <IntelSources />
         ) : (

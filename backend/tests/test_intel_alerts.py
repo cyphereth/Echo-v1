@@ -103,6 +103,24 @@ def test_scan_story_alerts_emits_for_anomalous_story():
     assert s.query(IntelAlert).count() == 1
 
 
+def test_scan_story_alerts_persists_burst_window():
+    """The emitted alert records the latest timeline bucket as window_start so the
+    UI can bound the story detail to the news under this signal."""
+    from radar.intel import alerts
+    from radar.intel.models import IntelAlert
+    s = _mem()
+    d = _direction(s)
+    _anomalous_story(s, d.id)
+    alerts.scan_story_alerts(s)
+    s.commit()
+    row = s.query(IntelAlert).one()
+    # latest bucket = base + 3h (see _anomalous_story); stored naive on the alert
+    assert row.window_start is not None
+    assert row.window_start.replace(tzinfo=None) == datetime(2026, 6, 20, 3, 0)
+    assert row.window_end is not None
+    assert row.window_end >= row.window_start.replace(tzinfo=None)
+
+
 def test_scan_story_alerts_skips_non_anomalous():
     from radar.intel import alerts
     from radar.intel.models import IntelStory
@@ -132,8 +150,10 @@ def test_detect_direction_burst_fires_on_latest_hour_spike():
     for i in range(9):
         _mention(s, d.id, base + timedelta(hours=3, minutes=i), f"s{n}"); n += 1
     s.flush()
-    mag = alerts.detect_direction_burst(s, d.id)
+    mag, window_start = alerts.detect_direction_burst(s, d.id)
     assert mag is not None and mag > 0
+    # window_start = the latest hour bucket that drove the burst
+    assert window_start == datetime(2026, 6, 20, 3, 0)
 
 
 def test_detect_direction_burst_none_without_baseline():
@@ -143,7 +163,7 @@ def test_detect_direction_burst_none_without_baseline():
     base = datetime(2026, 6, 20, 0, 0, tzinfo=timezone.utc)
     _mention(s, d.id, base, "a"); _mention(s, d.id, base + timedelta(hours=1), "b")
     s.flush()
-    assert alerts.detect_direction_burst(s, d.id) is None
+    assert alerts.detect_direction_burst(s, d.id) == (None, None)
 
 
 def test_scan_direction_alerts_emits_and_dedups():

@@ -18,7 +18,18 @@ export const intelApi = {
   },
   stream:    (params)         => INTEL_USE_MOCK ? mockApi.stream(params || {}) : passthrough('stream', params),
   stories:   (params)         => INTEL_USE_MOCK ? mockApi.stories(params || {}) : passthrough('stories', params),
-  story:     (id)             => INTEL_USE_MOCK ? mockApi.story(id) : request(`/intel/stories/${id}`),
+  // window (optional): { since, until } ISO bounds — used when a story is opened
+  // from a signal so the detail shows only posts inside the burst window.
+  story:     (id, window)     => {
+    if (INTEL_USE_MOCK) return mockApi.story(id);
+    const qs = window && (window.since || window.until)
+      ? '?' + new URLSearchParams(
+          Object.fromEntries(Object.entries({ since: window.since, until: window.until })
+            .filter(([, v]) => v != null && v !== ''))
+        ).toString()
+      : '';
+    return request(`/intel/stories/${id}${qs}`);
+  },
   deleteStory: (id)           => request(`/intel/stories/${id}`, { method: 'DELETE' }),
   directions:(window = '24h') => INTEL_USE_MOCK ? mockApi.directions() : passthrough('directions', { window }),
   direction: (key, window)    => INTEL_USE_MOCK ? mockApi.direction(key) : request(`/intel/directions/${key}?window=${window || '24h'}`),

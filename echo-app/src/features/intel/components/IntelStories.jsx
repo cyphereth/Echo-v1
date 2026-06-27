@@ -15,18 +15,21 @@ const C = { bar: '#2BB3C7', line: '#34D8A0', grid: 'rgba(43,179,199,.10)', fg3: 
 const tooltipStyle = { background: '#0A0F16', border: '1px solid rgba(43,179,199,.20)', borderRadius: '6px', color: '#D8E4F0', fontSize: '11px' };
 const DIRECTION_OPTS = Object.keys(DIRECTION_NAMES);
 
-export function IntelStories({ timeRange, openStoryId, openDirection, navToken }) {
+export function IntelStories({ timeRange, openStoryId, openDirection, openWindow, navToken }) {
   const [list, setList]         = useState([]);
   const [selectedId, setSel]    = useState(null);
   const [detail, setDetail]     = useState(null);
   const [filters, setFilters]   = useState({ direction: openDirection || '', side: '', verified: false });
   const [sort, setSort]         = useState('activity');
+  // Burst window from the signal that opened this story. Bounds the detail to
+  // "news under this signal"; cleared when the user picks a story manually.
+  const [activeWindow, setActiveWindow] = useState(null);
 
   // When navigated here with a specific story, select it immediately. navToken in the
   // deps so re-clicking the SAME signal/story re-selects it even if openStoryId is unchanged.
   useEffect(() => {
-    if (openStoryId != null) setSel(openStoryId);
-  }, [openStoryId, navToken]);
+    if (openStoryId != null) { setSel(openStoryId); setActiveWindow(openWindow || null); }
+  }, [openStoryId, openWindow, navToken]);
 
   // When navigated here from board with a direction, apply it as a filter.
   // navToken changes on every navigation so this fires even if direction is the same.
@@ -54,8 +57,8 @@ export function IntelStories({ timeRange, openStoryId, openDirection, navToken }
 
   useEffect(() => {
     if (!selectedId) { setDetail(null); return; }
-    intelApi.story(selectedId).then(setDetail).catch(() => setDetail(null));
-  }, [selectedId]);
+    intelApi.story(selectedId, activeWindow).then(setDetail).catch(() => setDetail(null));
+  }, [selectedId, activeWindow]);
 
   function deleteStory(id, ev) {
     ev.stopPropagation();
@@ -111,7 +114,7 @@ export function IntelStories({ timeRange, openStoryId, openDirection, navToken }
           const cr = CREDIBILITY[s.credibility] || CREDIBILITY.unrated;
           return (
             <div key={s.id} className={styles.storyCard} data-active={selectedId === s.id ? '1' : '0'}
-              onClick={() => setSel(s.id)}>
+              onClick={() => { setSel(s.id); setActiveWindow(null); }}>
               <button
                 onClick={(ev) => deleteStory(s.id, ev)}
                 title="Удалить сюжет (спам/мусор)"
@@ -136,7 +139,7 @@ export function IntelStories({ timeRange, openStoryId, openDirection, navToken }
       <div className={styles.storyDetail}>
         {!detail ? (
           <div className={styles.empty}>Выберите сюжет слева</div>
-        ) : <StoryDetail detail={detail} />}
+        ) : <StoryDetail detail={detail} onClearWindow={() => setActiveWindow(null)} />}
       </div>
     </div>
   );
@@ -163,9 +166,16 @@ function CollapsibleSection({ title, icon, count, children, defaultOpen = true }
   );
 }
 
-function StoryDetail({ detail }) {
+function _hm(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+function StoryDetail({ detail, onClearWindow }) {
   const cr = CREDIBILITY[detail.credibility] || CREDIBILITY.unrated;
   const sp = spikeLevel(detail.spike_pct);
+  const win = detail.window;
   const chartData = (detail.points || []).map(p => ({
     t: agoStrShort(p.bucket_start),
     mentions: p.mention_count,
@@ -174,6 +184,19 @@ function StoryDetail({ detail }) {
 
   return (
     <>
+      {win && (
+        <div className={styles.detailSummary}
+             style={{ display: 'flex', alignItems: 'center', gap: 10, borderLeftColor: '#34D8A0' }}>
+          <span style={{ flex: 1 }}>
+            Показаны события всплеска: <strong>{_hm(win.since)}–{_hm(win.until)}</strong>
+          </span>
+          <button onClick={onClearWindow}
+                  style={{ background: 'none', border: '1px solid rgba(43,179,199,.30)', color: '#2BB3C7',
+                           borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontSize: 11, whiteSpace: 'nowrap' }}>
+            Показать всё
+          </button>
+        </div>
+      )}
       <div className={styles.detailTitle}>{detail.title}</div>
       <div className={styles.detailBadges}>
         <span className={styles.badge} style={{ color: sp.color, background: sp.color + '22' }}>

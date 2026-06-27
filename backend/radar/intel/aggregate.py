@@ -109,14 +109,23 @@ def event(m) -> dict:
             "reply_to_tg_id": getattr(m, "reply_to_tg_id", None),
             "media": getattr(m, "media", None)}
 
-def story_detail(session, story) -> dict:
+def story_detail(session, story, since=None, until=None) -> dict:
+    """Story detail. When since/until (naive UTC) are given — e.g. opened from a
+    signal carrying its burst window — sources and events are bounded to that
+    window so the user sees "the news under this signal", not the whole history.
+    The timeline points/sparkline stay full to keep the burst in context."""
     base = story_summary(session, story)
     pts = _points(session, story.id)
     src = {}
-    rows = (session.query(IntelMention)
-            .join(IntelIncident, IntelMention.incident_id == IntelIncident.id)
-            .filter(IntelIncident.story_id == story.id,
-                    IntelMention.hidden == False).all())  # noqa: E712
+    q = (session.query(IntelMention)
+         .join(IntelIncident, IntelMention.incident_id == IntelIncident.id)
+         .filter(IntelIncident.story_id == story.id,
+                 IntelMention.hidden == False))  # noqa: E712
+    if since is not None:
+        q = q.filter(IntelMention.created_at >= since)
+    if until is not None:
+        q = q.filter(IntelMention.created_at <= until)
+    rows = q.all()
     for m in rows:
         key = m.author or "—"
         e = src.setdefault(key, {"name": key, "side": m.side, "count": 0, "last_at": None, "url": tg_url(m)})
@@ -130,6 +139,9 @@ def story_detail(session, story) -> dict:
                     "mention_count": p.mention_count, "source_count": p.source_count} for p in pts],
         "sources": list(src.values()),
         "events": [event(m) for m in sorted(rows, key=lambda m: m.created_at, reverse=True)[:50]],
+        "window": ({"since": _aware(since).isoformat() if since else None,
+                    "until": _aware(until).isoformat() if until else None}
+                   if (since is not None or until is not None) else None),
     })
     return base
 
@@ -258,4 +270,6 @@ def alert_payload(session, a) -> dict:
             "direction": d.key if d else None, "kind": a.kind,
             "magnitude": a.magnitude, "title": a.title, "message": a.message,
             "at": _aware(a.fired_at).isoformat() if a.fired_at else None,
+            "window_start": _aware(a.window_start).isoformat() if getattr(a, "window_start", None) else None,
+            "window_end": _aware(a.window_end).isoformat() if getattr(a, "window_end", None) else None,
             "acknowledged": a.acknowledged_at is not None}

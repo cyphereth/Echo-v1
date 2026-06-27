@@ -112,6 +112,11 @@ class IntelAlert(Base):
     message:         Mapped[str]      = mapped_column(Text, default="")
     fired_at:        Mapped[datetime] = mapped_column(default=_now)
     acknowledged_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    # Burst window that triggered the alert (naive UTC). Lets the UI bound the
+    # story detail to "news under this signal" instead of the whole history.
+    # Nullable: alerts fired before this column shipped fall back to full history.
+    window_start:    Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    window_end:      Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
 
 class IntelSpam(Base):

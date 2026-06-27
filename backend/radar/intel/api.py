@@ -304,16 +304,33 @@ def intel_stories(
     return [aggregate.story_summary(session, st) for st in rows]
 
 
+def _parse_naive(dt: str | None):
+    """Parse an ISO datetime query param into naive UTC (matching how mentions are
+    stored), or None if absent/unparseable."""
+    if not dt:
+        return None
+    try:
+        d = datetime.fromisoformat(dt)
+    except ValueError:
+        return None
+    if d.tzinfo is not None:
+        d = d.astimezone(timezone.utc).replace(tzinfo=None)
+    return d
+
+
 @router.get("/intel/stories/{story_id}")
 def intel_story_detail(
     story_id: int,
+    since: str | None = None,
+    until: str | None = None,
     user: User = Depends(current_user),
     session: Session = Depends(db),
 ):
     story = session.get(IntelStory, story_id)
     if not story:
         raise HTTPException(404, "Story not found")
-    return aggregate.story_detail(session, story)
+    return aggregate.story_detail(session, story,
+                                  since=_parse_naive(since), until=_parse_naive(until))
 
 
 @router.post("/intel/stories/{story_id}/assess")

@@ -31,14 +31,22 @@ def _recent_exists(session, scope, kind, *, direction_id=None, story_id=None) ->
 
 
 def _emit(session, scope, kind, *, title, message, magnitude,
-          direction_id=None, story_id=None):
+          direction_id=None, story_id=None, window_start=None):
     """Insert an alert unless one of the same (scope, ref, kind) fired within the
-    cooldown. Returns the new IntelAlert or None when suppressed."""
+    cooldown. Returns the new IntelAlert or None when suppressed.
+
+    window_start (naive UTC) is the start of the burst bucket that triggered the
+    alert; window_end is pinned to fired_at. The UI uses [window_start, window_end]
+    to bound the story detail to "the news under this signal". When window_start is
+    None the alert has no window and the detail falls back to full history."""
     if _recent_exists(session, scope, kind, direction_id=direction_id, story_id=story_id):
         return None
+    fired_at = _now()
+    window_end = fired_at.replace(tzinfo=None) if window_start is not None else None
     alert = IntelAlert(scope=scope, kind=kind, title=title or "", message=message or "",
                        magnitude=float(magnitude or 0.0),
-                       direction_id=direction_id, story_id=story_id, fired_at=_now())
+                       direction_id=direction_id, story_id=story_id, fired_at=fired_at,
+                       window_start=window_start, window_end=window_end)
     session.add(alert)
     session.flush()
     return alert
@@ -72,16 +80,21 @@ def scan_story_alerts(session) -> list:
     for st in stories:
         pts = aggregate._points(session, st.id)
         kind, magnitude = _classify_story(pts)
+        # Burst window = the latest timeline bucket (anomaly is detected on points[-1]).
+        spts = sorted(pts, key=lambda p: p.bucket_start)
+        window_start = spts[-1].bucket_start if spts else None
         alert = _emit(session, "story", kind,
                       title=st.title or "",
                       message=_story_message(kind, magnitude, st.title or ""),
-                      magnitude=magnitude, direction_id=st.direction_id, story_id=st.id)
+                      magnitude=magnitude, direction_id=st.direction_id, story_id=st.id,
+                      window_start=window_start)
         if alert is not None:
             out.append(alert)
     return out
 
 
-def _direction_hourly_counts(session, direction_id) -> list:
+def _direction_hourly_buckets(session, direction_id) -> dict:
+    """Map of {hour bucket (naive UTC) -> mention count} for a direction."""
     rows = (session.query(IntelMention.created_at)
             .filter(IntelMention.direction_id == direction_id).all())
     buckets: dict = {}
@@ -89,23 +102,27 @@ def _direction_hourly_counts(session, direction_id) -> list:
         if created_at is None:
             continue
         ts = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
-        key = ts.replace(minute=0, second=0, microsecond=0)
+        key = ts.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0, tzinfo=None)
         buckets[key] = buckets.get(key, 0) + 1
-    return [buckets[k] for k in sorted(buckets)]
+    return buckets
 
 
 def detect_direction_burst(session, direction_id):
-    """Spike pct if the latest hour bursts vs the mean of prior hours, else None."""
-    series = _direction_hourly_counts(session, direction_id)
+    """(spike_pct, window_start) if the latest hour bursts vs the mean of prior
+    hours, else (None, None). window_start is the latest bucket (naive UTC)."""
+    buckets = _direction_hourly_buckets(session, direction_id)
+    keys = sorted(buckets)
+    series = [buckets[k] for k in keys]
     if len(series) <= MIN_BUCKETS:
-        return None
+        return None, None
     base = series[:-1]
     last = series[-1]
     base_mean = sum(base) / max(1, len(base))
     spike = last >= MIN_VOLUME and (last >= base_mean * VOLUME_FACTOR if base_mean > 0 else True)
     if not spike:
-        return None
-    return round((last - base_mean) / base_mean * 100, 1) if base_mean > 0 else 100.0
+        return None, None
+    magnitude = round((last - base_mean) / base_mean * 100, 1) if base_mean > 0 else 100.0
+    return magnitude, keys[-1]
 
 
 def scan_direction_alerts(session) -> list:
@@ -113,13 +130,13 @@ def scan_direction_alerts(session) -> list:
     for d in session.query(IntelDirection).all():
         if d.key == "unassigned":
             continue
-        magnitude = detect_direction_burst(session, d.id)
+        magnitude, window_start = detect_direction_burst(session, d.id)
         if magnitude is None:
             continue
         alert = _emit(session, "direction", "direction_burst",
                       title=d.name or d.key,
                       message=f"Всплеск активности +{int(magnitude)}% по направлению {d.name or d.key}",
-                      magnitude=magnitude, direction_id=d.id)
+                      magnitude=magnitude, direction_id=d.id, window_start=window_start)
         if alert is not None:
             out.append(alert)
     return out

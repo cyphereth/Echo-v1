@@ -632,4 +632,5 @@ class TelegramProvider(SearchProvider):
         except Exception as e:
             log.warning("Telegram linked-chat search failed (%s): %s", h, type(e).__name__)
             return []
-        return [_parse_tg_chat_message(m, lid, h) for m in msgs if getattr(m, "id", None)]
+        ns = chat_namespace(getattr(linked, "username", None), getattr(linked, "id", lid))
+        return [_parse_tg_chat_message(m, ns, h) for m in msgs if getattr(m, "id", None)]

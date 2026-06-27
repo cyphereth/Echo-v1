@@ -16,7 +16,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -27,7 +27,10 @@ from .models import IntelDirection, IntelMention, IntelStory, IntelProbe, IntelA
 from ..models import _now
 from . import aggregate
 from . import credibility
+from . import media_cache
 from .spam_filter import _norm, is_exact_spam
+from .context_pass import _handle_for, _parse_handle_and_msg_id, _parent_post_id
+from ..brand.api import _get_tg_provider
 
 _VALID_SIDES = {"ru", "ua", "by", "mx", "ge", "md", "pmr"}
 _VALID_KINDS = {"channel", "chat"}
@@ -705,6 +708,63 @@ def intel_mention_hide(
     return {"id": m.id, "hidden": True}
 
 
+def _preview_or_error(provider, post_id: str, handle: str, msg_id: int, kind: str):
+    """Общая обвязка кэша+провайдера для media-эндпоинтов. Возвращает FileResponse или
+    HTTPException-совместимый ответ через raise."""
+    from ..core.providers.telegram import TelegramFloodWait
+    if kind not in ("photo", "video"):
+        raise HTTPException(404, "no previewable media")
+    if provider is None:
+        raise HTTPException(503, "provider unavailable")
+    try:
+        res = media_cache.get_or_fetch(provider, post_id, handle, msg_id, kind)
+    except TelegramFloodWait:
+        raise HTTPException(503, "rate-limited, try later")
+    if res is None:
+        raise HTTPException(404, "preview unavailable")
+    path, mime = res
+    return FileResponse(str(path), media_type=mime,
+                        headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.get("/intel/mention/{mention_id}/media")
+def intel_mention_media(
+    mention_id: int,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    """Превью фото/постер видео, прикреплённого к самому упоминанию."""
+    m = session.get(IntelMention, mention_id)
+    if m is None:
+        raise HTTPException(404, "mention not found")
+    handle = _handle_for(m)
+    _, msg_id = _parse_handle_and_msg_id(m.post_id)
+    return _preview_or_error(_get_tg_provider(), m.post_id, handle, int(msg_id), m.media or "")
+
+
+@router.get("/intel/mention/{mention_id}/parent-media/{tg_msg_id}")
+def intel_parent_media(
+    mention_id: int,
+    tg_msg_id: str,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    """Превью медиа родительского сообщения треда (tg_msg_id) этого упоминания."""
+    m = session.get(IntelMention, mention_id)
+    if m is None:
+        raise HTTPException(404, "mention not found")
+    ctx = (session.query(IntelThreadContext)
+           .filter(IntelThreadContext.mention_id == mention_id,
+                   IntelThreadContext.tg_msg_id == tg_msg_id,
+                   IntelThreadContext.role == "parent")
+           .first())
+    if ctx is None:
+        raise HTTPException(404, "parent not in thread")
+    handle = _handle_for(m)
+    parent_post_id = _parent_post_id(m, tg_msg_id)
+    return _preview_or_error(_get_tg_provider(), parent_post_id, handle, int(tg_msg_id), ctx.media or "")
+
+
 @router.get("/intel/mention/{mention_id}/context")
 def intel_mention_context(
     mention_id: int,
@@ -723,6 +783,7 @@ def intel_mention_context(
     reply_chain = sorted(
         [{"tg_msg_id": r.tg_msg_id, "depth": r.depth,
           "author": r.author, "text": r.text,
+          "media": r.media,
           "created_at": aggregate._aware(r.created_at).isoformat()}
          for r in rows if r.role == "parent"],
         key=lambda x: x["depth"],

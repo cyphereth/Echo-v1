@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../../core/components/icons';
 import { IntelSparkline } from './IntelSparkline';
 import { ThreadContext } from './ThreadContext';
+import MediaPreview from './MediaPreview';
 import { intelApi, CREDIBILITY, DIRECTION_NAMES, spikeLevel, agoStrShort, SIDE } from '../api';
 import styles from '../intel.module.css';
 
@@ -261,11 +262,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
                 <div className={styles.eventBody}>
                   <div className={styles.eventText}>
                     {e.media && (
-                      <span title={e.media === 'video' ? 'Прикреплено видео'
-                                  : e.media === 'photo' ? 'Прикреплено фото' : 'Прикреплён файл'}
-                            style={{ marginRight: 4 }}>
-                        {e.media === 'video' ? '🎬' : e.media === 'photo' ? '📷' : '📎'}
-                      </span>
+                      <MediaPreview kind={e.media} url={`/intel/mention/${e.id}/media`} label={e.text} />
                     )}
                     {snippet(e.text)}
                   </div>

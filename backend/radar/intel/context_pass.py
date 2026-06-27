@@ -110,6 +110,7 @@ def _resolve_locally(session: Session, mention: IntelMention) -> bool:
             author=anc.author or "",
             text=anc.text or "",
             created_at=anc.created_at,
+            media=anc.media,
         )
         sp = session.begin_nested()
         try:
@@ -194,6 +195,7 @@ def enrich_context(session: Session, provider, batch_size: int = 50) -> int:
                 author=p.get("author", ""),
                 text=p.get("text", ""),
                 created_at=p["created_at"],
+                media=p.get("media"),
             )
             sp = session.begin_nested()
             try:

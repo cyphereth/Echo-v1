@@ -5,7 +5,8 @@ import { useEffect, useState } from 'react';
 import { intelApi, CREDIBILITY, spikeLevel, activityLevel, agoStrShort } from '../api';
 import styles from '../intel.module.css';
 
-export function IntelBoard({ window: win, onOpenDir }) {
+export function IntelBoard({ timeRange, onOpenDir }) {
+  const win = timeRange?.window || '24h';
   const [dirs, setDirs]     = useState([]);
   const [loading, setLoading] = useState(true);
 

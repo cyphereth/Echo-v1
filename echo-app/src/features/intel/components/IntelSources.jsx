@@ -19,13 +19,15 @@ function SideBadge({ side }) {
   );
 }
 
-function KindBadge({ kind }) {
+function KindBadge({ kind, onToggle, busy }) {
   return (
     <span
       className={styles.srcBadge}
-      style={{ color: '#8DA3B8', background: 'rgba(141,163,184,.10)', border: '1px solid rgba(141,163,184,.18)' }}
+      style={{ color: '#8DA3B8', background: 'rgba(141,163,184,.10)', border: '1px solid rgba(141,163,184,.18)', cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.5 : 1 }}
+      onClick={busy ? undefined : onToggle}
+      title="Сменить тип (Канал ⇄ Чат)"
     >
-      {KIND_LABEL[kind] || kind}
+      {busy ? '…' : (KIND_LABEL[kind] || kind)}
     </span>
   );
 }
@@ -34,6 +36,7 @@ export function IntelSources() {
   const [sources, setSources]     = useState([]);
   const [loading, setLoading]     = useState(true);
   const [sideFilter, setSideFilter] = useState('all');
+  const [query, setQuery]         = useState('');
 
   // Add-form state
   const [link, setLink]       = useState('');
@@ -41,6 +44,7 @@ export function IntelSources() {
   const [kind, setKind]       = useState('channel');
   const [adding, setAdding]   = useState(false);
   const [deleting, setDeleting] = useState(null); // id being deleted
+  const [toggling, setToggling] = useState(null); // id whose kind is being switched
   const [err, setErr]         = useState('');
 
   async function load() {
@@ -73,6 +77,24 @@ export function IntelSources() {
     }
   }
 
+  async function handleToggleKind(src) {
+    if (toggling) return;
+    const next = src.kind === 'chat' ? 'channel' : 'chat';
+    setToggling(src.id);
+    try {
+      const updated = await intelApi.updateSource(src.id, { kind: next });
+      // Обновляем элемент на месте, без load() — иначе список перерисуется
+      // и скролл прыгнет наверх, теряя позицию пользователя.
+      setSources(prev => prev.map(s =>
+        s.id === src.id ? { ...s, ...(updated && updated.id ? updated : { kind: next }) } : s
+      ));
+    } catch (e) {
+      setErr(e.message || 'Ошибка смены типа');
+    } finally {
+      setToggling(null);
+    }
+  }
+
   async function handleDelete(id) {
     if (deleting) return;
     setDeleting(id);
@@ -87,9 +109,11 @@ export function IntelSources() {
   }
 
   const sides = ['all', ...Object.keys(SIDE)];
-  const visible = sideFilter === 'all'
-    ? sources
-    : sources.filter(s => s.side === sideFilter);
+  const q = query.trim().toLowerCase();
+  const visible = sources.filter(s =>
+    (sideFilter === 'all' || s.side === sideFilter) &&
+    (!q || String(s.handle || s.id).toLowerCase().includes(q))
+  );
 
   return (
     <div className={styles.workspace}>
@@ -115,39 +139,7 @@ export function IntelSources() {
           </div>
         </div>
 
-        {/* Source list */}
-        <div className={styles.sectionBody}>
-          {loading ? (
-            <div className={styles.empty}>Загрузка…</div>
-          ) : visible.length === 0 ? (
-            <div className={styles.empty}>Источники не найдены.</div>
-          ) : (
-            visible.map(src => (
-              <div key={src.id} className={styles.srcRow}>
-                <SideBadge side={src.side} />
-                <KindBadge kind={src.kind} />
-                <span className={styles.srcHandle}>
-                  {src.handle || src.id}
-                </span>
-                <span className={styles.srcMeta}>
-                  {src.last_collected
-                    ? new Date(src.last_collected).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
-                    : '—'}
-                </span>
-                <button
-                  className={styles.srcDel}
-                  onClick={() => handleDelete(src.id)}
-                  disabled={deleting === src.id}
-                  title="Удалить"
-                >
-                  ✕
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* Add form */}
+        {/* Add form — наверху, чтобы не скроллить вниз после каждого добавления */}
         <form className={styles.srcAddForm} onSubmit={handleAdd}>
           <input
             className={styles.srcInput}
@@ -184,6 +176,51 @@ export function IntelSources() {
           </button>
           {err && <span className={styles.srcError}>{err}</span>}
         </form>
+
+        {/* Search box — найти источник для удаления без листания */}
+        <div className={styles.srcSearch}>
+          <Icon name="search" size={13} color="#4A6378" />
+          <input
+            placeholder="поиск по добавленным источникам…"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+          />
+          {query && (
+            <button type="button" className={styles.srcSearchClear} onClick={() => setQuery('')} title="Очистить">✕</button>
+          )}
+        </div>
+
+        {/* Source list */}
+        <div className={styles.sectionBody}>
+          {loading ? (
+            <div className={styles.empty}>Загрузка…</div>
+          ) : visible.length === 0 ? (
+            <div className={styles.empty}>{q ? 'Ничего не найдено по запросу.' : 'Источники не найдены.'}</div>
+          ) : (
+            visible.map(src => (
+              <div key={src.id} className={styles.srcRow}>
+                <SideBadge side={src.side} />
+                <KindBadge kind={src.kind} busy={toggling === src.id} onToggle={() => handleToggleKind(src)} />
+                <span className={styles.srcHandle}>
+                  {src.handle || src.id}
+                </span>
+                <span className={styles.srcMeta}>
+                  {src.last_collected
+                    ? new Date(src.last_collected).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+                    : '—'}
+                </span>
+                <button
+                  className={styles.srcDel}
+                  onClick={() => handleDelete(src.id)}
+                  disabled={deleting === src.id}
+                  title="Удалить"
+                >
+                  ✕
+                </button>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   );

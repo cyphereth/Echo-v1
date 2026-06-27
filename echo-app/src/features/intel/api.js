@@ -12,16 +12,29 @@ const passthrough = (path, params) => {
 };
 
 export const intelApi = {
-  overview:  (window = '24h') => INTEL_USE_MOCK ? mockApi.overview(window) : passthrough('overview', { window }),
+  overview:  (params = {}) => {
+    const p = typeof params === 'string' ? { window: params } : params;
+    return INTEL_USE_MOCK ? mockApi.overview(p.window || '24h') : passthrough('overview', p);
+  },
   stream:    (params)         => INTEL_USE_MOCK ? mockApi.stream(params || {}) : passthrough('stream', params),
   stories:   (params)         => INTEL_USE_MOCK ? mockApi.stories(params || {}) : passthrough('stories', params),
   story:     (id)             => INTEL_USE_MOCK ? mockApi.story(id) : request(`/intel/stories/${id}`),
+  deleteStory: (id)           => request(`/intel/stories/${id}`, { method: 'DELETE' }),
   directions:(window = '24h') => INTEL_USE_MOCK ? mockApi.directions() : passthrough('directions', { window }),
   direction: (key, window)    => INTEL_USE_MOCK ? mockApi.direction(key) : request(`/intel/directions/${key}?window=${window || '24h'}`),
   search:    (q)              => INTEL_USE_MOCK ? mockApi.search(q) : passthrough('search', { q }),
   sources:   (params)         => passthrough('sources', params),
   addSource: (body)           => request('/intel/sources', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }),
   deleteSource: (id)          => request('/intel/sources/' + id, { method: 'DELETE' }),
+  updateSource: (id, body)    => request('/intel/sources/' + id, { method: 'PATCH', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }),
+  spamList:  (kind)           => passthrough('spam', kind ? { kind } : undefined),
+  addSpam:   (body)           => request('/intel/spam', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }),
+  deleteSpam:(id)             => request('/intel/spam/' + id, { method: 'DELETE' }),
+  alerts:    (params)         => INTEL_USE_MOCK ? Promise.resolve([]) : passthrough('alerts', params),
+  ackAlert:  (id)             => request(`/intel/alerts/${id}/ack`, { method: 'POST' }),
+  ackAllAlerts: ()            => request('/intel/alerts/ack-all', { method: 'POST' }),
+  mentionContext: (id)        => request(`/intel/mention/${id}/context`),
+  hideMention: (id)           => request(`/intel/mention/${id}/hide`, { method: 'POST' }),
 };
 
 // ── Live event stream (SSE) ─────────────────────────────────────────────────
@@ -30,24 +43,31 @@ export const intelApi = {
 // fetch (not EventSource) so the Bearer token rides in the Authorization header.
 // Auto-reconnects, resuming from the last id seen so no event is missed/duplicated.
 // Returns a stop() function. No-op in mock mode.
-export function streamLiveEvents({ afterId = 0, direction, onEvent }) {
+export function streamLiveEvents({ afterId = 0, afterAlertId = 0, direction, onEvent, onAlert }) {
   if (INTEL_USE_MOCK) return () => {};
   let stopped = false;
   let lastId = afterId || 0;
+  let lastAlertId = afterAlertId || 0;
   let currentCtrl = null;
-  // The server pings every ~1s, so healthy traffic means a chunk at least that often.
-  // If nothing arrives for STALL_MS the stream is dead (e.g. it silently stopped
-  // yielding after the Mac slept) → abort and reconnect, resuming from lastId.
-  const STALL_MS = 15000;
+  let currentReader = null;
+  // Server pings every ~1s. If nothing arrives for STALL_MS → stream is dead → reconnect.
+  const STALL_MS = 8000;
+
+  function abortCurrent() {
+    try { currentReader?.cancel(); } catch { /* ignore */ }
+    try { currentCtrl?.abort(); } catch { /* ignore */ }
+  }
 
   async function loop() {
+    let backoff = 1000;
     while (!stopped) {
       const ctrl = new AbortController();
       currentCtrl = ctrl;
-      let watchdog = setTimeout(() => ctrl.abort(), STALL_MS);
+      currentReader = null;
+      let watchdog = setTimeout(() => abortCurrent(), STALL_MS);
       try {
         const token = getToken();
-        const params = { after_id: String(lastId) };
+        const params = { after_id: String(lastId), after_alert_id: String(lastAlertId) };
         if (direction) params.direction = direction;
         const qs = new URLSearchParams(params).toString();
         const res = await fetch(`/intel/stream/live?${qs}`, {
@@ -55,44 +75,55 @@ export function streamLiveEvents({ afterId = 0, direction, onEvent }) {
           signal: ctrl.signal,
         });
         if (!res.ok || !res.body) throw new Error('sse ' + res.status);
+        backoff = 1000; // successful connection → reset backoff
         const reader = res.body.getReader();
+        currentReader = reader;
         const decoder = new TextDecoder();
         let buf = '';
         while (!stopped) {
           const { value, done } = await reader.read();
           if (done) break;
-          clearTimeout(watchdog);                          // got data → reset watchdog
-          watchdog = setTimeout(() => ctrl.abort(), STALL_MS);
+          clearTimeout(watchdog);
+          watchdog = setTimeout(() => abortCurrent(), STALL_MS);
           buf += decoder.decode(value, { stream: true });
           let sep;
           while ((sep = buf.indexOf('\n\n')) >= 0) {
             const frame = buf.slice(0, sep);
             buf = buf.slice(sep + 2);
+            let eventType = 'message';
+            let dataRaw = '';
             for (const line of frame.split('\n')) {
-              if (!line.startsWith('data:')) continue;       // skip ": ping" heartbeats
-              const raw = line.slice(5).trim();
-              if (!raw) continue;
-              try {
-                const ev = JSON.parse(raw);
-                if (ev && ev.id) lastId = Math.max(lastId, ev.id);
-                onEvent(ev);
-              } catch { /* ignore malformed frame */ }
+              if (line.startsWith('event:')) eventType = line.slice(6).trim();
+              else if (line.startsWith('data:')) dataRaw += line.slice(5).trim();
             }
+            if (!dataRaw) continue;
+            try {
+              const ev = JSON.parse(dataRaw);
+              if (eventType === 'alert') {
+                if (ev && ev.id) lastAlertId = Math.max(lastAlertId, ev.id);
+                if (onAlert) onAlert(ev);
+              } else {
+                if (ev && ev.id) lastId = Math.max(lastId, ev.id);
+                if (onEvent) onEvent(ev);
+              }
+            } catch { /* ignore malformed frame */ }
           }
         }
       } catch {
         if (stopped) return;
+        // Exponential backoff on repeated failures, capped at 10s
+        backoff = Math.min(backoff * 1.5, 10000);
       } finally {
         clearTimeout(watchdog);
+        currentReader = null;
       }
-      if (!stopped) await new Promise(r => setTimeout(r, 2000));  // backoff, then resume
+      if (!stopped) await new Promise(r => setTimeout(r, backoff));
     }
   }
 
-  // When the tab becomes visible again (returning from sleep / background), force an
-  // immediate reconnect instead of waiting for the watchdog — recovers fastest.
+  // On tab visible: reconnect immediately, don't wait for the watchdog or backoff.
   const onVisible = () => {
-    if (!stopped && document.visibilityState === 'visible' && currentCtrl) currentCtrl.abort();
+    if (!stopped && document.visibilityState === 'visible') abortCurrent();
   };
   if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible);
 

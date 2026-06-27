@@ -23,9 +23,11 @@ from sqlalchemy.orm import Session
 from ..core.db import get_session
 from ..core.auth import decode_token
 from ..models import User
-from .models import IntelDirection, IntelMention, IntelStory, IntelProbe
+from .models import IntelDirection, IntelMention, IntelStory, IntelProbe, IntelAlert, IntelThreadContext, IntelSpam, IntelIncident, IntelStoryPoint
+from ..models import _now
 from . import aggregate
 from . import credibility
+from .spam_filter import _norm, is_exact_spam
 
 _VALID_SIDES = {"ru", "ua", "by", "mx", "ge", "md", "pmr"}
 _VALID_KINDS = {"channel", "chat"}
@@ -81,26 +83,49 @@ def _hours(window: str) -> int:
 @router.get("/intel/overview")
 def intel_overview(
     window: str = "24h",
+    from_dt: Optional[str] = None,
+    to_dt: Optional[str] = None,
     user: User = Depends(current_user),
     session: Session = Depends(db),
 ):
+    if from_dt or to_dt:
+        try:
+            frm = datetime.fromisoformat(from_dt).replace(tzinfo=timezone.utc) if from_dt else None
+            tod = datetime.fromisoformat(to_dt).replace(tzinfo=timezone.utc) if to_dt else datetime.now(timezone.utc)
+        except ValueError:
+            raise HTTPException(400, "Invalid from_dt/to_dt ISO format")
+        return aggregate.compute_overview_range(session, frm, tod)
     return aggregate.compute_overview(session, _hours(window))
 
 
 @router.get("/intel/stream")
 def intel_stream(
     window: str = "24h",
+    from_dt: Optional[str] = None,
+    to_dt: Optional[str] = None,
     direction: Optional[str] = None,
     limit: int = 50,
     user: User = Depends(current_user),
     session: Session = Depends(db),
 ):
-    since = datetime.now(timezone.utc) - timedelta(hours=_hours(window))
-    q = session.query(IntelMention).filter(IntelMention.created_at >= since)
+    if from_dt or to_dt:
+        try:
+            since = datetime.fromisoformat(from_dt).replace(tzinfo=timezone.utc) if from_dt else None
+            until = datetime.fromisoformat(to_dt).replace(tzinfo=timezone.utc) if to_dt else datetime.now(timezone.utc)
+        except ValueError:
+            raise HTTPException(400, "Invalid from_dt/to_dt ISO format")
+        q = session.query(IntelMention)
+        if since:
+            q = q.filter(IntelMention.created_at >= since.replace(tzinfo=None))
+        q = q.filter(IntelMention.created_at <= until.replace(tzinfo=None))
+    else:
+        since = datetime.now(timezone.utc) - timedelta(hours=_hours(window))
+        q = session.query(IntelMention).filter(IntelMention.created_at >= since.replace(tzinfo=None))
     if direction:
         d = session.query(IntelDirection).filter_by(key=direction).first()
         if d:
             q = q.filter(IntelMention.direction_id == d.id)
+    q = q.filter(IntelMention.hidden == False)  # noqa: E712  — soft-hidden (спам) не показываем
     rows = q.order_by(IntelMention.created_at.desc()).limit(limit).all()
     return [aggregate.event(m) for m in rows]
 
@@ -135,6 +160,7 @@ INTEL_SSE_INTERVAL = 1.0
 @router.get("/intel/stream/live")
 async def intel_stream_live(
     after_id: int = 0,
+    after_alert_id: int = 0,
     direction: Optional[str] = None,
     authorization: str = Header(None),
 ):
@@ -162,21 +188,48 @@ async def intel_stream_live(
                 last_id = s.query(func.max(IntelMention.id)).scalar() or 0
             finally:
                 s.close()
+        last_alert_id = after_alert_id
+        if last_alert_id < 0:
+            s = get_session()
+            try:
+                last_alert_id = s.query(func.max(IntelAlert.id)).scalar() or 0
+            finally:
+                s.close()
         # Open the stream immediately so the client knows it's connected.
         yield ": connected\n\n"
         while True:
-            s = get_session()
+            # Wrap each DB poll in its own try/except so a transient SQLite lock or
+            # serialisation error doesn't kill the generator — we just skip the tick
+            # and send a ping to keep the connection alive.
+            payloads: list = []
+            apayloads: list = []
             try:
-                q = s.query(IntelMention).filter(IntelMention.id > last_id)
-                if direction_id is not None:
-                    q = q.filter(IntelMention.direction_id == direction_id)
-                rows = q.order_by(IntelMention.id.asc()).limit(100).all()
-                payloads = [(m.id, json.dumps(aggregate.event(m), ensure_ascii=False)) for m in rows]
-            finally:
-                s.close()
+                s = get_session()
+                try:
+                    q = s.query(IntelMention).filter(IntelMention.id > last_id,
+                                                     IntelMention.hidden == False)  # noqa: E712
+                    if direction_id is not None:
+                        q = q.filter(IntelMention.direction_id == direction_id)
+                    rows = q.order_by(IntelMention.id.asc()).limit(100).all()
+                    payloads = [(m.id, json.dumps(aggregate.event(m), ensure_ascii=False)) for m in rows]
+                finally:
+                    s.close()
+                s = get_session()
+                try:
+                    arows = (s.query(IntelAlert).filter(IntelAlert.id > last_alert_id)
+                             .order_by(IntelAlert.id.asc()).limit(50).all())
+                    apayloads = [(a.id, json.dumps(aggregate.alert_payload(s, a), ensure_ascii=False))
+                                 for a in arows]
+                finally:
+                    s.close()
+            except Exception as exc:
+                log.warning("SSE tick db error (skipping): %s", exc)
             for mid, payload in payloads:
                 last_id = mid
                 yield f"data: {payload}\n\n"
+            for aid, payload in apayloads:
+                last_alert_id = aid
+                yield f"event: alert\ndata: {payload}\n\n"
             # Heartbeat keeps the connection alive through proxies between bursts.
             yield ": ping\n\n"
             await asyncio.sleep(INTEL_SSE_INTERVAL)
@@ -199,10 +252,27 @@ def intel_stories(
     verified: Optional[bool] = None,
     sort: str = "recency",
     limit: int = 50,
+    from_dt: Optional[str] = None,
+    to_dt: Optional[str] = None,
+    window: str = "24h",
     user: User = Depends(current_user),
     session: Session = Depends(db),
 ):
     q = session.query(IntelStory)
+    # Time range filter
+    if from_dt or to_dt:
+        try:
+            frm = datetime.fromisoformat(from_dt).replace(tzinfo=None) if from_dt else None
+            tod = datetime.fromisoformat(to_dt).replace(tzinfo=None) if to_dt else datetime.now(timezone.utc).replace(tzinfo=None)
+        except ValueError:
+            raise HTTPException(400, "Invalid from_dt/to_dt")
+        if frm:
+            q = q.filter(IntelStory.last_seen_at >= frm)
+        q = q.filter(IntelStory.last_seen_at <= tod)
+    else:
+        since = datetime.now(timezone.utc) - timedelta(hours=_hours(window))
+        since_naive = since.replace(tzinfo=None)
+        q = q.filter(IntelStory.last_seen_at >= since_naive, IntelStory.created_at >= since_naive)
     if direction:
         d = session.query(IntelDirection).filter_by(key=direction).first()
         if d:
@@ -307,7 +377,8 @@ def intel_direction_detail(
     stories = session.query(IntelStory).filter_by(direction_id=d.id).all()
     stream_rows = (
         session.query(IntelMention)
-        .filter(IntelMention.direction_id == d.id, IntelMention.created_at >= since)
+        .filter(IntelMention.direction_id == d.id, IntelMention.created_at >= since,
+                IntelMention.hidden == False)  # noqa: E712
         .order_by(IntelMention.created_at.desc())
         .limit(50)
         .all()
@@ -400,6 +471,31 @@ def intel_sources_create(
     return {**_probe_dict(probe), "created": True}
 
 
+@router.patch("/intel/sources/{source_id}")
+def intel_sources_update(
+    source_id: int,
+    body: dict,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    probe = session.get(IntelProbe, source_id)
+    if not probe:
+        raise HTTPException(404, "Source not found")
+    if "kind" in body:
+        kind = (body.get("kind") or "").strip().lower()
+        if kind not in _VALID_KINDS:
+            raise HTTPException(400, f"Invalid kind '{kind}'. Must be one of: {sorted(_VALID_KINDS)}")
+        probe.kind = kind
+    if "side" in body:
+        side = (body.get("side") or "").strip().lower()
+        if side not in _VALID_SIDES:
+            raise HTTPException(400, f"Invalid side '{side}'. Must be one of: {sorted(_VALID_SIDES)}")
+        probe.side = side
+    session.commit()
+    session.refresh(probe)
+    return _probe_dict(probe)
+
+
 @router.delete("/intel/sources/{source_id}")
 def intel_sources_delete(
     source_id: int,
@@ -412,3 +508,230 @@ def intel_sources_delete(
     session.delete(probe)
     session.commit()
     return {"deleted": True}
+
+
+_VALID_SPAM_KINDS = {"word", "example", "keyword"}
+
+
+def _spam_dict(s: IntelSpam) -> dict:
+    return {
+        "id": s.id,
+        "kind": s.kind,
+        "value": s.value,
+        "author": s.author,
+        "source_post_id": s.source_post_id,
+        "note": s.note or "",
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+    }
+
+
+@router.get("/intel/spam")
+def intel_spam_list(
+    kind: Optional[str] = None,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    q = session.query(IntelSpam)
+    if kind:
+        q = q.filter(IntelSpam.kind == kind)
+    rows = q.order_by(IntelSpam.id.desc()).all()
+    return [_spam_dict(s) for s in rows]
+
+
+@router.post("/intel/spam")
+def intel_spam_create(
+    body: dict,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    kind = (body.get("kind") or "").strip().lower()
+    value = (body.get("value") or "").strip()
+    if kind not in _VALID_SPAM_KINDS:
+        raise HTTPException(400, f"Invalid kind '{kind}'. Must be one of: {sorted(_VALID_SPAM_KINDS)}")
+    if not value:
+        raise HTTPException(400, "value is required")
+    existing = session.query(IntelSpam).filter_by(kind=kind, value=value).first()
+    if existing:
+        return _spam_dict(existing)
+    row = IntelSpam(
+        kind=kind,
+        value=value,
+        author=(body.get("author") or None),
+        source_post_id=(body.get("source_post_id") or None),
+        note=(body.get("note") or ""),
+    )
+    session.add(row)
+    # Куратор скинул в спам конкретный пост → прячем уже лежащие в БД дословные дубли,
+    # чтобы они немедленно пропали из ленты/сюжетов (а не только фильтровались впредь).
+    hidden_now = 0
+    if kind == "example":
+        target = _norm(value)
+        candidates = (session.query(IntelMention)
+                      .filter(IntelMention.hidden == False)  # noqa: E712
+                      .all())
+        for m in candidates:
+            if _norm(m.text) == target:
+                _hide_mention(session, m)
+                hidden_now += 1
+    session.commit()
+    session.refresh(row)
+    out = _spam_dict(row)
+    out["hidden_now"] = hidden_now
+    return out
+
+
+@router.delete("/intel/spam/{spam_id}")
+def intel_spam_delete(
+    spam_id: int,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    row = session.get(IntelSpam, spam_id)
+    if not row:
+        raise HTTPException(404, "Spam entry not found")
+    session.delete(row)
+    session.commit()
+    return {"deleted": True}
+
+
+@router.get("/intel/alerts")
+def intel_alerts(
+    unread: bool = False,
+    limit: int = 50,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    q = session.query(IntelAlert)
+    if unread:
+        q = q.filter(IntelAlert.acknowledged_at.is_(None))
+    rows = q.order_by(IntelAlert.id.desc()).limit(limit).all()
+    return [aggregate.alert_payload(session, a) for a in rows]
+
+
+@router.post("/intel/alerts/ack-all")
+def intel_alert_ack_all(
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    rows = session.query(IntelAlert).filter(IntelAlert.acknowledged_at.is_(None)).all()
+    for a in rows:
+        a.acknowledged_at = _now()
+    session.commit()
+    return {"ok": True, "count": len(rows)}
+
+
+@router.post("/intel/alerts/{alert_id}/ack")
+def intel_alert_ack(
+    alert_id: int,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    a = session.get(IntelAlert, alert_id)
+    if a is None:
+        raise HTTPException(404, "Alert not found")
+    if a.acknowledged_at is None:
+        a.acknowledged_at = _now()
+        session.commit()
+    return {"ok": True}
+
+
+def _hide_mention(session: Session, m: IntelMention) -> None:
+    """Soft-hide одного упоминания + best-effort декремент счётчика владеющего сюжета
+    (не ниже 0). Не коммитит — это делает вызывающий. Идемпотентность проверяет caller."""
+    if m.hidden:
+        return
+    m.hidden = True
+    if m.incident_id is not None:
+        inc = session.get(IntelIncident, m.incident_id)
+        if inc is not None and inc.story_id is not None:
+            story = session.get(IntelStory, inc.story_id)
+            if story is not None and (story.post_count or 0) > 0:
+                story.post_count -= 1
+
+
+@router.delete("/intel/stories/{story_id}")
+def intel_story_delete(
+    story_id: int,
+    session: Session = Depends(db),
+    user: User = Depends(current_user),
+):
+    """Удалить сюжет целиком (куратор: «это спам / мусорный кластер»). Прячем все его
+    упоминания (hidden=True — они уже привязаны к инцидентам, так что повторно НЕ
+    кластеризуются), затем удаляем точки/инциденты/алерты/сам сюжет. Возвращает число
+    скрытых упоминаний."""
+    story = session.get(IntelStory, story_id)
+    if story is None:
+        raise HTTPException(404, "Story not found")
+
+    incidents = session.query(IntelIncident).filter_by(story_id=story_id).all()
+    inc_ids = [i.id for i in incidents]
+
+    hidden = 0
+    if inc_ids:
+        mentions = (session.query(IntelMention)
+                    .filter(IntelMention.incident_id.in_(inc_ids),
+                            IntelMention.hidden == False)  # noqa: E712
+                    .all())
+        for m in mentions:
+            m.hidden = True
+            hidden += 1
+
+    # Чистим связанные строки, чтобы сюжет не «всплыл» обратно и не оставил висячих FK.
+    session.query(IntelStoryPoint).filter_by(story_id=story_id).delete()
+    session.query(IntelAlert).filter_by(story_id=story_id).update({"story_id": None})
+    for inc in incidents:
+        session.delete(inc)
+    session.delete(story)
+    session.commit()
+    return {"deleted": True, "hidden_mentions": hidden}
+
+
+@router.post("/intel/mention/{mention_id}/hide")
+def intel_mention_hide(
+    mention_id: int,
+    session: Session = Depends(db),
+    user: User = Depends(current_user),
+):
+    """Soft-hide одного упоминания (куратор скинул его в спам). Пост остаётся в БД,
+    но пропадает из ленты/сюжетов/агрегатов. Идемпотентно: повторный вызов на уже
+    скрытом ничего не делает (и не двигает post_count повторно)."""
+    m = session.get(IntelMention, mention_id)
+    if m is None:
+        raise HTTPException(404, "Mention not found")
+    if m.hidden:
+        return {"id": m.id, "hidden": True}
+    _hide_mention(session, m)
+    session.commit()
+    return {"id": m.id, "hidden": True}
+
+
+@router.get("/intel/mention/{mention_id}/context")
+def intel_mention_context(
+    mention_id: int,
+    session: Session = Depends(db),
+    user: User = Depends(current_user),
+):
+    mention = session.get(IntelMention, mention_id)
+    if mention is None:
+        raise HTTPException(404, "Mention not found")
+
+    rows = (session.query(IntelThreadContext)
+            .filter(IntelThreadContext.mention_id == mention_id)
+            .order_by(IntelThreadContext.role, IntelThreadContext.depth.asc())
+            .all())
+
+    reply_chain = sorted(
+        [{"tg_msg_id": r.tg_msg_id, "depth": r.depth,
+          "author": r.author, "text": r.text,
+          "created_at": aggregate._aware(r.created_at).isoformat()}
+         for r in rows if r.role == "parent"],
+        key=lambda x: x["depth"],
+        reverse=True,
+    )
+    siblings = sorted(
+        [{"tg_msg_id": r.tg_msg_id, "author": r.author,
+          "text": r.text, "created_at": aggregate._aware(r.created_at).isoformat()}
+         for r in rows if r.role == "sibling"],
+        key=lambda x: x["created_at"],
+    )
+    return {"mention_id": mention_id, "reply_chain": reply_chain, "siblings": siblings}

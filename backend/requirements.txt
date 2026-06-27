@@ -9,3 +9,4 @@ telethon>=1.43,<2
 pymorphy3>=2.0
 sentence-transformers>=3.0
 numpy>=1.26
+deep-translator>=1.11

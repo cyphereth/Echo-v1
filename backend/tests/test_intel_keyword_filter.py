@@ -112,6 +112,78 @@ def test_channel_keeps_military_drops_general():
     )
 
 
+# ── 2b. Curator positive keywords admit posts that miss the lexicon ────────────
+
+def test_curator_keyword_admits_otherwise_dropped_post():
+    """A post that fails the military lexicon is admitted if it matches a curator-managed
+    positive keyword (kind="keyword"), OR'd into the gate."""
+    from radar.intel import seed, collector
+    from radar.intel.intake import ingest_lexicon_json
+    from radar.intel.models import IntelProbe, IntelMention, IntelSpam
+
+    s = _sess()
+    seed.ensure_default_directions(s)
+    ingest_lexicon_json(s, _SEED_PATH)
+
+    # Curator adds a non-military positive keyword.
+    s.add(IntelSpam(kind="keyword", value="наводнение"))
+    s.commit()
+
+    p = IntelProbe(platform="telegram", kind="channel", query="@testchannel", side="ua")
+    s.add(p)
+    s.commit()
+
+    now = datetime.now(timezone.utc)
+    matches_keyword = SimpleNamespace(
+        post_id="@testchannel/1", author="@testchannel",
+        text="сильное наводнение затопило центральные улицы города сегодня утром",
+        followers=0, created_at=now, hashtags=[], likes=0,
+    )
+    general = SimpleNamespace(
+        post_id="@testchannel/2", author="@testchannel",
+        text="Президент возложил венок к мемориалу сегодня утром на центральной площади",
+        followers=0, created_at=now, hashtags=[], likes=0,
+    )
+    page = SimpleNamespace(posts=[matches_keyword, general], cursor=None)
+    prov = SimpleNamespace(search=lambda q, k, c: page)
+
+    n = collector.collect_probe(s, p, prov)
+    assert n == 1, f"expected 1 stored mention, got {n}"
+    stored = s.query(IntelMention).one()
+    assert stored.post_id == "@testchannel/1"
+
+
+def test_curator_keyword_overrides_length_gate_for_chat():
+    """A short chat reply (< MIN_TEXT_LEN) matching a curator keyword is admitted —
+    the keyword hit bypasses the length noise-gate (the reply bug)."""
+    from radar.intel.collector import chat_message_relevant, MIN_TEXT_LEN
+
+    short = "наводнение!"  # < 20 chars — would normally be dropped by the length gate
+    assert len(short) < MIN_TEXT_LEN
+    # Without the keyword → dropped (too short, no lexicon hit)
+    assert chat_message_relevant(short, "@u", [], []) is False
+    # With the curator keyword → admitted despite being short
+    assert chat_message_relevant(short, "@u", [], ["наводнение"]) is True
+    # Text with no alphabetic char is still dropped even on a keyword hit
+    assert chat_message_relevant("123 456", "@u", [], ["123"]) is False
+
+
+def test_load_keywords_returns_only_keyword_kind():
+    from radar.intel.models import IntelSpam
+    from radar.intel.spam_filter import load_keywords
+
+    s = _sess()
+    s.add_all([
+        IntelSpam(kind="keyword", value="Наводнение"),
+        IntelSpam(kind="word", value="реклама"),
+        IntelSpam(kind="example", value="купи сейчас"),
+    ])
+    s.commit()
+
+    kws = load_keywords(s)
+    assert kws == ["наводнение"], f"unexpected keywords: {kws}"
+
+
 # ── 3. keyword_relevant unit tests (keyword-only, geo is NOT an admit path) ────
 
 def test_keyword_relevant():

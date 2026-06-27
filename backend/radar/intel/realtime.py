@@ -27,7 +27,9 @@ import time
 from sqlalchemy.exc import IntegrityError
 
 from ..core.db import get_session
-from ..core.providers.telegram import _parse_tg_message, _parse_tg_chat_message
+from ..core.providers.telegram import (
+    _parse_tg_message, _parse_tg_chat_message, chat_namespace,
+)
 from .models import IntelLexicon, IntelMention, IntelProbe
 from .geo import detect_direction
 from .tagging import resolve_direction_id
@@ -266,7 +268,7 @@ class IntelRealtime:
         msg = event.message
         try:
             if kind == "chat":
-                ns = username or str(getattr(event, "chat_id", "chat"))
+                ns = chat_namespace(username, getattr(event, "chat_id", None))
                 post = _parse_tg_chat_message(msg, ns, "@" + username if username else "@chat")
             else:
                 followers = getattr(chat, "participants_count", 0) or 0

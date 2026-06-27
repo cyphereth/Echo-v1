@@ -613,6 +613,37 @@ class TelegramProvider(SearchProvider):
                  h, reply_to_tg_id, len(parents), len(siblings))
         return {"parents": parents, "siblings": siblings}
 
+    def download_media_preview(self, handle: str, msg_id: int, kind: str) -> "tuple[bytes, str] | None":
+        """Скачать превью-thumbnail медиа сообщения. (bytes, mime) или None.
+
+        photo/video → наибольший thumbnail (постер), mime image/jpeg. file и отсутствие
+        превью → None. Бросает TelegramFloodWait (как fetch_thread_context)."""
+        if kind not in ("photo", "video"):
+            return None
+        h = handle if (not handle or handle.startswith("@") or handle.startswith("#")) else f"@{handle}"
+        try:
+            entity = self._await(self._client.get_entity(int(h[1:]) if h.startswith("#") else h))
+            msgs = self._await(self._client.get_messages(entity, ids=[int(msg_id)]))
+        except TelegramFloodWait:
+            raise
+        except Exception as e:
+            log.warning("download_media_preview: lookup failed (%s/%s): %s", h, msg_id, type(e).__name__)
+            return None
+        msg = msgs[0] if msgs else None
+        if msg is None:
+            return None
+        try:
+            # thumb=-1 → наибольший доступный thumbnail (постер), не оригинал.
+            data = self._await(self._client.download_media(msg, file=bytes, thumb=-1))
+        except TelegramFloodWait:
+            raise
+        except Exception as e:
+            log.warning("download_media_preview: download failed (%s/%s): %s", h, msg_id, type(e).__name__)
+            return None
+        if not data:
+            return None
+        return (data, "image/jpeg")
+
     def search_linked_chat(self, parent_handle: str, term: str, limit: int = 20, min_id: int = 0) -> list[Post]:
         """Search the discussion group LINKED to a (public) channel, for groups that have
         no public @username. The parent channel is always resolvable, so we reach the

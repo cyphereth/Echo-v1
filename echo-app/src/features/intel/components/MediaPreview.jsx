@@ -22,6 +22,7 @@ export default function MediaPreview({ kind, url, label }) {
       const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
       if (!res.ok) throw new Error(String(res.status));
       const blob = await res.blob();
+      if (objUrl.current) URL.revokeObjectURL(objUrl.current);
       objUrl.current = URL.createObjectURL(blob);
       setSrc(objUrl.current);
       setState('ready');

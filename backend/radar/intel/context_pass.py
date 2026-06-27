@@ -119,11 +119,18 @@ def _resolve_locally(session: Session, mention: IntelMention) -> bool:
         except IntegrityError:
             sp.rollback()
 
-    # The last node whose own parent was NOT found locally is the resolved root.
-    mention.thread_root_id = chain[-1].id
-    mention.context_fetched = True
-    session.commit()
-    return True
+    # Цепочка полна ТОЛЬКО если верхний достигнутый узел реально корневой
+    # (у него нет родителя). Если хвост оборван (родитель не в БД) — оставляем
+    # context_fetched=False, чтобы сетевой enrich_context дочинил ветку и нашёл
+    # настоящий корень. reply_to_id (прямой родитель) уже проставлен выше.
+    top = chain[-1]
+    if not top.reply_to_tg_id:
+        mention.thread_root_id = top.id
+        mention.context_fetched = True
+        session.commit()
+        return True
+    session.commit()  # сохраняем reply_to_id + materialised parent-rows
+    return False
 
 
 def enrich_context(session: Session, provider, batch_size: int = 50) -> int:

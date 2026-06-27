@@ -35,6 +35,8 @@ def test_photo_returns_bytes_and_mime():
     assert data == b"JPEGBYTES"
     assert mime == "image/jpeg"
     assert any(c[0] == "download_media" for c in client.calls)
+    thumb_calls = [c for c in client.calls if c[0] == "download_media"]
+    assert thumb_calls and thumb_calls[0][1] == -1
 
 
 def test_file_kind_returns_none_without_download():
@@ -50,3 +52,15 @@ def test_missing_message_returns_none():
         def get_messages(self, entity, ids=None): return []
     p = _provider(Empty(None))
     assert p.download_media_preview("@chan", 99, "photo") is None
+
+
+def test_floodwait_propagates():
+    import pytest
+    from radar.core.providers.telegram import TelegramFloodWait
+    msg = SimpleNamespace(id=42, photo=object(), video=None, document=None)
+    class FloodClient(_FakeClient):
+        def download_media(self, msg, file=None, thumb=None):
+            raise TelegramFloodWait(60)
+    p = _provider(FloodClient(msg))
+    with pytest.raises(TelegramFloodWait):
+        p.download_media_preview("@chan", 42, "photo")

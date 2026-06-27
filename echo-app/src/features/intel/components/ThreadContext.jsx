@@ -3,6 +3,7 @@
 // home feed («Лента событий») and the story-detail events list.
 import { useState } from 'react';
 import { intelApi } from '../api';
+import MediaPreview from './MediaPreview';
 
 export function ThreadContext({ mentionId }) {
   const [open, setOpen] = useState(false);
@@ -37,6 +38,11 @@ export function ThreadContext({ mentionId }) {
               <div key={p.tg_msg_id} style={{ color: '#4A6378', fontSize: 11, marginBottom: 2,
                                               paddingLeft: i * 8 }}>
                 <span style={{ color: '#3A5368', marginRight: 4 }}>{p.author}</span>
+                {p.media && (
+                  <MediaPreview kind={p.media}
+                    url={`/intel/mention/${mentionId}/parent-media/${p.tg_msg_id}`}
+                    label={p.text} />
+                )}
                 {p.text}
               </div>
             ))}

@@ -229,6 +229,11 @@
   grid-template-rows: minmax(0, 1fr);
   align-items: stretch;
 }
+/* the event-feed row gets the lion's share of the height — it's the main thing the
+   operator watches. ~1 : 1.9 split vs the hot/alerts row above it. */
+.homeWorkspace .grid2.feedRow {
+  flex: 1.9 1 0;
+}
 /* sections inside the home grid become flex columns so their body can scroll */
 .homeWorkspace .section {
   display: flex;

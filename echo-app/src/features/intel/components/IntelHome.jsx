@@ -1,6 +1,6 @@
 // Situational Center (home) — «что горит сейчас».
 // KPI strip + Now hot + Alerts + Top stories + Event stream.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../../core/components/icons';
 import { IntelSparkline } from './IntelSparkline';
 import { ThreadContext } from './ThreadContext';
@@ -20,6 +20,8 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
   const [flashIds, setFlashIds] = useState(() => new Set());
   const [hiddenIds, setHiddenIds] = useState(() => new Set());
   const [subjectFilter, setSubjectFilter] = useState(null);  // фильтр ленты по нас. пункту
+  const [paused, setPaused]     = useState(false);  // наведение курсора замораживает ленту
+  const pausedRef               = useRef(false);     // чтобы merge-эффект читал актуальное значение
   const seenRef                 = useRef(new Set());
 
   // Throw a post into the spam filter (kind="example") and hide it from the feed.
@@ -69,16 +71,17 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
     return () => { alive = false; clearInterval(kpiTimer); };
   }, [timeRange]);
 
-  // Merge live events arriving from IntelApp's unified stream.
+  // Merge live events arriving from IntelApp's unified stream into the feed.
   // Filter by window so switching to 1h doesn't show 2-day-old posts that
-  // were just ingested by the collector.
-  useEffect(() => {
-    if (!liveEvents.length || isCustom) return;
+  // were just ingested by the collector. Dedupes against what's already in the
+  // stream, so it's safe to call with the full (cumulative) liveEvents prop.
+  const mergeLive = useCallback((events) => {
+    if (!events.length || isCustom) return;
     const windowMs = win === '1h' ? 3600000 : win === '7d' ? 7 * 86400000 : win === '30d' ? 30 * 86400000 : 86400000;
     const cutoff = Date.now() - windowMs;
     setStream(prev => {
       const seen = new Set(prev.map(e => e.id));
-      const add = liveEvents.filter(e =>
+      const add = events.filter(e =>
         e && e.id != null && !seen.has(e.id) &&
         (!e.created_at || Date.parse(e.created_at) >= cutoff)
       );
@@ -93,7 +96,22 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
       // и кладём в НАЧАЛО; slice(0,200) обрезает старые снизу, а не новые сверху.
       return [...add.reverse(), ...prev].slice(0, 200);
     });
-  }, [liveEvents, win, isCustom]);
+  }, [win, isCustom]);
+
+  // While the cursor is over the feed (paused), don't fold new events in — they'd
+  // shift rows under the user's pointer. liveEvents is cumulative, so on un-pause
+  // we just re-merge the whole prop and dedup catches the backlog.
+  useEffect(() => {
+    if (pausedRef.current) return;
+    mergeLive(liveEvents);
+  }, [liveEvents, mergeLive]);
+
+  const onFeedEnter = useCallback(() => { pausedRef.current = true; setPaused(true); }, []);
+  const onFeedLeave = useCallback(() => {
+    pausedRef.current = false;
+    setPaused(false);
+    mergeLive(liveEvents);  // flush whatever arrived while paused
+  }, [liveEvents, mergeLive]);
 
   // Collapse verbatim cross-channel reposts: events sharing a content signature become
   // one row (the newest), with a count of how many channels carried it. Keeps the feed
@@ -211,7 +229,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
       </div>
 
       {/* Top stories + Event stream */}
-      <div className={styles.grid2}>
+      <div className={`${styles.grid2} ${styles.feedRow}`}>
         <div className={styles.section}>
           <div className={styles.sectionHead}>
             <span className={styles.sectionTitle}>
@@ -235,7 +253,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
           </div>
         </div>
 
-        <div className={styles.section}>
+        <div className={styles.section} onMouseEnter={onFeedEnter} onMouseLeave={onFeedLeave}>
           <div className={styles.sectionHead}>
             <span className={styles.sectionTitle}>
               <Icon name="radio" size={13} color="#57D2E2" />
@@ -245,6 +263,13 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
             {isCustom ? (
               <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 10, color: '#6A8499' }}>
                 АРХИВ
+              </span>
+            ) : paused ? (
+              <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 10, color: '#FFB23E', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                {liveEvents.length > 0 && (
+                  <span style={{ color: '#FFB23E', fontWeight: 700 }}>❚❚</span>
+                )}
+                ПАУЗА
               </span>
             ) : (
               <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 10, color: '#34D8A0', display: 'inline-flex', alignItems: 'center', gap: 5 }}>

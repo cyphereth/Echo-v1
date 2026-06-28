@@ -69,6 +69,30 @@ def test_ingest_applies_overrides(tmp_path):
     assert s.query(IntelLexicon).filter_by(term="сирена").one().tier == "strong"
 
 
+_REAL_SEED = os.path.join(
+    os.path.dirname(__file__), "..", "radar", "intel", "data", "keywords.seed.json"
+)
+
+
+def test_real_seed_tiers():
+    from radar.intel.intake import ingest_lexicon_json
+    from radar.intel.models import IntelLexicon
+    s = _sess()
+    ingest_lexicon_json(s, _REAL_SEED)
+
+    def tier(term):
+        row = s.query(IntelLexicon).filter_by(term=term).first()
+        assert row is not None, f"term {term!r} missing from seed"
+        return row.tier
+
+    # сильные узкие термины
+    for t in ("калибр", "вибух", "прилёт", "пво", "шахед"):
+        assert tier(t) == "strong", f"{t} expected strong, got {tier(t)}"
+    # слабые многозначные (генераторы мусора)
+    for t in ("сейчас", "внимание", "движение", "очередь", "работа", "слышно"):
+        assert tier(t) == "weak", f"{t} expected weak, got {tier(t)}"
+
+
 def test_ingest_updates_tier_on_reingest(tmp_path):
     """Повторный ингест меняет tier у существующей строки, не плодит дубли."""
     import json

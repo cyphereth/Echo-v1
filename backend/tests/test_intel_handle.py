@@ -6,6 +6,22 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
+
+# ── Fixtures ───────────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _isolate_join_state(tmp_path, monkeypatch):
+    """Point the shared join-state at a throwaway file and clear its cache, so the
+    _ensure_joined tests never read from — or write to — the real subscribed.json
+    (otherwise test invite links leak into per-account state and poison later runs)."""
+    from radar.intel import subscribe
+    monkeypatch.setattr(subscribe, "_STATE_FILE", str(tmp_path / "subscribed.json"))
+    monkeypatch.setattr(subscribe, "_done_cache", None)
+    monkeypatch.setattr(subscribe, "_JOIN_INTERVAL", 0.0)
+    yield
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 

@@ -734,11 +734,31 @@ def intel_mention_hide(
     m = session.get(IntelMention, mention_id)
     if m is None:
         raise HTTPException(404, "Mention not found")
-    if m.hidden:
-        return {"id": m.id, "hidden": True}
-    _hide_mention(session, m)
+
+    # Лента схлопывает кросс-канальные репосты по сигнатуре контента и показывает
+    # ОДНУ строку на группу. Поэтому прячем не только выбранное упоминание, а ВСЕХ
+    # близнецов с той же сигнатурой — иначе после рефреша «всплывёт» дубликат и пост
+    # будто вернётся. Окно ±7 дней вокруг поста ограничивает запрос (репосты идут
+    # кучно во времени), а пустая сигнатура (пустой текст) дедупу не подлежит.
+    sig = aggregate.content_sig(m.text)
+    hidden = 0
+    if sig:
+        win = timedelta(days=7)
+        cands = (session.query(IntelMention)
+                 .filter(IntelMention.hidden == False,  # noqa: E712
+                         IntelMention.created_at >= (m.created_at - win),
+                         IntelMention.created_at <= (m.created_at + win))
+                 .all())
+        for c in cands:
+            if aggregate.content_sig(c.text) == sig:
+                _hide_mention(session, c)
+                hidden += 1
+    else:
+        if not m.hidden:
+            _hide_mention(session, m)
+            hidden = 1
     session.commit()
-    return {"id": m.id, "hidden": True}
+    return {"id": m.id, "hidden": True, "hidden_count": hidden}
 
 
 def _preview_or_error(provider, post_id: str, handle: str, msg_id: int, kind: str):

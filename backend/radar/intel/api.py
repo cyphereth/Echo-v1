@@ -381,3 +381,43 @@ def intel_feed_stream(
                              headers={"Cache-Control": "no-cache",
                                       "X-Accel-Buffering": "no",
                                       "Connection": "keep-alive"})
+
+
+# ── Feed v2 — layout persistence ──────────────────────────────────────────────
+
+class LayoutBody(BaseModel):
+    direction_keys: list[str]
+
+
+@router.get("/intel/feed/layout")
+def intel_feed_layout_get(
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    row = session.query(IntelFeedLayout).order_by(IntelFeedLayout.updated_at.desc()).first()
+    try:
+        keys = json.loads(row.direction_ids) if row else []
+    except (ValueError, TypeError):
+        keys = []
+    return {"direction_keys": keys,
+            "updated_at": row.updated_at.isoformat() if row else None}
+
+
+@router.put("/intel/feed/layout")
+def intel_feed_layout_put(
+    body: LayoutBody,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    if not getattr(user, "is_admin", False):
+        raise HTTPException(403, "admin only")
+    row = session.query(IntelFeedLayout).order_by(IntelFeedLayout.updated_at.desc()).first()
+    if row is None:
+        row = IntelFeedLayout(direction_ids="[]")
+        session.add(row)
+    row.direction_ids = json.dumps(body.direction_keys)
+    row.updated_by = user.id
+    row.updated_at = datetime.now(timezone.utc)
+    session.commit()
+    return {"direction_keys": body.direction_keys,
+            "updated_at": row.updated_at.isoformat()}

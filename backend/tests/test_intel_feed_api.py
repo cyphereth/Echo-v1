@@ -117,3 +117,35 @@ def test_feed_stream_yields_events_tagged_with_direction():
     t.join(timeout=10)
     assert not error, error
     assert any("bryansk" in c for c in chunks), chunks
+
+
+def test_get_layout_returns_empty_default():
+    client, tok = _bootstrap()
+    r = client.get("/intel/feed/layout",
+                   headers={"Authorization": f"Bearer {tok}"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["direction_keys"] == []
+
+
+def test_put_layout_saves_and_admin_only():
+    client, tok = _bootstrap()
+    r = client.put("/intel/feed/layout",
+                   headers={"Authorization": f"Bearer {tok}"},
+                   json={"direction_keys": ["bryansk", "kharkiv"]})
+    assert r.status_code == 200
+    assert r.json()["direction_keys"] == ["bryansk", "kharkiv"]
+    r2 = client.get("/intel/feed/layout",
+                    headers={"Authorization": f"Bearer {tok}"})
+    assert r2.json()["direction_keys"] == ["bryansk", "kharkiv"]
+
+
+def test_put_layout_403_for_non_admin():
+    # Register a second user with no admin flag.
+    client, _ = _bootstrap()
+    client.post("/auth/register", json={"email": "user@test.local", "password": "secret123"})
+    tok = client.post("/auth/login", json={"email": "user@test.local", "password": "secret123"}).json()["token"]
+    r = client.put("/intel/feed/layout",
+                   headers={"Authorization": f"Bearer {tok}"},
+                   json={"direction_keys": ["bryansk"]})
+    assert r.status_code == 403

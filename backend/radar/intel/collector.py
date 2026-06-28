@@ -116,19 +116,21 @@ _ABBREV_RE = re.compile(
 )
 
 
-def matched_terms(text: str, lexicon_terms) -> list[str]:
-    """Terms appearing in text at a word boundary.
+def matched_terms(text: str, lexicon_tiers) -> list[tuple[str, str]]:
+    """(term, tier) pairs appearing in text at a word boundary.
 
-    Two passes: (1) the word-lexicon, lowercased/case-insensitive; (2) the uppercase
-    ABBREVIATIONS, matched case-sensitively against the ORIGINAL text.
+    Two passes: (1) the word-lexicon (mapping term→tier), lowercased/case-insensitive;
+    (2) the uppercase ABBREVIATIONS, matched case-sensitively against the ORIGINAL text
+    and always tier "strong" (they are narrow military markers).
     """
     raw = (text or "").strip()
     low = raw.lower()
-    out = []
-    for term in lexicon_terms:
+    out: list[tuple[str, str]] = []
+    for term, tier in dict(lexicon_tiers).items():
         if re.search(r"(?<!\w)" + re.escape(term.lower()) + r"(?!\w)", low):
-            out.append(term.lower())
-    out.extend(_ABBREV_RE.findall(raw))
+            out.append((term.lower(), tier or "weak"))
+    for ab in _ABBREV_RE.findall(raw):
+        out.append((ab, "strong"))
     return out
 
 
@@ -137,27 +139,51 @@ def _looks_like_weather(text: str) -> bool:
     return any(ctx in low for ctx in _WEATHER_CONTEXT)
 
 
-def keyword_relevant(text: str, lexicon_terms) -> bool:
-    """Return True if text contains a military lexicon term.
+def keyword_relevant(text: str, lexicon_tiers, geo_hit: bool = False) -> bool:
+    """Return True if text passes the tiered admission rule.
 
-    KEYWORD-ONLY: a geo-direction match is NOT an admit path (detect_direction is used
-    solely for direction TAGGING elsewhere). The ``lexicon_terms`` iterable is loaded
-    once per :func:`collect_probe` call — no per-message DB queries.
+    Rule: 1 strong OR 2+ weak OR (1 weak + geo_hit). KEYWORD-ONLY: geo alone is NOT an
+    admit path — geo only PROMOTES a single weak hit (geo_hit is computed by the caller
+    via detect_place). The ``lexicon_tiers`` mapping is loaded once per collect_probe.
 
     Weather false-positive guard: if every matched term is an ambiguous weather word
     (град/смерч/торнадо) AND the text reads like a weather report, drop it.
     """
-    hits = matched_terms(text, lexicon_terms)
+    hits = matched_terms(text, lexicon_tiers)
     if not hits:
         return False
-    non_ambiguous = [t for t in hits if t not in AMBIGUOUS_WEATHER_TERMS]
-    if not non_ambiguous and _looks_like_weather(text):
+    non_weather = [t for (t, _tier) in hits if t not in AMBIGUOUS_WEATHER_TERMS]
+    if not non_weather and _looks_like_weather(text):
         return False
-    return True
+    strong = [t for (t, tier) in hits if tier == "strong"]
+    weak = [t for (t, tier) in hits if tier == "weak"]
+    if strong:
+        return True
+    if len(weak) >= 2:
+        return True
+    if len(weak) == 1 and geo_hit:
+        return True
+    return False
 
 
-def chat_message_relevant(text: str, author: str, lexicon_terms: tuple = (),
-                          keywords: tuple = ()) -> bool:
+def load_lexicon_tiers(session) -> dict[str, str]:
+    """Term→tier map for the admission gate. One query, loaded once per collect cycle."""
+    from .models import IntelLexicon
+    return {
+        (t or "").lower(): (tier or "weak")
+        for (t, tier) in session.query(IntelLexicon.term, IntelLexicon.tier).all()
+    }
+
+
+def _geo_hit(text: str) -> bool:
+    """True if the text names any tracked oblast/city (promotes a single weak hit)."""
+    from .geo import detect_place
+    key, city = detect_place(text)
+    return bool(key or city)
+
+
+def chat_message_relevant(text: str, author: str, lexicon_tiers=(),
+                          keywords: tuple = (), geo_hit: bool = False) -> bool:
     """Return True if a chat message is worth storing as an IntelMention.
 
     Hard drop conditions (any → False):
@@ -188,7 +214,7 @@ def chat_message_relevant(text: str, author: str, lexicon_terms: tuple = (),
     if not kw_hit and len(stripped) < MIN_TEXT_LEN:
         return False
 
-    return kw_hit or keyword_relevant(stripped, lexicon_terms)
+    return kw_hit or keyword_relevant(stripped, lexicon_tiers, geo_hit=geo_hit)
 
 
 # ── Spam-filter store helper ─────────────────────────────────────────────────
@@ -243,7 +269,7 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
     try:
         # Load lexicon terms once per call — shared by both channel and chat branches.
         # Word-boundary matching is done inside keyword_relevant / chat_message_relevant.
-        lexicon_terms = [t for (t,) in session.query(IntelLexicon.term).all()]
+        lexicon_terms = load_lexicon_tiers(session)
         if not lexicon_terms:
             log.warning("intel lexicon is empty — channel posts kept only on geo match (run lexicon seed)")
 

@@ -66,6 +66,16 @@ def test_detect_place_skips_actor_capital_metonymy():
     assert detect_place("ракетная опасность, Москва") == (None, "Москва")
 
 
+def test_detect_place_republic_abbreviations():
+    """Посты, где населённого пункта нет в газеттире, но указан регион-республика
+    («…, ДНР. фиксация БПЛА»), должны получать метку ДНР/ЛНР и привязку к фронту."""
+    from radar.intel.geo import detect_place
+    assert detect_place("Володарский район, Боевое, ДНР. фиксация БПЛА") == ("donetsk", "ДНР")
+    assert detect_place("обстрел по ЛНР") == ("luhansk", "ЛНР")
+    # не ломать обычные слова — «днр»/«лнр» не должны цепляться внутри слов
+    assert detect_place("просто новость про погоду") == (None, None)
+
+
 def test_resolve_direction_id_defaults_unassigned():
     from radar.intel import seed
     from radar.intel.tagging import resolve_direction_id

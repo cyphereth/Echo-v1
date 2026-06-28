@@ -316,3 +316,68 @@ def intel_search(
         .all()
     )
     return [aggregate.story_summary(session, st) for st in rows]
+
+
+# ── Feed v2 — multiplexed live stream ─────────────────────────────────────────
+
+def _feed_stream_gen(direction_keys, side, window_h):
+    """Sync generator yielding SSE chunks for the multiplexed feed.
+
+    Polls the DB every 2s for new IntelMention rows linked (via m2m) to any
+    of `direction_keys`, since the last-seen mention id. Each event is tagged
+    `{"direction": <key>, "event": {…}}`. Heartbeat every 15s.
+    """
+    from ..core.db import SessionLocal
+    last_id = 0
+    last_heartbeat = time.monotonic()
+    while True:
+        try:
+            with SessionLocal() as s:
+                # Resolve direction ids → keys each pass (cheap; ~8 columns).
+                dirs = (s.query(IntelDirection)
+                        .filter(IntelDirection.key.in_(direction_keys)).all())
+                id_to_key = {d.id: d.key for d in dirs}
+                if id_to_key:
+                    q = (s.query(IntelMention, IntelMentionDirection.direction_id,
+                                 IntelMentionDirection.match_type)
+                         .join(IntelMentionDirection,
+                               IntelMentionDirection.mention_id == IntelMention.id)
+                         .filter(IntelMentionDirection.direction_id.in_(list(id_to_key)),
+                                 IntelMention.id > last_id))
+                    if side:
+                        q = q.filter(IntelMention.side == side)
+                    since = datetime.now(timezone.utc) - timedelta(hours=window_h)
+                    q = q.filter(IntelMention.created_at >= since)
+                    for (m, did, mt) in q.order_by(IntelMention.id).all():
+                        last_id = max(last_id, m.id)
+                        payload = aggregate.feed_event(m, id_to_key.get(did, "?"), mt)
+                        yield f"data: {json.dumps(payload, default=str, ensure_ascii=False)}\n\n"
+        except Exception:
+            pass  # keep the stream alive on transient errors
+        if time.monotonic() - last_heartbeat > 15:
+            yield ": ping\n\n"
+            last_heartbeat = time.monotonic()
+        time.sleep(2)
+
+
+@router.get("/intel/feed/stream")
+def intel_feed_stream(
+    directions: str,
+    side: Optional[str] = None,
+    window: str = "24h",
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    """SSE stream of new mentions across the requested columns.
+
+    `directions` is a comma-separated list of direction keys. The server
+    polls every 2s and emits one event per new mention (tagged with the
+    direction it matched)."""
+    keys = [k.strip() for k in directions.split(",") if k.strip()]
+    if not keys:
+        raise HTTPException(400, "at least one direction required")
+    gen = _feed_stream_gen(keys, side, _hours(window))
+    return StreamingResponse(gen, media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no",
+                                      "Connection": "keep-alive"})

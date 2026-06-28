@@ -31,15 +31,17 @@ def _bootstrap():
         s.commit()
         d1 = s.query(IntelDirection).filter_by(key="bryansk").first()
         d2 = s.query(IntelDirection).filter_by(key="kharkiv").first()
-        m = IntelMention(direction_id=d2.id, platform="telegram", post_id="seed-p1",
-                        author="@ua", side="ua", text="обстріл під Брянськом",
-                        created_at=datetime.now(timezone.utc))
-        s.add(m); s.flush()
-        s.add_all([
-            IntelMentionDirection(mention_id=m.id, direction_id=d2.id, match_type="source"),
-            IntelMentionDirection(mention_id=m.id, direction_id=d1.id, match_type="geo"),
-        ])
-        s.commit()
+        existing = s.query(IntelMention).filter_by(platform="telegram", post_id="seed-p1").first()
+        if existing is None:
+            m = IntelMention(direction_id=d2.id, platform="telegram", post_id="seed-p1",
+                            author="@ua", side="ua", text="обстріл під Брянськом",
+                            created_at=datetime.now(timezone.utc))
+            s.add(m); s.flush()
+            s.add_all([
+                IntelMentionDirection(mention_id=m.id, direction_id=d2.id, match_type="source"),
+                IntelMentionDirection(mention_id=m.id, direction_id=d1.id, match_type="geo"),
+            ])
+            s.commit()
     _SETUP = (client, tok)
     return _SETUP
 
@@ -90,3 +92,28 @@ def test_post_directions_rejects_duplicate_key():
                     headers={"Authorization": f"Bearer {tok}"},
                     json={"key": "bryansk", "name": "dup", "geo_terms": []})
     assert r.status_code == 409
+
+
+def test_feed_stream_yields_events_tagged_with_direction():
+    """The SSE generator yields at least one event tagged with the seeded
+    bryansk direction. Drained synchronously under a thread timeout — full
+    SSE over TestClient hangs on infinite streams."""
+    import threading
+    from radar.intel.api import _feed_stream_gen
+    chunks = []
+    error = []
+
+    def drain():
+        try:
+            for chunk in _feed_stream_gen(["bryansk", "kharkiv"], None, 24):
+                chunks.append(chunk)
+                if any("data:" in c for c in chunks):
+                    break
+        except Exception as e:
+            error.append(e)
+
+    t = threading.Thread(target=drain, daemon=True)
+    t.start()
+    t.join(timeout=10)
+    assert not error, error
+    assert any("bryansk" in c for c in chunks), chunks

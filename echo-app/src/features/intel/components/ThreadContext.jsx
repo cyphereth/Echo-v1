@@ -20,7 +20,14 @@ export function ThreadContext({ mentionId }) {
       .finally(() => setLoading(false));
   }
 
-  const borderStyle = { borderLeft: '2px solid #2BB3C7', paddingLeft: 8, margin: '4px 0' };
+  // Подложка + светлый текст: в треде сообщения должны читаться так же легко, как
+  // основная лента (раньше были тускло-серыми #4A6378 на тёмном фоне).
+  const borderStyle = {
+    borderLeft: '2px solid #2BB3C7', padding: '6px 10px', margin: '4px 0',
+    background: 'rgba(43, 179, 199, 0.07)', borderRadius: 4,
+  };
+  const msgStyle = { color: '#CBD9E3', fontSize: 12, lineHeight: 1.45, marginBottom: 4 };
+  const authorStyle = { color: '#5FB6C7', fontWeight: 600, marginRight: 4 };
   const hasCtx = ctx && ((ctx.reply_chain?.length || 0) + (ctx.siblings?.length || 0)) > 0;
 
   return (
@@ -35,9 +42,8 @@ export function ThreadContext({ mentionId }) {
         hasCtx ? (
           <div style={borderStyle}>
             {[...(ctx.reply_chain || [])].reverse().map((p, i) => (
-              <div key={p.tg_msg_id} style={{ color: '#4A6378', fontSize: 11, marginBottom: 2,
-                                              paddingLeft: i * 8 }}>
-                <span style={{ color: '#3A5368', marginRight: 4 }}>{p.author}</span>
+              <div key={p.tg_msg_id} style={{ ...msgStyle, paddingLeft: i * 8 }}>
+                <span style={authorStyle}>{p.author}</span>
                 {p.media && (
                   <MediaPreview kind={p.media}
                     url={`/intel/mention/${mentionId}/parent-media/${p.tg_msg_id}`}
@@ -47,15 +53,15 @@ export function ThreadContext({ mentionId }) {
               </div>
             ))}
             {(ctx.siblings || []).map(s => (
-              <div key={s.tg_msg_id} style={{ color: '#4A6378', fontSize: 11, marginBottom: 2,
+              <div key={s.tg_msg_id} style={{ ...msgStyle,
                                               paddingLeft: (ctx.reply_chain?.length || 0) * 8 }}>
-                <span style={{ color: '#3A5368', marginRight: 4 }}>{s.author}</span>
+                <span style={authorStyle}>{s.author}</span>
                 {s.text}
               </div>
             ))}
           </div>
         ) : (
-          <div style={{ ...borderStyle, color: '#4A6378', fontSize: 11 }}>
+          <div style={{ ...borderStyle, color: '#8FA6B5', fontSize: 12 }}>
             Родительское сообщение ещё не подгружено.
           </div>
         )

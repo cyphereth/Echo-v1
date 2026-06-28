@@ -61,6 +61,42 @@ def retag_unassigned_geo(session, limit: int = 4000) -> int:
     return changed
 
 
+def backfill_translate_and_geo(session, limit: int = 50000) -> dict[str, int]:
+    """One-off repair for posts stored BEFORE translation/locality landed: re-translate
+    Ukrainian text to Russian and stamp the 📍 settlement (and front) extracted from the
+    (translated) text. Deterministic, idempotent — re-running on Russian text leaves it
+    unchanged. Curator subjects are never cleared: subject is only ever set, when the text
+    itself names a settlement (the same 'text wins' rule as tag_geo).
+
+    Returns counts: {'scanned', 'translated', 'subject_set', 'redirected'}.
+    """
+    from .models import IntelMention
+    from .geo import detect_place
+    from .translate import maybe_translate
+    rows = (session.query(IntelMention)
+            .order_by(IntelMention.id.desc()).limit(limit).all())
+    n = {"scanned": 0, "translated": 0, "subject_set": 0, "redirected": 0}
+    for m in rows:
+        n["scanned"] += 1
+        new_text = maybe_translate(m.text or "")
+        if new_text != m.text:
+            m.text = new_text
+            n["translated"] += 1
+        key, city = detect_place(new_text)
+        if city and city != m.subject:
+            m.subject = city
+            n["subject_set"] += 1
+        if key:
+            did = resolve_direction_id(session, key)
+            if did != m.direction_id:
+                m.direction_id = did
+                n["redirected"] += 1
+        if n["scanned"] % 200 == 0:
+            session.commit()
+    session.commit()
+    return n
+
+
 def _llm_classify(text: str, keys: list[str], glossary: str) -> str | None:
     """Ask the LLM which direction key the text belongs to, or None. Raises
     LLMNotConfigured if no key — caller treats that as 'skip'."""

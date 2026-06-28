@@ -205,6 +205,40 @@ PLACE_ONLY: dict[str, str] = {
 }
 
 
+# Capital cities that double as political actors ("удары Киева", "Москва заявила") and so
+# are prone to metonymy false-positives. For these (and only these) a match is vetoed when
+# the surrounding grammar marks the city as an ACTOR rather than a LOCATION — see
+# _actor_metonym. Ordinary settlements/fronts are never gated (a front is rarely a metonym
+# and «Суджа под огнём» has no preposition), so direction detection is untouched.
+_ACTOR_CITIES = {"Киев", "Москва"}
+# Locative prepositions: their presence right before the city marks it as a place, not an
+# actor («над Киевом», «под Москвой», «по Киеву»). RU + UA forms.
+_LOCATIVE_PREPS = {
+    "в", "во", "на", "под", "у", "из", "из-под", "около", "возле", "близ", "над",
+    "к", "до", "по", "при", "над", "біля", "під", "у", "в", "з", "до", "на", "по",
+}
+# Speech / decision verbs that follow an actor-city («Киев заявил», «Москва решила»).
+_ACTOR_VERB = re.compile(
+    r"\b(заяв|сообщ|призва|объяв|реш|готов|обвин|пригроз|анонс|подтвер|настаив|"
+    r"потреб|предлож|намер|отверг|осуд|счит|план|обещ|пообещ|допуст|раскрыл)")
+
+
+def _actor_metonym(low: str, start: int, end: int, city: str | None) -> bool:
+    """True when the matched actor-capital reads as a political ACTOR, not a place:
+    preceded directly by a non-preposition word (genitive «ударов/власти Киева») or
+    followed by a speech/decision verb («Киев заявил»). A leading preposition, comma,
+    or sentence start keeps it as a location."""
+    if city not in _ACTOR_CITIES:
+        return False
+    pre = low[:start].rstrip()
+    m = re.search(r"([а-яёa-zії'\-]+)\s*$", pre)
+    if m and m.group(1) not in _LOCATIVE_PREPS:
+        return True  # «ударов Киева» — genitive actor, no locative preposition
+    if _ACTOR_VERB.search(low[end:end + 24]):
+        return True  # «Киев заявил/решил…»
+    return False
+
+
 def detect_place(text: str) -> tuple[str | None, str | None]:
     """Return (direction_key, city) for the first geo term found in `text`.
 
@@ -212,17 +246,20 @@ def detect_place(text: str) -> tuple[str | None, str | None]:
     endings are caught, e.g. «в Судже» → Суджа). `city` is the canonical display name of
     the matched stem, or None for a region-level stem (oblast still returned).
     GEO_KEYWORDS (front directions) is scanned first, then PLACE_ONLY (📍-only cities,
-    which return direction=None). First match wins. No match → (None, None)."""
+    which return direction=None). First match wins. Actor-capital metonyms are skipped
+    (see _actor_metonym). No match → (None, None)."""
     if not text:
         return None, None
     low = text.lower()
     for key, terms in GEO_KEYWORDS.items():
         for stem, city in terms.items():
-            if re.search(r"(?<!\w)" + re.escape(stem), low):
-                return key, city
+            for mt in re.finditer(r"(?<!\w)" + re.escape(stem), low):
+                if not _actor_metonym(low, mt.start(), mt.end(), city):
+                    return key, city
     for stem, city in PLACE_ONLY.items():
-        if re.search(r"(?<!\w)" + re.escape(stem), low):
-            return None, city
+        for mt in re.finditer(r"(?<!\w)" + re.escape(stem), low):
+            if not _actor_metonym(low, mt.start(), mt.end(), city):
+                return None, city
     return None, None
 
 

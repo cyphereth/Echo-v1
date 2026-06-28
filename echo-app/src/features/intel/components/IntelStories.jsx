@@ -68,6 +68,13 @@ export function IntelStories({ timeRange, openStoryId, openDirection, navToken }
       .catch(() => {});
   }
 
+  function muteStory(id, ev) {
+    ev.stopPropagation();
+    setList(prev => prev.filter(s => s.id !== id));
+    setSel(cur => (cur === id ? null : cur));
+    intelApi.muteStory(id).catch(() => { /* optimistic */ });
+  }
+
   return (
     <div className={styles.gridSplit} style={{ flex: 1 }}>
       {/* left: list + filters */}
@@ -118,6 +125,13 @@ export function IntelStories({ timeRange, openStoryId, openDirection, navToken }
                 style={{ position: 'absolute', top: 6, right: 6, background: 'none', border: 'none',
                          color: '#4A6378', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: 2 }}>
                 ✕
+              </button>
+              <button
+                onClick={(ev) => muteStory(s.id, ev)}
+                title="Не сигналить по этому сюжету (источник остаётся)"
+                style={{ position: 'absolute', top: 6, right: 24, background: 'none', border: 'none',
+                         color: '#4A6378', cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: 2 }}>
+                🔕
               </button>
               <div className={styles.storyCardTitle} style={{ paddingRight: 16 }}>{s.title}</div>
               <div className={styles.storyCardMeta}>

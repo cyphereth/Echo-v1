@@ -43,6 +43,7 @@ export function IntelApp({ onExit }) {
   const [searchResults, setSearchResults] = useState(null);
   const [liveEvents, setLiveEvents] = useState([]);
   const [alerts, setAlerts]         = useState([]);
+  const [muted, setMuted] = useState({ stories: [], directions: [] });
   const [toasts, setToasts]         = useState([]);
   const seenAlert = useRef(new Set());
 
@@ -53,6 +54,7 @@ export function IntelApp({ onExit }) {
       rows.forEach(a => seenAlert.current.add(a.id));
       setAlerts(rows);
     }).catch(() => {});
+    intelApi.mutedList().then(setMuted).catch(() => {});
 
     const stop = streamLiveEvents({
       // -1 → сервер стартует с max(alert.id): шлёт ТОЛЬКО новые сигналы, появившиеся
@@ -84,6 +86,29 @@ export function IntelApp({ onExit }) {
   const ackAll = useCallback(async () => {
     setAlerts(prev => prev.map(a => ({ ...a, acknowledged: true })));
     try { await intelApi.ackAllAlerts(); } catch { /* optimistic */ }
+  }, []);
+
+  const muteFromAlert = useCallback(async (a) => {
+    // оптимистично убираем все сигналы того же объекта из ленты
+    setAlerts(prev => prev.filter(x => a.scope === 'direction'
+      ? x.direction_id !== a.direction_id
+      : x.story_id !== a.story_id));
+    try {
+      if (a.scope === 'direction') await intelApi.muteDirection(a.direction_id);
+      else await intelApi.muteStory(a.story_id);
+      setMuted(await intelApi.mutedList());
+    } catch { /* optimistic */ }
+  }, []);
+
+  const unmute = useCallback(async (kind, id) => {
+    setMuted(prev => ({
+      stories: kind === 'story' ? prev.stories.filter(s => s.id !== id) : prev.stories,
+      directions: kind === 'direction' ? prev.directions.filter(d => d.id !== id) : prev.directions,
+    }));
+    try {
+      if (kind === 'direction') await intelApi.unmuteDirection(id);
+      else await intelApi.unmuteStory(id);
+    } catch { /* optimistic */ }
   }, []);
 
   const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
@@ -149,7 +174,7 @@ export function IntelApp({ onExit }) {
           </div>
           <div className={styles.topgrow} />
           <AlertBell alerts={visibleAlerts} unreadCount={unreadCount} onAck={ackAlert} onAckAll={ackAll}
-                     onOpen={openAlert} />
+                     onOpen={openAlert} onMute={muteFromAlert} muted={muted} onUnmute={unmute} />
           <DateRangePicker value={timeRange} onChange={setTimeRange} />
           <div className={styles.searchBox}>
             <Icon name="search" size={13} color="#4A6378" />

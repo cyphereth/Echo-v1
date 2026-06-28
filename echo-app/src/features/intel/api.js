@@ -35,6 +35,11 @@ export const intelApi = {
   ackAllAlerts: ()            => request('/intel/alerts/ack-all', { method: 'POST' }),
   mentionContext: (id)        => request(`/intel/mention/${id}/context`),
   hideMention: (id)           => request(`/intel/mention/${id}/hide`, { method: 'POST' }),
+  muteStory:      (id) => request(`/intel/stories/${id}/mute`, { method: 'POST' }),
+  unmuteStory:    (id) => request(`/intel/stories/${id}/unmute`, { method: 'POST' }),
+  muteDirection:  (id) => request(`/intel/directions/${id}/mute`, { method: 'POST' }),
+  unmuteDirection:(id) => request(`/intel/directions/${id}/unmute`, { method: 'POST' }),
+  mutedList:      ()   => request('/intel/muted'),
 };
 
 // ── Live event stream (SSE) ─────────────────────────────────────────────────

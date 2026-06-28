@@ -62,6 +62,10 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
     "intel_mentions": {
         "hidden": "BOOLEAN NOT NULL DEFAULT 0",
         "media":  "TEXT",
+        "subject": "TEXT",
+    },
+    "intel_probes": {
+        "subject": "TEXT",
     },
     "intel_thread_context": {
         "media": "TEXT",

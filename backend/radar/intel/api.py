@@ -413,7 +413,7 @@ def intel_search(
 
 # ── Sources management ────────────────────────────────────────────────────────
 
-def _probe_dict(p: IntelProbe) -> dict:
+def _probe_dict(p: IntelProbe, dir_key: str | None = None) -> dict:
     nra = p.next_run_at.isoformat() if p.next_run_at else None
     # watermark is the last-seen post_id (a STRING), not a timestamp — do NOT call
     # .isoformat() on it. Surface a simple collected flag + the raw watermark.
@@ -422,10 +422,32 @@ def _probe_dict(p: IntelProbe) -> dict:
         "handle": p.query,
         "side": p.side,
         "kind": p.kind,
+        "subject": getattr(p, "subject", None),
+        "direction": dir_key,  # oblast key (None until set); resolved by caller
         "collected": p.watermark is not None,
         "last_collected": p.watermark,  # raw post_id string (None until first collect)
         "next_run_at": nra,
     }
+
+
+def _resolve_direction(session, key: str | None) -> Optional[int]:
+    """Map a direction key to its id for storing on a source. Empty/None clears it;
+    an unknown key is a client error."""
+    if not key:
+        return None
+    d = session.query(IntelDirection).filter_by(key=key).first()
+    if d is None:
+        raise HTTPException(400, f"Unknown direction '{key}'")
+    return d.id
+
+
+def _dir_keys(session, probes: list[IntelProbe]) -> dict:
+    """Batch-resolve direction_id -> key for a list of probes (one query)."""
+    ids = {p.direction_id for p in probes if p.direction_id}
+    if not ids:
+        return {}
+    rows = session.query(IntelDirection.id, IntelDirection.key).filter(IntelDirection.id.in_(ids)).all()
+    return {i: k for (i, k) in rows}
 
 
 @router.get("/intel/sources")
@@ -442,7 +464,8 @@ def intel_sources_list(
     if kind:
         q = q.filter(IntelProbe.kind == kind)
     rows = q.order_by(IntelProbe.id).limit(limit).all()
-    return [_probe_dict(p) for p in rows]
+    keys = _dir_keys(session, rows)
+    return [_probe_dict(p, keys.get(p.direction_id)) for p in rows]
 
 
 @router.post("/intel/sources")
@@ -460,18 +483,23 @@ def intel_sources_create(
         raise HTTPException(400, f"Invalid kind '{kind}'. Must be one of: {sorted(_VALID_KINDS)}")
     if not link:
         raise HTTPException(400, "link is required")
+    subject = (body.get("subject") or "").strip() or None
+    direction_id = _resolve_direction(session, (body.get("direction") or "").strip() or None)
     existing = session.query(IntelProbe).filter_by(query=link).first()
     if existing:
-        return {**_probe_dict(existing), "created": False}
+        keys = _dir_keys(session, [existing])
+        return {**_probe_dict(existing, keys.get(existing.direction_id)), "created": False}
     # next_run_at in the past → the source jumps to the FRONT of the due queue, so the
     # ticker polls it on its very next pass (within one tick) instead of after the
     # backlog of already-scheduled sources.
     probe = IntelProbe(platform="telegram", kind=kind, query=link, side=side,
+                       subject=subject, direction_id=direction_id,
                        next_run_at=datetime(1970, 1, 1, tzinfo=timezone.utc))
     session.add(probe)
     session.commit()
     session.refresh(probe)
-    return {**_probe_dict(probe), "created": True}
+    keys = _dir_keys(session, [probe])
+    return {**_probe_dict(probe, keys.get(probe.direction_id)), "created": True}
 
 
 @router.patch("/intel/sources/{source_id}")
@@ -494,9 +522,14 @@ def intel_sources_update(
         if side not in _VALID_SIDES:
             raise HTTPException(400, f"Invalid side '{side}'. Must be one of: {sorted(_VALID_SIDES)}")
         probe.side = side
+    if "subject" in body:
+        probe.subject = (body.get("subject") or "").strip() or None
+    if "direction" in body:
+        probe.direction_id = _resolve_direction(session, (body.get("direction") or "").strip() or None)
     session.commit()
     session.refresh(probe)
-    return _probe_dict(probe)
+    keys = _dir_keys(session, [probe])
+    return _probe_dict(probe, keys.get(probe.direction_id))
 
 
 @router.delete("/intel/sources/{source_id}")

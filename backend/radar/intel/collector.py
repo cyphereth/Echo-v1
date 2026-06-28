@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from .models import IntelLexicon, IntelMention, IntelProbe
 from .geo import detect_direction
-from .tagging import resolve_direction_id
+from .tagging import resolve_direction_id, tag_geo
 from .translate import maybe_translate
 from .spam_filter import load_spam, load_keywords, blocked_by_word, classify_spam_batch, is_exact_spam
 from ..core.spam import looks_like_ad_cheap
@@ -287,9 +287,10 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                 if blocked_by_word(text, blocklist):
                     continue
 
-                dir_id = resolve_direction_id(session, detect_direction(text))
+                dir_id, subject = tag_geo(session, probe, text)
                 pending.append(IntelMention(
                     direction_id=dir_id,
+                    subject=subject,
                     platform=probe.platform,
                     post_id=post.post_id,
                     author=author,
@@ -356,9 +357,10 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                     if blocked_by_word(text, blocklist):
                         continue
 
-                    dir_id = resolve_direction_id(session, detect_direction(text))
+                    dir_id, subject = tag_geo(session, probe, text)
                     pending.append(IntelMention(
                         direction_id=dir_id,
+                        subject=subject,
                         platform=probe.platform,
                         post_id=post.post_id,
                         author=post.author or "",

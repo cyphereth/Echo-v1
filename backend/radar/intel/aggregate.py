@@ -104,6 +104,7 @@ def event(m) -> dict:
             "post_id": m.post_id,
             "text": m.text, "url": tg_url(m), "created_at": _aware(m.created_at).isoformat(),
             "verified": bool(m.verified), "direction": m.direction_id,
+            "subject": getattr(m, "subject", None),
             "sig": content_sig(m.text),
             "is_reply": bool(getattr(m, "reply_to_tg_id", None)),
             "reply_to_tg_id": getattr(m, "reply_to_tg_id", None),

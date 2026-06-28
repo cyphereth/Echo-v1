@@ -262,6 +262,7 @@ function StoryDetail({ detail }) {
                 <div className={styles.eventBody}>
                   <div className={styles.eventText}>{e.text}</div>
                   <div className={styles.eventMeta}>
+                    {e.subject && <span style={{ color: '#57D2E2' }}>📍 {e.subject} · </span>}
                     {e.author}{e.verified ? ' · ✓' : ''}
                     {e.url && (
                       <> · <a href={e.url} target="_blank" rel="noopener noreferrer"

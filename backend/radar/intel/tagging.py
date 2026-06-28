@@ -12,6 +12,26 @@ def resolve_direction_id(session, key: str | None) -> int:
     return seed.ensure_unassigned_direction(session).id
 
 
+def tag_geo(session, probe, text: str) -> tuple[int, str | None]:
+    """Resolve (direction_id, subject) for a post from `probe`.
+
+    Text wins for the oblast: if the post text names a place, use that direction.
+    The source's subject (a curator-set locality) is only attached when it would not
+    contradict the text — i.e. when the text named nothing, or named the same oblast
+    the source belongs to. A repost about a different region thus gets no false city.
+    """
+    from .geo import detect_direction
+    subject = getattr(probe, "subject", None)
+    src_dir = getattr(probe, "direction_id", None)
+    key = detect_direction(text)
+    if key:
+        dir_id = resolve_direction_id(session, key)
+        return dir_id, (subject if (src_dir and dir_id == src_dir) else None)
+    # Text named no place — fall back to the source's oblast + locality.
+    dir_id = src_dir or resolve_direction_id(session, None)
+    return dir_id, subject
+
+
 def retag_unassigned_geo(session, limit: int = 4000) -> int:
     """Re-tag 'unassigned' mentions using the (expanded) geo gazetteer — deterministic,
     no LLM. Run after the gazetteer grows so already-stored posts that now match a

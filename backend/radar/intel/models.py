@@ -25,6 +25,10 @@ class IntelProbe(Base):
     watermark:    Mapped[Optional[str]] = mapped_column(Text)
     next_run_at:  Mapped[datetime] = mapped_column(default=_now)
     interval_sec: Mapped[int]      = mapped_column(Integer, default=3600)
+    # Curator-set locality (city/town/settlement) this source covers. Free text.
+    # Stamped onto collected mentions as a fallback geo label when the post text
+    # itself names no place. direction_id (above) is the oblast-level fallback.
+    subject:      Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class IntelMention(Base):
@@ -49,6 +53,7 @@ class IntelMention(Base):
     context_fetched: Mapped[bool]          = mapped_column(Boolean, default=False, server_default="0")
     hidden:          Mapped[bool]          = mapped_column(Boolean, default=False, server_default="0")  # soft-hide: куратор скинул в спам
     media:           Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # "photo"|"video"|"file" если к посту приложено вложение
+    subject:         Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # населённый пункт-ярлык, проставленный из источника при сборе
 
 
 class IntelIncident(Base):

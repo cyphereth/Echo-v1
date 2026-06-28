@@ -19,6 +19,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
   const [stream, setStream]     = useState([]);
   const [flashIds, setFlashIds] = useState(() => new Set());
   const [hiddenIds, setHiddenIds] = useState(() => new Set());
+  const [subjectFilter, setSubjectFilter] = useState(null);  // фильтр ленты по нас. пункту
   const seenRef                 = useRef(new Set());
 
   // Throw a post into the spam filter (kind="example") and hide it from the feed.
@@ -112,8 +113,15 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
       bySig.set(key, out.length);
       out.push({ ...e, _dups: 1, _srcs: new Set(e.author ? [e.author] : []) });
     }
-    return out;
-  }, [stream, hiddenIds]);
+    return subjectFilter ? out.filter(e => e.subject === subjectFilter) : out;
+  }, [stream, hiddenIds, subjectFilter]);
+
+  // Уникальные нас. пункты в текущей ленте — для чип-фильтра.
+  const subjects = useMemo(() => {
+    const s = new Set();
+    for (const e of stream) if (e.subject) s.add(e.subject);
+    return Array.from(s).sort();
+  }, [stream]);
 
   if (!data) return <div className={styles.workspace}><div className={styles.empty}>Загрузка обстановки…</div></div>;
 
@@ -248,6 +256,16 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
               </span>
             )}
           </div>
+          {subjects.length > 0 && (
+            <div className={styles.srcFilters} style={{ flexWrap: 'wrap', padding: '4px 0' }}>
+              <button className={styles.filterChip} data-active={subjectFilter === null ? '1' : '0'}
+                      onClick={() => setSubjectFilter(null)}>ВСЕ</button>
+              {subjects.map(s => (
+                <button key={s} className={styles.filterChip} data-active={subjectFilter === s ? '1' : '0'}
+                        onClick={() => setSubjectFilter(s)}>📍 {s}</button>
+              ))}
+            </div>
+          )}
           <div className={styles.scrollBody}>
           {feed.map(e => {
             const sd = SIDE[e.side] || SIDE.ru;
@@ -267,6 +285,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
                     {snippet(e.text)}
                   </div>
                   <div className={styles.eventMeta}>
+                    {e.subject && <span style={{ color: '#57D2E2' }}>📍 {e.subject} · </span>}
                     {e.author} · {DIRECTION_NAMES[e.direction]?.split(' ')[0] || e.direction}
                     {dups > 1 ? ` · ${dups} канал.` : ''}
                     {e.verified ? ' · ✓' : ''}

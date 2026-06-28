@@ -424,6 +424,10 @@ class TelegramProvider(SearchProvider):
         except FloodWaitError as e:
             log.warning("Telegram flood wait %ds", e.seconds)
             raise TelegramFloodWait(e.seconds)
+        except TelegramFloodWait:
+            # Parked-flood fast-fail from _await — propagate so the caller backs off
+            # instead of treating it as an ordinary join failure and moving on.
+            raise
         except Exception as e:
             log.warning("Telegram join failed (%s): %s", h, type(e).__name__)
             return False
@@ -476,6 +480,9 @@ class TelegramProvider(SearchProvider):
         except (InviteHashExpiredError, InviteHashInvalidError) as e:
             log.warning("Telegram invite invalid (%s): %s", raw, type(e).__name__)
             return None
+        except TelegramFloodWait:
+            # Parked-flood fast-fail from _await — propagate so the caller backs off.
+            raise
         except Exception as e:
             log.warning("Telegram invite join failed (%s): %s", raw, type(e).__name__)
             return None

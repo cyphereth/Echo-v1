@@ -19,10 +19,15 @@ def _ensure_joined(probe: IntelProbe, tg_provider, session: Session) -> bool:
     (resolved to the same query as another probe) and was therefore deleted —
     the caller must then skip collecting it.
     """
+    from ..core.providers.telegram import TelegramFloodWait
+    from . import subscribe
     q = probe.query or ""
     try:
         if collector._is_invite_link(q):
+            if subscribe.already_joined(q):
+                return True  # already a member — don't re-import the invite every tick
             resolved = tg_provider.join_invite(q)
+            subscribe.mark_joined(q)
             if resolved and resolved != q:
                 # Different invite links can resolve to the SAME chat (#id) or
                 # @handle. If another probe already tracks the resolved target,
@@ -41,8 +46,15 @@ def _ensure_joined(probe: IntelProbe, tg_provider, session: Session) -> bool:
                 session.commit()
         else:
             handle = collector._clean_handle(q)
-            if handle:
-                tg_provider.join_channel(handle)
+            if handle and not subscribe.already_joined(handle):
+                # Join once and remember it. Re-issuing JoinChannelRequest for an
+                # already-joined channel on every tick is what earns multi-hour bans.
+                if tg_provider.join_channel(handle):
+                    subscribe.mark_joined(handle)
+    except TelegramFloodWait:
+        # Account is flood-parked — abort the whole batch (caller backs off) instead
+        # of churning through the rest of the due probes.
+        raise
     except Exception:
         log.warning("join failed for probe %s (%s) — will still attempt collect", probe.id, q)
     return True

@@ -671,6 +671,77 @@ def intel_alert_ack(
     return {"ok": True}
 
 
+@router.post("/intel/stories/{story_id}/mute")
+def intel_story_mute(
+    story_id: int,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    """Заглушить сюжет: больше не сигналит + удалить его текущие алерты."""
+    st = session.get(IntelStory, story_id)
+    if st is None:
+        raise HTTPException(404, "Story not found")
+    st.muted = True
+    session.query(IntelAlert).filter(IntelAlert.story_id == story_id).delete()
+    session.commit()
+    return {"ok": True}
+
+
+@router.post("/intel/stories/{story_id}/unmute")
+def intel_story_unmute(
+    story_id: int,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    st = session.get(IntelStory, story_id)
+    if st is None:
+        raise HTTPException(404, "Story not found")
+    st.muted = False
+    session.commit()
+    return {"ok": True}
+
+
+@router.post("/intel/directions/{direction_id}/mute")
+def intel_direction_mute(
+    direction_id: int,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    """Заглушить направление: больше не сигналит + удалить все алерты этого направления."""
+    d = session.get(IntelDirection, direction_id)
+    if d is None:
+        raise HTTPException(404, "Direction not found")
+    d.muted = True
+    session.query(IntelAlert).filter(IntelAlert.direction_id == direction_id).delete()
+    session.commit()
+    return {"ok": True}
+
+
+@router.post("/intel/directions/{direction_id}/unmute")
+def intel_direction_unmute(
+    direction_id: int,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    d = session.get(IntelDirection, direction_id)
+    if d is None:
+        raise HTTPException(404, "Direction not found")
+    d.muted = False
+    session.commit()
+    return {"ok": True}
+
+
+@router.get("/intel/muted")
+def intel_muted(
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    stories = session.query(IntelStory).filter(IntelStory.muted.is_(True)).all()
+    dirs = session.query(IntelDirection).filter(IntelDirection.muted.is_(True)).all()
+    return {"stories": [{"id": s.id, "title": s.title} for s in stories],
+            "directions": [{"id": d.id, "name": d.name} for d in dirs]}
+
+
 def _hide_mention(session: Session, m: IntelMention) -> None:
     """Soft-hide одного упоминания + best-effort декремент счётчика владеющего сюжета
     (не ниже 0). Не коммитит — это делает вызывающий. Идемпотентность проверяет caller."""

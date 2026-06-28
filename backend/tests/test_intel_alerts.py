@@ -279,3 +279,73 @@ def test_scan_direction_alerts_skips_muted_direction():
     s.flush()
     assert alerts.scan_direction_alerts(s) == []
     assert s.query(IntelAlert).count() == 0
+
+
+def test_mute_story_sets_flag_and_deletes_alerts():
+    from radar.intel import alerts
+    from radar.intel.models import IntelStory, IntelAlert
+    s = _mem_threadsafe()
+    d = _direction(s)
+    st = _anomalous_story(s, d.id)
+    alerts._emit(s, "story", "spike", title="t", message="m", magnitude=1.0,
+                 direction_id=d.id, story_id=st.id)
+    s.commit()
+    c = _client(s)
+
+    assert c.post(f"/intel/stories/{st.id}/mute").json()["ok"] is True
+    s.expire_all()
+    assert s.get(IntelStory, st.id).muted is True
+    assert s.query(IntelAlert).filter_by(story_id=st.id).count() == 0
+
+    assert c.post(f"/intel/stories/{st.id}/unmute").json()["ok"] is True
+    s.expire_all()
+    assert s.get(IntelStory, st.id).muted is False
+
+
+def test_mute_direction_sets_flag_and_deletes_alerts():
+    from radar.intel import alerts
+    from radar.intel.models import IntelDirection, IntelAlert
+    s = _mem_threadsafe()
+    d = _direction(s)
+    alerts._emit(s, "direction", "direction_burst", title="Курское",
+                 message="Всплеск", magnitude=300.0, direction_id=d.id)
+    s.commit()
+    c = _client(s)
+
+    assert c.post(f"/intel/directions/{d.id}/mute").json()["ok"] is True
+    s.expire_all()
+    assert s.get(IntelDirection, d.id).muted is True
+    assert s.query(IntelAlert).filter_by(direction_id=d.id).count() == 0
+
+    assert c.post(f"/intel/directions/{d.id}/unmute").json()["ok"] is True
+    s.expire_all()
+    assert s.get(IntelDirection, d.id).muted is False
+
+
+def test_muted_list_returns_both():
+    from radar.intel.models import IntelStory
+    from datetime import datetime, timezone
+    s = _mem_threadsafe()
+    d = _direction(s)
+    d.muted = True
+    base = datetime(2026, 6, 20, tzinfo=timezone.utc)
+    st = IntelStory(direction_id=d.id, title="заглушённый", muted=True,
+                    first_seen_at=base, last_seen_at=base)
+    s.add(st); s.commit()
+    c = _client(s)
+
+    body = c.get("/intel/muted").json()
+    assert [x["title"] for x in body["stories"]] == ["заглушённый"]
+    assert [x["name"] for x in body["directions"]] == ["Курское"]
+
+
+def test_alert_payload_includes_direction_id():
+    from radar.intel import alerts
+    s = _mem_threadsafe()
+    d = _direction(s)
+    alerts._emit(s, "direction", "direction_burst", title="Курское",
+                 message="Всплеск", magnitude=300.0, direction_id=d.id)
+    s.commit()
+    c = _client(s)
+    listed = c.get("/intel/alerts?unread=true").json()
+    assert listed[0]["direction_id"] == d.id

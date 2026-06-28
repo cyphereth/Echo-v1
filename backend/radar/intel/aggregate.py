@@ -256,6 +256,7 @@ def compute_overview_range(session, from_dt, to_dt) -> dict:
 def alert_payload(session, a) -> dict:
     d = session.get(IntelDirection, a.direction_id) if a.direction_id else None
     return {"id": a.id, "scope": a.scope, "story_id": a.story_id,
+            "direction_id": a.direction_id,
             "direction": d.key if d else None, "kind": a.kind,
             "magnitude": a.magnitude, "title": a.title, "message": a.message,
             "at": _aware(a.fired_at).isoformat() if a.fired_at else None,

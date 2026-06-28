@@ -44,7 +44,7 @@ class IntelFeedLayout(Base):
 class IntelProbe(Base):
     __tablename__ = "intel_probes"
     id:           Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
-    direction_id: Mapped[int]      = mapped_column(ForeignKey("intel_directions.id"), nullable=False)
+    direction_id: Mapped[Optional[int]] = mapped_column(ForeignKey("intel_directions.id"))
     platform:     Mapped[str]      = mapped_column(Text)
     kind:         Mapped[str]      = mapped_column(Text)              # channel | global
     query:        Mapped[str]      = mapped_column(Text)
@@ -110,3 +110,12 @@ class IntelStoryPoint(Base):
     bucket_start:  Mapped[datetime] = mapped_column(nullable=False)
     mention_count: Mapped[int]      = mapped_column(Integer, default=0)
     source_count:  Mapped[int]      = mapped_column(Integer, default=0)
+
+
+class IntelLexicon(Base):
+    __tablename__ = "intel_lexicon"
+    id:         Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
+    term:       Mapped[str]      = mapped_column(Text, unique=True, nullable=False)
+    meaning:    Mapped[str]      = mapped_column(Text, default="")
+    category:   Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(default=_now)

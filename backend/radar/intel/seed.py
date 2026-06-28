@@ -10,6 +10,15 @@ from .geo_dict import DEFAULT_DIRECTIONS, GEO_DICT_VERSION
 _META_KEY = "__geo_dict_version__"
 
 
+def ensure_unassigned_direction(session) -> IntelDirection:
+    d = session.query(IntelDirection).filter_by(key="unassigned").first()
+    if d is None:
+        d = IntelDirection(key="unassigned", name="Без направления")
+        session.add(d)
+        session.commit()
+    return d
+
+
 def ensure_default_directions(session) -> None:
     # Version guard: if a previous seed wrote a different version, refresh.
     meta = session.query(IntelDirection).filter_by(key=_META_KEY).first()
@@ -36,3 +45,4 @@ def ensure_default_directions(session) -> None:
         else:
             meta.name = str(GEO_DICT_VERSION)
     session.commit()
+    ensure_unassigned_direction(session)

@@ -99,12 +99,55 @@ def _migrate() -> None:
                     conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
 
+def _fix_intel_probes_nullable() -> None:
+    """Guard: if intel_probes exists with direction_id NOT NULL (old schema from
+    before Task 1 made it nullable), rebuild the table so Task 4 intake can insert
+    probes without a direction_id.  SQLite cannot ALTER a NOT NULL constraint away,
+    so we recreate the table preserving all rows.  Idempotent: does nothing on a
+    fresh DB or one that already has the nullable column."""
+    if not _DATABASE_URL.startswith("sqlite"):
+        return  # PostgreSQL can ALTER; this guard is SQLite-only
+    insp = inspect(engine)
+    if "intel_probes" not in set(insp.get_table_names()):
+        return  # table doesn't exist yet; create_all() will build it correctly
+    cols = {c["name"]: c for c in insp.get_columns("intel_probes")}
+    if "direction_id" not in cols:
+        return  # unexpected schema; leave it alone
+    if not cols["direction_id"].get("nullable", True):
+        # direction_id is NOT NULL — rebuild to nullable.
+        # Use only the columns that exist in the OLD table so the INSERT
+        # works regardless of how many columns the old schema had.
+        # Special-case next_run_at: old rows may store NULL (TEXT), substitute now().
+        old_col_names = list(cols.keys())
+        select_exprs = [
+            "COALESCE(next_run_at, datetime('now'))" if c == "next_run_at" else c
+            for c in old_col_names
+        ]
+        col_list    = ", ".join(old_col_names)
+        select_list = ", ".join(select_exprs)
+        with engine.begin() as conn:
+            conn.exec_driver_sql(
+                "CREATE TABLE intel_probes_old AS SELECT * FROM intel_probes"
+            )
+            conn.exec_driver_sql("DROP TABLE intel_probes")
+            # Recreate with the correct (nullable) schema from the ORM definition.
+            import radar.intel.models  # noqa: F401 — ensures table in metadata
+            from ..models import Base as _Base
+            _Base.metadata.tables["intel_probes"].create(conn)
+            conn.exec_driver_sql(
+                f"INSERT INTO intel_probes ({col_list}) "
+                f"SELECT {select_list} FROM intel_probes_old"
+            )
+            conn.exec_driver_sql("DROP TABLE intel_probes_old")
+
+
 def init_db() -> None:
     import radar.news.models, radar.brand.models, radar.intel.models  # noqa: F401  register new tables
     Base.metadata.create_all(engine)
     from .migrate_split import migrate_split
     migrate_split(engine)
     _migrate()
+    _fix_intel_probes_nullable()
     from .vec import create_vec_tables
     with engine.begin() as conn:
         create_vec_tables(conn)

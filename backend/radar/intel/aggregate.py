@@ -44,6 +44,16 @@ def event(m) -> dict:
             "text": m.text, "url": m.url, "created_at": _aware(m.created_at).isoformat(),
             "verified": bool(m.verified), "direction": m.direction_id}
 
+
+def feed_event(m, direction_key, match_type=None) -> dict:
+    """Serialize an IntelMention for the feed, tagged with the column's
+    direction key and the match_type that placed it there."""
+    return {
+        **event(m),
+        "direction": direction_key,
+        "match_type": match_type or "source",
+    }
+
 def story_detail(session, story) -> dict:
     base = story_summary(session, story)
     pts = _points(session, story.id)

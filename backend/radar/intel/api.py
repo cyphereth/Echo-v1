@@ -9,17 +9,22 @@ Domain isolation: only imports from `.` / `..core.*` / `..models`.
 """
 from __future__ import annotations
 
+import json
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..core.db import get_session
 from ..core.auth import decode_token
 from ..models import User
-from .models import IntelDirection, IntelMention, IntelStory
+from .models import (IntelDirection, IntelMention, IntelMentionDirection,
+                     IntelStory, IntelFeedLayout)
 from . import aggregate
 from . import credibility
 
@@ -194,8 +199,78 @@ def intel_directions(
     user: User = Depends(current_user),
     session: Session = Depends(db),
 ):
-    dirs = session.query(IntelDirection).all()
-    return [aggregate.direction_card(session, d, _hours(window)) for d in dirs]
+    rows = (session.query(IntelDirection)
+            .filter(IntelDirection.kind != "meta")
+            .order_by(IntelDirection.kind, IntelDirection.name).all())
+    return [_direction_out(session, d, _hours(window)) for d in rows]
+
+
+def _direction_out(session, d, window_h=24) -> dict:
+    since = datetime.now(timezone.utc) - timedelta(hours=window_h)
+    events_count = (session.query(IntelMentionDirection)
+                    .join(IntelMention, IntelMentionDirection.mention_id == IntelMention.id)
+                    .filter(IntelMentionDirection.direction_id == d.id,
+                            IntelMention.created_at >= since).count())
+    try:
+        terms = json.loads(d.geo_terms or "[]")
+    except (ValueError, TypeError):
+        terms = []
+    return {"id": d.id, "key": d.key, "name": d.name, "kind": d.kind,
+            "region_key": d.region_key, "geo_terms": terms,
+            "events_count": events_count}
+
+
+class DirectionCreate(BaseModel):
+    key: str
+    name: str
+    geo_terms: list[str] = []
+    region_key: str | None = None
+
+
+@router.post("/intel/directions")
+def intel_create_direction(
+    body: DirectionCreate,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    key = body.key.strip().lower()
+    if not key:
+        raise HTTPException(400, "key required")
+    if session.query(IntelDirection).filter_by(key=key).first():
+        raise HTTPException(409, "direction already exists")
+    d = IntelDirection(
+        key=key, name=body.name.strip() or key, kind="custom",
+        region_key=body.region_key,
+        geo_terms=json.dumps([t.lower() for t in body.geo_terms], ensure_ascii=False),
+    )
+    session.add(d); session.commit()
+    return _direction_out(session, d, 24)
+
+
+# ── Feed v2 ───────────────────────────────────────────────────────────────────
+
+@router.get("/intel/feed")
+def intel_feed(
+    direction: str,
+    side: Optional[str] = None,
+    window: str = "24h",
+    limit: int = 50,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    """Initial history for one column — mentions linked to `direction` via m2m."""
+    d = session.query(IntelDirection).filter_by(key=direction).first()
+    if not d:
+        raise HTTPException(404, "direction not found")
+    since = datetime.now(timezone.utc) - timedelta(hours=_hours(window))
+    q = (session.query(IntelMention, IntelMentionDirection.match_type)
+         .join(IntelMentionDirection, IntelMentionDirection.mention_id == IntelMention.id)
+         .filter(IntelMentionDirection.direction_id == d.id,
+                 IntelMention.created_at >= since))
+    if side:
+        q = q.filter(IntelMention.side == side)
+    rows = q.order_by(IntelMention.created_at.desc()).limit(limit).all()
+    return [aggregate.feed_event(m, direction, mt) for (m, mt) in rows]
 
 
 @router.get("/intel/directions/{key}")

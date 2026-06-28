@@ -31,8 +31,7 @@ from ..core.providers.telegram import (
     _parse_tg_message, _parse_tg_chat_message, chat_namespace,
 )
 from .models import IntelLexicon, IntelMention, IntelProbe
-from .geo import detect_direction
-from .tagging import resolve_direction_id
+from .tagging import tag_geo
 from .collector import (
     MIN_TEXT_LEN,
     _clean_handle,
@@ -73,7 +72,8 @@ def build_source_map(session):
         handle = _clean_handle(raw).lstrip("@").lower()
         if not handle:
             continue
-        by_user[handle] = {"side": p.side, "kind": p.kind, "handle": "@" + handle}
+        by_user[handle] = {"side": p.side, "kind": p.kind, "handle": "@" + handle,
+                           "subject": p.subject, "direction_id": p.direction_id}
         join_handles.append("@" + handle)
     return by_user, join_handles, invite_links
 
@@ -81,7 +81,8 @@ def build_source_map(session):
 # ── Persistence ─────────────────────────────────────────────────────────────────
 
 def store_realtime_post(session, post, side, kind, lexicon_terms,
-                        spam_words=None, spam_examples=None, keywords=None) -> bool:
+                        spam_words=None, spam_examples=None, keywords=None,
+                        subject=None, src_direction_id=None) -> bool:
     """Persist one parsed Post as an IntelMention, or skip it.
 
     Applies the same gate the poller uses (chat_message_relevant for chats; length +
@@ -116,9 +117,15 @@ def store_realtime_post(session, post, side, kind, lexicon_terms,
     if is_spam_text(text, spam_words, spam_examples):
         return False
 
-    dir_id = resolve_direction_id(session, detect_direction(text))
+    # Та же гео-привязка, что и у поллера (collector.py): текст решает область, а
+    # subject/область источника подставляются как fallback, если текст не назвал место
+    # (или назвал ту же область). Иначе live-посты теряли местоположение канала.
+    from types import SimpleNamespace
+    probe = SimpleNamespace(subject=subject, direction_id=src_direction_id)
+    dir_id, subject = tag_geo(session, probe, text)
     mention = IntelMention(
         direction_id=dir_id,
+        subject=subject,
         platform=post.platform or "telegram",
         post_id=post.post_id,
         author=author,
@@ -285,7 +292,8 @@ class IntelRealtime:
         loop = asyncio.get_event_loop()
         try:
             stored = await loop.run_in_executor(
-                None, self._store_sync, post, side, kind
+                None, self._store_sync, post, side, kind,
+                info.get("subject"), info.get("direction_id"),
             )
         except Exception:
             log.exception("intel realtime: store failed for %s", post.post_id)
@@ -300,13 +308,14 @@ class IntelRealtime:
             if getattr(post, "reply_to_tg_id", None):
                 self._kick_enrich()
 
-    def _store_sync(self, post, side, kind) -> bool:
+    def _store_sync(self, post, side, kind, subject=None, src_direction_id=None) -> bool:
         """Open a short-lived session, store the post (translate + gates + dedup),
         commit, and report whether a new row landed. Runs in an executor thread."""
         session = get_session()
         try:
             if store_realtime_post(session, post, side, kind, self._lexicon,
-                                   self._spam_words, self._spam_examples, self._keywords):
+                                   self._spam_words, self._spam_examples, self._keywords,
+                                   subject, src_direction_id):
                 session.commit()
                 return True
             session.rollback()

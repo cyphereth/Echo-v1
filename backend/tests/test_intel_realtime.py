@@ -33,12 +33,49 @@ def test_build_source_map_splits_public_and_invite():
     ])
     s.commit()
     by_user, join_handles, invite_links = build_source_map(s)
-    assert by_user["nexta_live"] == {"side": "by", "kind": "channel", "handle": "@nexta_live"}
+    assert by_user["nexta_live"]["side"] == "by"
+    assert by_user["nexta_live"]["kind"] == "channel"
+    assert by_user["nexta_live"]["handle"] == "@nexta_live"
     assert by_user["some_chat"]["side"] == "ru"
     assert "@nexta_live" in join_handles and "@some_chat" in join_handles
     assert len(invite_links) == 1 and invite_links[0][1] == "ua"
     # invite link is NOT in the username lookup (no resolvable @handle)
     assert all("+" not in k for k in by_user)
+
+
+def test_build_source_map_carries_subject_and_direction():
+    """Карта источников несёт subject + direction_id источника — иначе live-лента не
+    знает, какой нас. пункт проставить свежему посту (регрессия)."""
+    from radar.intel import seed
+    from radar.intel.realtime import build_source_map
+    from radar.intel.models import IntelProbe, IntelDirection
+    s = _sess()
+    seed.ensure_default_directions(s)
+    bel = s.query(IntelDirection).filter_by(key="belgorod").one().id
+    s.add(IntelProbe(platform="telegram", kind="chat", query="@shebekino_chat",
+                     side="ru", subject="Шебекино", direction_id=bel))
+    s.commit()
+    by_user, _, _ = build_source_map(s)
+    assert by_user["shebekino_chat"]["subject"] == "Шебекино"
+    assert by_user["shebekino_chat"]["direction_id"] == bel
+
+
+def test_store_realtime_attaches_source_subject():
+    """Live-пост без явной географии в тексте получает нас. пункт источника — как поллер
+    (collector). Раньше realtime игнорировал subject и место не показывалось в ленте."""
+    from radar.intel import seed
+    from radar.intel.realtime import store_realtime_post
+    from radar.intel.models import IntelMention, IntelDirection
+    s = _sess()
+    seed.ensure_default_directions(s)
+    bel = s.query(IntelDirection).filter_by(key="belgorod").one().id
+    text = "прилёт по окраине, горит склад, без света полрайона сегодня вечером"
+    assert store_realtime_post(s, _post("c/77", text), "ru", "chat", ["прилёт"],
+                               subject="Шебекино", src_direction_id=bel) is True
+    s.commit()
+    m = s.query(IntelMention).filter_by(post_id="c/77").one()
+    assert m.subject == "Шебекино"
+    assert m.direction_id == bel
 
 
 def test_store_realtime_curator_keyword_admits_non_lexicon_post():

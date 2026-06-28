@@ -58,14 +58,26 @@ def ingest_lexicon_json(session, path: str) -> dict:
     The file structure is::
 
         {
-            "_meta": {...},
-            "<category_key>": {"description": "...", "words": ["term1", ...]},
+            "_meta": {
+                "overrides_weak": ["term1", ...],
+                "overrides_strong": ["term2", ...],
+            },
+            "<category_key>": {
+                "description": "...",
+                "tier": "weak" | "strong",
+                "words": ["term1", ...]
+            },
             ...
         }
 
     Every word in each category is normalised (strip + lower) and upserted:
     - new term → INSERT, increments ``added``
-    - existing term → UPDATE meaning/category, increments ``updated``
+    - existing term → UPDATE meaning/category/tier, increments ``updated``
+
+    Tier assignment logic:
+    - if term in _meta.overrides_strong → tier = "strong"
+    - else if term in _meta.overrides_weak → tier = "weak"
+    - else tier = category.tier (defaults to "weak" if not specified)
 
     Returns ``{"added": N, "updated": M}``. Idempotent: re-running returns
     ``{"added": 0, "updated": M}`` (all rows exist, counts still track updates).
@@ -73,22 +85,37 @@ def ingest_lexicon_json(session, path: str) -> dict:
     added = updated = 0
     with open(path, encoding="utf-8") as fh:
         data = json.load(fh)
+
+    meta = data.get("_meta", {})
+    overrides_weak = {w.strip().lower() for w in meta.get("overrides_weak", [])}
+    overrides_strong = {w.strip().lower() for w in meta.get("overrides_strong", [])}
+
+    def _tier_for(term: str, category_tier: str) -> str:
+        if term in overrides_strong:
+            return "strong"
+        if term in overrides_weak:
+            return "weak"
+        return category_tier
+
     for category, obj in data.items():
         if category == "_meta":
             continue
         if not isinstance(obj, dict):
             continue
         meaning = obj.get("description", "")
+        category_tier = obj.get("tier", "weak")
         for word in obj.get("words", []):
             term = word.strip().lower()
             if not term:
                 continue
+            tier = _tier_for(term, category_tier)
             row = session.query(IntelLexicon).filter_by(term=term).first()
             if row is None:
-                session.add(IntelLexicon(term=term, meaning=meaning, category=category))
+                session.add(IntelLexicon(term=term, meaning=meaning,
+                                         category=category, tier=tier))
                 added += 1
             else:
-                row.meaning, row.category = meaning, category
+                row.meaning, row.category, row.tier = meaning, category, tier
                 updated += 1
     session.commit()
     return {"added": added, "updated": updated}

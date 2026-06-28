@@ -166,6 +166,20 @@ function CollapsibleSection({ title, icon, count, children, defaultOpen = true }
 function StoryDetail({ detail }) {
   const cr = CREDIBILITY[detail.credibility] || CREDIBILITY.unrated;
   const sp = spikeLevel(detail.spike_pct);
+  // Куратор может выкинуть отдельное событие из сюжета (спам/мусор), не трогая источник:
+  // помечаем как пример мусора + мягко скрываем упоминание (пропадает из ленты и сюжетов).
+  const [hiddenEventIds, setHiddenEventIds] = useState(() => new Set());
+
+  function hideEvent(e, ev) {
+    ev.stopPropagation();
+    setHiddenEventIds(prev => { const n = new Set(prev); n.add(e.id); return n; });
+    Promise.all([
+      intelApi.addSpam({ kind: 'example', value: e.text || '', author: e.author || null, source_post_id: e.post_id || null }),
+      intelApi.hideMention(e.id),
+    ]).catch(() => { /* optimistic — оставляем скрытым в любом случае */ });
+  }
+
+  const visibleEvents = (detail.events || []).filter(e => !hiddenEventIds.has(e.id));
   const chartData = (detail.points || []).map(p => ({
     t: agoStrShort(p.bucket_start),
     mentions: p.mention_count,
@@ -252,9 +266,9 @@ function StoryDetail({ detail }) {
       </CollapsibleSection>
 
       {/* constituent events */}
-      {detail.events?.length > 0 && (
-        <CollapsibleSection icon="bar3" title="События" count={detail.events.length} defaultOpen={false}>
-          {detail.events.map(e => {
+      {visibleEvents.length > 0 && (
+        <CollapsibleSection icon="bar3" title="События" count={visibleEvents.length} defaultOpen={false}>
+          {visibleEvents.map(e => {
             const sd = SIDE[e.side] || SIDE.ru;
             return (
               <div key={e.id} className={styles.eventRow}>
@@ -272,6 +286,11 @@ function StoryDetail({ detail }) {
                   {e.is_reply && <ThreadContext mentionId={e.id} />}
                 </div>
                 <span className={styles.eventTime}>{agoStrShort(e.created_at)}</span>
+                <button
+                  className={styles.eventSpam}
+                  onClick={(ev) => hideEvent(e, ev)}
+                  title="В спам (скрыть сообщение и запомнить как мусор) — источник остаётся"
+                >✕</button>
               </div>
             );
           })}

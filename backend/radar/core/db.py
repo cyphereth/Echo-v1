@@ -75,6 +75,14 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "opportunity":    "TEXT",
         "is_spam":        "BOOLEAN DEFAULT 0",
     },
+    "intel_directions": {
+        "kind":       "TEXT DEFAULT 'region'",
+        "region_key": "TEXT",
+        "geo_terms":  "TEXT DEFAULT '[]'",
+    },
+    "users": {
+        "is_admin": "BOOLEAN DEFAULT 0",
+    },
 }
 
 

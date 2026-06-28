@@ -19,6 +19,23 @@ export const intelApi = {
   directions:(window = '24h') => INTEL_USE_MOCK ? mockApi.directions() : passthrough('directions', { window }),
   direction: (key, window)    => INTEL_USE_MOCK ? mockApi.direction(key) : request(`/intel/directions/${key}?window=${window || '24h'}`),
   search:    (q)              => INTEL_USE_MOCK ? mockApi.search(q) : passthrough('search', { q }),
+
+  // ── Feed v2 ──────────────────────────────────────────────────────────────
+  feed:            (direction, params = {}) => passthrough('feed', { direction, ...params }),
+  createDirection: (body) => request('/intel/directions', { method: 'POST', body: JSON.stringify(body) }),
+  getLayout:       ()     => request('/intel/feed/layout'),
+  saveLayout:      (body) => request('/intel/feed/layout', { method: 'PUT', body: JSON.stringify(body) }),
+  feedStream:      (directions, params = {}, onEvent) => {
+    const token = localStorage.getItem('echo_token') || '';
+    const qs = new URLSearchParams({
+      directions: directions.join(','),
+      token,
+      ...(params || {}),
+    });
+    const es = new EventSource(`/intel/feed/stream?${qs.toString()}`);
+    es.onmessage = (e) => { try { onEvent(JSON.parse(e.data)); } catch {} };
+    return es;  // caller closes on unmount
+  },
 };
 
 // ── Витринные форматтеры ────────────────────────────────────────────────────

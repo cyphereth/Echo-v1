@@ -585,3 +585,67 @@
 }
 
 .sparkWrap { display: inline-flex; align-items: center; }
+
+
+/* ── Feed v2 — TweetDeck-style multi-column live feed ─────────────────────── */
+.feed { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.feedEmpty { display: flex; align-items: center; justify-content: center;
+  flex: 1; color: #6A8499; font-family: var(--font-mono); font-size: 12px; }
+
+.feedTopbar { display: flex; gap: 12px; align-items: center;
+  padding: 10px 14px; border-bottom: 1px solid #1B2630; }
+.feedSeg { display: flex; gap: 2px; background: #161D24; border-radius: 6px; padding: 2px; }
+.feedSeg button { padding: 4px 10px; font-size: 11px; border: none; background: transparent;
+  color: #7A8B99; border-radius: 4px; cursor: pointer; font-family: var(--font-mono); }
+.feedSeg button[data-active="1"] { background: #1F6FEB; color: #fff; }
+.feedResetBtn { font-size: 11px; background: transparent; border: 1px solid #2A3441;
+  color: #7A8B99; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-family: var(--font-mono); }
+.feedResetBtn:hover { color: #E8EDF2; border-color: #3A4451; }
+
+.feedColumnBar { display: flex; gap: 6px; align-items: center; padding: 8px 14px;
+  border-bottom: 1px solid #1B2630; overflow-x: auto; }
+.colChip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+  font-size: 11px; background: #1F2A33; border: 1px solid #2A3441; border-radius: 999px;
+  color: #E8EDF2; font-family: var(--font-mono); white-space: nowrap; }
+.colChip button { background: none; border: none; color: #7A8B99; cursor: pointer; padding: 0; }
+.colChip button:hover { color: #FF4D5E; }
+
+.colPickerWrap { position: relative; }
+.colPickerBtn { padding: 4px 12px; font-size: 11px; background: #1F6FEB; border: 1px solid #1F6FEB;
+  border-radius: 999px; color: #fff; cursor: pointer; font-family: var(--font-mono); }
+.colPicker { position: absolute; top: 100%; left: 0; margin-top: 6px; width: 280px;
+  background: #0E1419; border: 1px solid #2A3441; border-radius: 8px; z-index: 50;
+  box-shadow: 0 12px 32px rgba(0,0,0,.5); }
+.colPickerSearch { width: 100%; box-sizing: border-box; padding: 8px 10px; background: #161D24;
+  border: none; border-bottom: 1px solid #1B2630; color: #E8EDF2; font-size: 12px; outline: none; }
+.colPickerList { max-height: 280px; overflow-y: auto; }
+.colPickerItem { display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  font-size: 12px; color: #B5C0CC; cursor: pointer; }
+.colPickerItem:hover { background: #161D24; }
+.colPickerKind { font-size: 10px; color: #6A8499; margin-left: 4px; }
+
+.feedColumns { flex: 1; display: flex; gap: 8px; padding: 10px; overflow-x: auto; min-height: 0; }
+.feedColumn { flex: 0 0 300px; background: #0E1419; border: 1px solid #1B2630;
+  border-radius: 8px; display: flex; flex-direction: column; max-height: 100%; }
+.feedColumnHead { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  border-bottom: 1px solid #1B2630; }
+.feedColumnName { font-size: 12px; font-weight: 700; color: #E8EDF2; flex: 1; }
+.feedColumnCount { font-size: 11px; color: #7A8B99; font-family: var(--font-mono); }
+.feedColumnX { background: none; border: none; color: #6A8499; cursor: pointer; font-size: 12px; }
+.feedColumnX:hover { color: #FF4D5E; }
+.feedColumnBody { overflow-y: auto; flex: 1; }
+.feedColumnEmpty { padding: 20px 10px; text-align: center; color: #6A8499; font-size: 11px;
+  font-family: var(--font-mono); }
+
+.postCard { padding: 8px 10px; border-bottom: 1px solid #141A20; transition: background 1s; }
+.postCard[data-new="1"] { background: rgba(31,111,235,.25); }
+.postMeta { display: flex; align-items: center; gap: 6px; font-size: 10px; color: #7A8B99;
+  font-family: var(--font-mono); margin-bottom: 4px; }
+.postAuthor { color: #B5C0CC; }
+.postTime { margin-left: auto; }
+.postMatch { padding: 0 4px; border: 1px solid #2A3441; border-radius: 3px; font-size: 9px; }
+.postText { font-size: 12px; color: #E8EDF2; line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.postCredRow { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.credDot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.postLink { font-size: 10px; color: #57D2E2; text-decoration: none; font-family: var(--font-mono); }

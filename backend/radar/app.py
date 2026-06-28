@@ -38,6 +38,16 @@ async def lifespan(app: FastAPI):
         seed_module.ensure_default_topics(session)
         from .intel import seed as intel_seed
         intel_seed.ensure_default_directions(session)
+
+        # Bootstrap: the first registered user is the contour admin (idempotent).
+        from .core.db import SessionLocal
+        from .models import User
+        with SessionLocal() as s:
+            if not s.query(User).filter_by(is_admin=True).first():
+                first = s.query(User).order_by(User.id).first()
+                if first is not None:
+                    first.is_admin = True
+                    s.commit()
     finally:
         session.close()
 

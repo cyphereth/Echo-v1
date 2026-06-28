@@ -11,7 +11,34 @@ class IntelDirection(Base):
     id:         Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
     key:        Mapped[str]      = mapped_column(Text, unique=True, nullable=False)   # "kursk"
     name:       Mapped[str]      = mapped_column(Text, nullable=False)                # "Курское"
+    kind:       Mapped[str]      = mapped_column(Text, default="region")              # region|city|custom|meta
+    region_key: Mapped[Optional[str]] = mapped_column(Text)                           # parent region key for cities
+    geo_terms:  Mapped[str]      = mapped_column(Text, default="[]")                  # JSON list of lowercase terms
     created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class IntelMentionDirection(Base):
+    """Many-to-many: an IntelMention may belong to several IntelDirections.
+
+    `match_type` is 'source' (probe subscribed), 'geo' (text matched a term),
+    or 'manual' (operator pinned it).
+    """
+    __tablename__ = "intel_mention_directions"
+    __table_args__ = (UniqueConstraint("mention_id", "direction_id"),)
+    id:           Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
+    mention_id:   Mapped[int]      = mapped_column(ForeignKey("intel_mentions.id"), nullable=False)
+    direction_id: Mapped[int]      = mapped_column(ForeignKey("intel_directions.id"), nullable=False)
+    match_type:   Mapped[str]      = mapped_column(Text, default="source")
+    created_at:   Mapped[datetime] = mapped_column(default=_now)
+
+
+class IntelFeedLayout(Base):
+    """The contour-wide 'боевой дефолт' column layout (admin-saved)."""
+    __tablename__ = "intel_feed_layouts"
+    id:            Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
+    direction_ids: Mapped[str]      = mapped_column(Text, default="[]")   # JSON list of direction keys, in order
+    updated_by:    Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"))
+    updated_at:    Mapped[datetime] = mapped_column(default=_now)
 
 
 class IntelProbe(Base):

@@ -14,6 +14,7 @@ class User(Base):
     id:            Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
     email:         Mapped[str]      = mapped_column(Text, unique=True, nullable=False)
     password_hash: Mapped[str]      = mapped_column(Text, nullable=False)
+    is_admin:      Mapped[bool]     = mapped_column(Boolean, default=False)
     created_at:    Mapped[datetime] = mapped_column(default=_now)
 
 

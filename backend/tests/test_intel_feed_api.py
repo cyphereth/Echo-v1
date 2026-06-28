@@ -121,6 +121,12 @@ def test_feed_stream_yields_events_tagged_with_direction():
 
 def test_get_layout_returns_empty_default():
     client, tok = _bootstrap()
+    # Clear any layout saved by prior tests (in-memory shared DB).
+    from radar.core.db import SessionLocal
+    from radar.intel.models import IntelFeedLayout
+    with SessionLocal() as s:
+        s.query(IntelFeedLayout).delete()
+        s.commit()
     r = client.get("/intel/feed/layout",
                    headers={"Authorization": f"Bearer {tok}"})
     assert r.status_code == 200

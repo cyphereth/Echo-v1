@@ -363,16 +363,32 @@ def _feed_stream_gen(direction_keys, side, window_h):
 @router.get("/intel/feed/stream")
 def intel_feed_stream(
     directions: str,
+    token: Optional[str] = None,
     side: Optional[str] = None,
     window: str = "24h",
-    user: User = Depends(current_user),
+    authorization: str = Header(None),
     session: Session = Depends(db),
 ):
     """SSE stream of new mentions across the requested columns.
 
     `directions` is a comma-separated list of direction keys. The server
     polls every 2s and emits one event per new mention (tagged with the
-    direction it matched)."""
+    direction it matched).
+
+    Auth: the standard Bearer header OR a `?token=` query param (EventSource
+    cannot set Authorization headers, so the frontend passes the token as a
+    query string)."""
+    raw = authorization or (f"Bearer {token}" if token else None)
+    if not raw or not raw.startswith("Bearer "):
+        raise HTTPException(401, "Not authenticated")
+    try:
+        payload = decode_token(raw.split(" ", 1)[1])
+    except Exception:
+        raise HTTPException(401, "Invalid or expired token")
+    user = session.get(User, payload.get("uid"))
+    if not user:
+        raise HTTPException(401, "User not found")
+
     keys = [k.strip() for k in directions.split(",") if k.strip()]
     if not keys:
         raise HTTPException(400, "at least one direction required")

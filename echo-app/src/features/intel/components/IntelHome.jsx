@@ -94,9 +94,14 @@ export function IntelHome({ timeRange, liveEvents = [], hiddenIds, hideEvent, se
           setFlashIds(f => { const n = new Set(f); n.delete(e.id); return n; });
         }, FLASH_MS);
       });
-      // Лента — newest-first. liveEvents приходят oldest→newest, поэтому разворачиваем
-      // и кладём в НАЧАЛО; slice(0,200) обрезает старые снизу, а не новые сверху.
-      return [...add.reverse(), ...prev].slice(0, 200);
+      // Лента — newest-first ПО ВРЕМЕНИ ПОСТА (created_at), а не по порядку вставки.
+      // Коллектор может затянуть пост, которому уже пара минут, ПОЗЖЕ свежих —
+      // у него больший id, и слепой prepend ставил бы «2м» над «сейчас». Поэтому
+      // мёржим и сортируем по created_at (id — тай-брейк для одинаковых меток).
+      const ts = e => (e.created_at ? Date.parse(e.created_at) : 0);
+      return [...add, ...prev]
+        .sort((a, b) => ts(b) - ts(a) || (b.id - a.id))
+        .slice(0, 200);
     });
   }, [win, isCustom]);
 
@@ -139,11 +144,11 @@ export function IntelHome({ timeRange, liveEvents = [], hiddenIds, hideEvent, se
   if (!data) return <div className={styles.workspace}><div className={styles.empty}>Загрузка обстановки…</div></div>;
 
   const { kpis, hot, alerts, top_stories } = data;
-  const SNIPPET_MAX = 160;
-  const snippet = (t) => {
-    const s = (t || '').replace(/\s+/g, ' ').trim();
-    return s.length > SNIPPET_MAX ? s.slice(0, SNIPPET_MAX) + '…' : s;
-  };
+  // Лента показывает ПОЛНЫЙ текст поста (без обрезки и без hover-всплывашки).
+  // Длинные посты рендерим чуть мельче, чтобы они не разрывали ленту, оставаясь
+  // полностью читаемыми. LONG_TEXT — порог, после которого включаем мелкий шрифт.
+  const LONG_TEXT = 240;
+  const cleanText = (t) => (t || '').replace(/\s+/g, ' ').trim();
 
   return (
     <div className={`${styles.workspace} ${styles.homeWorkspace}`}>
@@ -281,18 +286,21 @@ export function IntelHome({ timeRange, liveEvents = [], hiddenIds, hideEvent, se
             const sd = SIDE[e.side] || SIDE.ru;
             const isNew = flashIds.has(e.id);
             const dups = e._dups || 1;
+            const text = cleanText(e.text);
+            const textClass = text.length > LONG_TEXT
+              ? `${styles.eventText} ${styles.eventTextLong}`
+              : styles.eventText;
             return (
-              <div key={e.id} className={isNew ? `${styles.eventRow} ${styles.eventRowNew}` : styles.eventRow}
-                   title={e.text}>
+              <div key={e.id} className={isNew ? `${styles.eventRow} ${styles.eventRowNew}` : styles.eventRow}>
                 <span className={styles.eventSide} style={{ color: sd.color, background: sd.color + '1A' }}>
                   {sd.label}
                 </span>
                 <div className={styles.eventBody}>
-                  <div className={styles.eventText}>
+                  <div className={textClass}>
                     {e.media && (
                       <MediaPreview kind={e.media} url={`/intel/mention/${e.id}/media`} label={e.text} />
                     )}
-                    {snippet(e.text)}
+                    {text}
                   </div>
                   <div className={styles.eventMeta}>
                     {e.subject && <span style={{ color: '#57D2E2' }}>📍 {e.subject} · </span>}

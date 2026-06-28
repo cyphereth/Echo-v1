@@ -84,6 +84,9 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "window_start": "DATETIME",
         "window_end":   "DATETIME",
     },
+    "intel_lexicon": {
+        "tier": "TEXT NOT NULL DEFAULT 'weak'",
+    },
     "stories": {
         "topic_id":         "INTEGER",
         "source_count":     "INTEGER DEFAULT 0",

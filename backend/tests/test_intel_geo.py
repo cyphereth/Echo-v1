@@ -16,6 +16,18 @@ def test_detect_direction_by_geo_keyword():
     assert detect_direction("бои у Работино") == "zaporizhzhia"
     assert detect_direction("просто новость про погоду") is None
 
+
+def test_detect_place_returns_oblast_and_city():
+    from radar.intel.geo import detect_place
+    # city stem → (oblast, canonical city name); declension is matched (в Судже → Суджа)
+    assert detect_place("удар по складу под Суджей") == ("kursk", "Суджа")
+    assert detect_place("атака на Шостку") == ("sumy", "Шостка")
+    assert detect_place("угроза БПЛА, Воронеж") == ("voronezh", "Воронеж")
+    # region-level stem → oblast but no city label
+    assert detect_place("обстрел Сумской области") == ("sumy", None)
+    # nothing → (None, None)
+    assert detect_place("просто новость про погоду") == (None, None)
+
 def test_resolve_direction_id_defaults_unassigned():
     from radar.intel import seed
     from radar.intel.tagging import resolve_direction_id

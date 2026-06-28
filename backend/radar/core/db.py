@@ -69,6 +69,10 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
     },
     "intel_stories": {
         "muted": "BOOLEAN NOT NULL DEFAULT 0",
+        "subject": "TEXT",
+    },
+    "intel_incidents": {
+        "subject": "TEXT",
     },
     "intel_directions": {
         "muted": "BOOLEAN NOT NULL DEFAULT 0",

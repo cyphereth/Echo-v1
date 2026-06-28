@@ -15,18 +15,21 @@ def resolve_direction_id(session, key: str | None) -> int:
 def tag_geo(session, probe, text: str) -> tuple[int, str | None]:
     """Resolve (direction_id, subject) for a post from `probe`.
 
-    Text wins for the oblast: if the post text names a place, use that direction.
-    The source's subject (a curator-set locality) is only attached when it would not
-    contradict the text — i.e. when the text named nothing, or named the same oblast
-    the source belongs to. A repost about a different region thus gets no false city.
+    Text wins — both for the oblast AND the city: if the post text names a settlement
+    that becomes the subject. If the text names only an oblast (region-level stem), the
+    source's curator-set subject is attached when it does not contradict the text (same
+    oblast). A repost about a different region thus gets no false city. When the text
+    names no place at all, fall back to the source's oblast + locality.
     """
-    from .geo import detect_direction
+    from .geo import detect_place
     subject = getattr(probe, "subject", None)
     src_dir = getattr(probe, "direction_id", None)
-    key = detect_direction(text)
+    key, city = detect_place(text)
     if key:
         dir_id = resolve_direction_id(session, key)
-        return dir_id, (subject if (src_dir and dir_id == src_dir) else None)
+        same = bool(src_dir) and dir_id == src_dir
+        # text's own city wins; else the source's subject only if the same oblast
+        return dir_id, (city or (subject if same else None))
     # Text named no place — fall back to the source's oblast + locality.
     dir_id = src_dir or resolve_direction_id(session, None)
     return dir_id, subject

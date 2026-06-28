@@ -41,15 +41,39 @@ def test_tag_geo_empty_text_falls_back_to_source():
     assert subject == "Шебекино"
 
 
-def test_tag_geo_text_same_oblast_keeps_subject():
-    """Text names a town in the SAME oblast as the source → city stays."""
+def test_tag_geo_text_city_wins_over_source_subject():
+    """Text names a town in the SAME oblast as the source → the TEXT's city wins
+    (it describes the concrete event); the source subject is only a fallback."""
     from radar.intel.tagging import tag_geo
     s = _sess(); _seed(s)
     bel = _dir_id(s, "belgorod")
     probe = SimpleNamespace(subject="Шебекино", direction_id=bel)
     dir_id, subject = tag_geo(s, probe, "в Грайвороне сообщают о работе ПВО")
     assert dir_id == bel
-    assert subject == "Шебекино"
+    assert subject == "Грайворон"
+
+
+def test_tag_geo_region_only_text_keeps_source_subject():
+    """Text names only the oblast (region-level stem, no city) → source subject kept."""
+    from radar.intel.tagging import tag_geo
+    s = _sess(); _seed(s)
+    bel = _dir_id(s, "belgorod")
+    probe = SimpleNamespace(subject="Шебекино", direction_id=bel)
+    # "белгород" stem in text resolves a city; use an oblast-only phrasing instead:
+    dir_id, subject = tag_geo(s, probe, "сводка по Сумской области без деталей")
+    # text points to another oblast (sumy) with no city → no false source city
+    assert dir_id == _dir_id(s, "sumy")
+    assert subject is None
+
+
+def test_tag_geo_bot_aggregator_gets_city_from_text():
+    """A bot-aggregator source (no subject) still gets 📍 from the post text."""
+    from radar.intel.tagging import tag_geo
+    s = _sess(); _seed(s)
+    probe = SimpleNamespace(subject=None, direction_id=None)
+    dir_id, subject = tag_geo(s, probe, "Воронеж. Угроза применения БПЛА. Перейдите в укрытие!")
+    assert dir_id == _dir_id(s, "voronezh")
+    assert subject == "Воронеж"
 
 
 def test_tag_geo_text_other_oblast_drops_subject():

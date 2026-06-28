@@ -67,6 +67,9 @@ class IntelIncident(Base):
     first_seen_at: Mapped[datetime] = mapped_column(nullable=False)
     last_seen_at:  Mapped[datetime] = mapped_column(nullable=False)
     created_at:    Mapped[datetime] = mapped_column(default=_now)
+    # Locality of the first mention that opened this incident; clustering keeps posts
+    # of different cities apart (see clustering.cluster_owner match_guard).
+    subject:       Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class IntelStory(Base):
@@ -86,6 +89,8 @@ class IntelStory(Base):
     first_seen_at:    Mapped[datetime] = mapped_column(nullable=False)
     last_seen_at:     Mapped[datetime] = mapped_column(nullable=False)
     created_at:       Mapped[datetime] = mapped_column(default=_now)
+    # Locality of the first incident that opened this story (see clustering match_guard).
+    subject:          Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class IntelStoryPoint(Base):

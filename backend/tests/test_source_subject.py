@@ -87,6 +87,17 @@ def test_tag_geo_text_other_oblast_drops_subject():
     assert subject is None
 
 
+def test_tag_geo_place_only_city_gets_locality_no_front():
+    """A bot-aggregator post about a city outside the tracked fronts (Москва) → 📍 set,
+    direction falls back to 'unassigned' (no front spawned for it)."""
+    from radar.intel.tagging import tag_geo
+    s = _sess(); _seed(s)
+    probe = SimpleNamespace(subject=None, direction_id=None)
+    dir_id, subject = tag_geo(s, probe, "Москва. Объявлена опасность атаки БПЛА")
+    assert subject == "Москва"
+    assert dir_id == _dir_id(s, "unassigned")
+
+
 def test_tag_geo_source_without_subject():
     from radar.intel.tagging import tag_geo
     s = _sess(); _seed(s)

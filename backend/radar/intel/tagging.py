@@ -18,7 +18,9 @@ def tag_geo(session, probe, text: str) -> tuple[int, str | None]:
     Text wins — both for the oblast AND the city: if the post text names a settlement
     that becomes the subject. If the text names only an oblast (region-level stem), the
     source's curator-set subject is attached when it does not contradict the text (same
-    oblast). A repost about a different region thus gets no false city. When the text
+    oblast). A repost about a different region thus gets no false city. A 📍-only city
+    (one outside the tracked fronts, e.g. Москва/Львов) gives a locality label but no
+    direction — it lands in 'unassigned' yet still shows where it happened. When the text
     names no place at all, fall back to the source's oblast + locality.
     """
     from .geo import detect_place
@@ -30,6 +32,10 @@ def tag_geo(session, probe, text: str) -> tuple[int, str | None]:
         same = bool(src_dir) and dir_id == src_dir
         # text's own city wins; else the source's subject only if the same oblast
         return dir_id, (city or (subject if same else None))
+    if city:
+        # 📍-only city (no tracked front): keep the source oblast if any, show the city.
+        dir_id = src_dir or resolve_direction_id(session, None)
+        return dir_id, city
     # Text named no place — fall back to the source's oblast + locality.
     dir_id = src_dir or resolve_direction_id(session, None)
     return dir_id, subject

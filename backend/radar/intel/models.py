@@ -12,6 +12,7 @@ class IntelDirection(Base):
     key:        Mapped[str]      = mapped_column(Text, unique=True, nullable=False)   # "kursk"
     name:       Mapped[str]      = mapped_column(Text, nullable=False)                # "Курское"
     created_at: Mapped[datetime] = mapped_column(default=_now)
+    muted:      Mapped[bool]     = mapped_column(Boolean, default=False, server_default="0")
 
 
 class IntelProbe(Base):
@@ -75,6 +76,7 @@ class IntelStory(Base):
     title:            Mapped[str]      = mapped_column(Text, default="")
     status:           Mapped[str]      = mapped_column(Text, default="active")
     is_anomaly:       Mapped[bool]     = mapped_column(Boolean, default=False, server_default="0")
+    muted:            Mapped[bool]     = mapped_column(Boolean, default=False, server_default="0")
     post_count:       Mapped[int]      = mapped_column(Integer, default=0)
     source_count:     Mapped[int]      = mapped_column(Integer, default=0)
     verified:         Mapped[bool]     = mapped_column(Boolean, default=False)

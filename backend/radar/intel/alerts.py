@@ -65,11 +65,18 @@ def _story_message(kind: str, magnitude: float, title: str) -> str:
 
 
 def scan_story_alerts(session) -> list:
-    """Emit an alert for every currently-anomalous active story (cooldown-deduped)."""
+    """Emit an alert for every currently-anomalous active story (cooldown-deduped).
+    Заглушённые сюжеты и сюжеты заглушённых направлений пропускаются."""
     out = []
+    muted_dir_ids = {row[0] for row in
+                     session.query(IntelDirection.id)
+                     .filter(IntelDirection.muted.is_(True)).all()}
     stories = (session.query(IntelStory)
-               .filter(IntelStory.is_anomaly.is_(True), IntelStory.status == "active").all())
+               .filter(IntelStory.is_anomaly.is_(True), IntelStory.status == "active",
+                       IntelStory.muted.is_(False)).all())
     for st in stories:
+        if st.direction_id in muted_dir_ids:
+            continue
         pts = aggregate._points(session, st.id)
         kind, magnitude = _classify_story(pts)
         alert = _emit(session, "story", kind,
@@ -111,7 +118,7 @@ def detect_direction_burst(session, direction_id):
 def scan_direction_alerts(session) -> list:
     out = []
     for d in session.query(IntelDirection).all():
-        if d.key == "unassigned":
+        if d.key == "unassigned" or d.muted:
             continue
         magnitude = detect_direction_burst(session, d.id)
         if magnitude is None:

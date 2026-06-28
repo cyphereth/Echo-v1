@@ -238,3 +238,44 @@ def test_run_intel_tick_emits_alerts(monkeypatch):
     s.commit()
     passes.run_intel_tick(s, tg_provider=None)
     assert s.query(IntelAlert).filter_by(scope="story").count() == 1
+
+
+def test_scan_story_alerts_skips_muted_story():
+    from radar.intel import alerts
+    from radar.intel.models import IntelAlert
+    s = _mem()
+    d = _direction(s)
+    st = _anomalous_story(s, d.id)
+    st.muted = True
+    s.flush()
+    assert alerts.scan_story_alerts(s) == []
+    assert s.query(IntelAlert).count() == 0
+
+
+def test_scan_story_alerts_skips_story_under_muted_direction():
+    from radar.intel import alerts
+    from radar.intel.models import IntelAlert
+    s = _mem()
+    d = _direction(s)
+    d.muted = True
+    _anomalous_story(s, d.id)
+    s.flush()
+    assert alerts.scan_story_alerts(s) == []
+    assert s.query(IntelAlert).count() == 0
+
+
+def test_scan_direction_alerts_skips_muted_direction():
+    from radar.intel import alerts
+    from radar.intel.models import IntelAlert
+    s = _mem()
+    d = _direction(s)
+    d.muted = True
+    base = datetime(2026, 6, 20, 0, 0, tzinfo=timezone.utc)
+    n = 0
+    for h in range(3):
+        _mention(s, d.id, base + timedelta(hours=h, minutes=1), f"b{n}"); n += 1
+    for i in range(9):
+        _mention(s, d.id, base + timedelta(hours=3, minutes=i), f"s{n}"); n += 1
+    s.flush()
+    assert alerts.scan_direction_alerts(s) == []
+    assert s.query(IntelAlert).count() == 0

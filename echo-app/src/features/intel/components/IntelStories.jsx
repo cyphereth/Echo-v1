@@ -2,7 +2,7 @@
 // Левая колонка: список + фильтры (direction / side / verified-only) + sort.
 // Правая: деталь — заголовок, summary, credibility, activity-timeline,
 // список источников по сторонам, составляющие события.
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
@@ -194,6 +194,25 @@ function StoryDetail({ detail }) {
   }
 
   const visibleEvents = (detail.events || []).filter(e => !hiddenEventIds.has(e.id));
+  // Схлопываем дословные кросс-канальные репосты в одну строку (как главная лента):
+  // события с одной content-сигнатурой → одно событие (самое свежее) + счётчик каналов.
+  // Тексты с разным началом (напр. «Шостка…» vs «Воронеж…») имеют разный sig и не сольются.
+  const collapsedEvents = useMemo(() => {
+    const out = [];
+    const bySig = new Map();
+    for (const e of visibleEvents) {
+      const key = e.sig || `id:${e.id}`;
+      if (bySig.has(key)) {
+        const item = out[bySig.get(key)];
+        item._dups += 1;
+        if (e.author) item._srcs.add(e.author);
+        continue;
+      }
+      bySig.set(key, out.length);
+      out.push({ ...e, _dups: 1, _srcs: new Set(e.author ? [e.author] : []) });
+    }
+    return out;
+  }, [visibleEvents]);
   const chartData = (detail.points || []).map(p => ({
     t: agoStrShort(p.bucket_start),
     mentions: p.mention_count,
@@ -280,10 +299,11 @@ function StoryDetail({ detail }) {
       </CollapsibleSection>
 
       {/* constituent events */}
-      {visibleEvents.length > 0 && (
-        <CollapsibleSection icon="bar3" title="События" count={visibleEvents.length} defaultOpen={false}>
-          {visibleEvents.map(e => {
+      {collapsedEvents.length > 0 && (
+        <CollapsibleSection icon="bar3" title="События" count={collapsedEvents.length} defaultOpen={false}>
+          {collapsedEvents.map(e => {
             const sd = SIDE[e.side] || SIDE.ru;
+            const dups = e._dups || 1;
             return (
               <div key={e.id} className={styles.eventRow}>
                 <span className={styles.eventSide} style={{ color: sd.color, background: sd.color + '1A' }}>{sd.label}</span>
@@ -291,7 +311,7 @@ function StoryDetail({ detail }) {
                   <div className={styles.eventText}>{e.text}</div>
                   <div className={styles.eventMeta}>
                     {e.subject && <span style={{ color: '#57D2E2' }}>📍 {e.subject} · </span>}
-                    {e.author}{e.verified ? ' · ✓' : ''}
+                    {e.author}{dups > 1 ? ` · ${dups} канал.` : ''}{e.verified ? ' · ✓' : ''}
                     {e.url && (
                       <> · <a href={e.url} target="_blank" rel="noopener noreferrer"
                              style={{ color: '#57D2E2', textDecoration: 'none' }}>↗ TG</a></>

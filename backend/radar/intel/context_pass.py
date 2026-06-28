@@ -134,6 +134,115 @@ def _resolve_locally(session: Session, mention: IntelMention) -> bool:
     return False
 
 
+def enrich_one(session: Session, provider, mention: IntelMention) -> bool:
+    """Fetch and store thread context for a single reply mention.
+
+    Tries the local fast path first (parent already in our DB → no network), then
+    falls back to a Telegram fetch. Returns True when context was successfully
+    stored. Lets TelegramFloodWait propagate so callers can back off; any other
+    fetch error marks the mention done to avoid retry loops. Shared by the
+    background pass (enrich_context) and the on-demand /context endpoint, so a
+    curator opening a thread doesn't wait for the next background batch.
+    """
+    from ..core.providers.telegram import TelegramFloodWait
+    from .translate import maybe_translate
+
+    # Fast path: parent already in our DB → assemble chain locally, no network.
+    try:
+        if _resolve_locally(session, mention):
+            return True
+    except Exception:
+        log.exception("context_pass: local resolve failed for mention %s — falling back", mention.id)
+        session.rollback()
+
+    _, current_tg_id = _parse_handle_and_msg_id(mention.post_id)
+    handle = _handle_for(mention)
+    try:
+        result = provider.fetch_thread_context(
+            handle,
+            reply_to_tg_id=mention.reply_to_tg_id,
+            current_tg_id=current_tg_id,
+        )
+    except TelegramFloodWait:
+        raise  # account flood-parked — let caller back off; don't burn the mention
+    except Exception:
+        log.exception("context_pass: fetch failed for mention %s — marking done", mention.id)
+        mention.context_fetched = True
+        session.commit()
+        return False
+
+    if result is None:
+        log.warning("context_pass: fetch returned None for mention %s — skipping", mention.id)
+        mention.context_fetched = True
+        session.commit()
+        return False
+
+    for p in result.get("parents", []):
+        ctx = IntelThreadContext(
+            mention_id=mention.id,
+            tg_msg_id=p["tg_msg_id"],
+            role="parent",
+            depth=p["depth"],
+            author=p.get("author", ""),
+            text=maybe_translate(p.get("text", "")),
+            created_at=p["created_at"],
+            media=p.get("media"),
+        )
+        sp = session.begin_nested()
+        try:
+            session.add(ctx)
+            session.flush()
+            sp.commit()
+        except IntegrityError:
+            sp.rollback()
+
+    for sib in result.get("siblings", []):
+        ctx = IntelThreadContext(
+            mention_id=mention.id,
+            tg_msg_id=sib["tg_msg_id"],
+            role="sibling",
+            depth=0,
+            author=sib.get("author", ""),
+            text=maybe_translate(sib.get("text", "")),
+            created_at=sib["created_at"],
+        )
+        sp = session.begin_nested()
+        try:
+            session.add(ctx)
+            session.flush()
+            sp.commit()
+        except IntegrityError:
+            sp.rollback()
+
+    # Resolve reply_to_id and thread_root_id from index. Parent/root post_ids are
+    # built in the mention's own namespace (composite for chats, bare for channels).
+    if mention.reply_to_tg_id:
+        parent_post_id = _parent_post_id(mention, mention.reply_to_tg_id)
+        parent_in_index = (
+            session.query(IntelMention)
+            .filter(IntelMention.post_id == parent_post_id)
+            .first()
+        )
+        if parent_in_index:
+            mention.reply_to_id = parent_in_index.id
+
+    parents = result.get("parents", [])
+    if parents:
+        root_tg_id = parents[-1]["tg_msg_id"]
+        root_post_id = _parent_post_id(mention, root_tg_id)
+        root_in_index = (
+            session.query(IntelMention)
+            .filter(IntelMention.post_id == root_post_id)
+            .first()
+        )
+        if root_in_index:
+            mention.thread_root_id = root_in_index.id
+
+    mention.context_fetched = True
+    session.commit()
+    return True
+
+
 def enrich_context(session: Session, provider, batch_size: int = 50) -> int:
     """Fetch and store thread context for unprocessed reply mentions.
 
@@ -153,102 +262,12 @@ def enrich_context(session: Session, provider, batch_size: int = 50) -> int:
 
     enriched = 0
     for mention in pending:
-        # Fast path: parent already in our DB → assemble chain locally, no network.
         try:
-            if _resolve_locally(session, mention):
+            if enrich_one(session, provider, mention):
                 enriched += 1
-                continue
-        except Exception:
-            log.exception("context_pass: local resolve failed for mention %s — falling back", mention.id)
-            session.rollback()
-
-        _, current_tg_id = _parse_handle_and_msg_id(mention.post_id)
-        handle = _handle_for(mention)
-        try:
-            result = provider.fetch_thread_context(
-                handle,
-                reply_to_tg_id=mention.reply_to_tg_id,
-                current_tg_id=current_tg_id,
-            )
         except TelegramFloodWait as e:
             log.warning("context_pass flood-wait %ds — aborting batch", getattr(e, "seconds", "?"))
             session.commit()
             return enriched
-        except Exception:
-            log.exception("context_pass: fetch failed for mention %s — marking done", mention.id)
-            mention.context_fetched = True
-            session.commit()
-            continue
-
-        if result is None:
-            log.warning("context_pass: fetch returned None for mention %s — skipping", mention.id)
-            mention.context_fetched = True
-            session.commit()
-            continue
-
-        for p in result.get("parents", []):
-            ctx = IntelThreadContext(
-                mention_id=mention.id,
-                tg_msg_id=p["tg_msg_id"],
-                role="parent",
-                depth=p["depth"],
-                author=p.get("author", ""),
-                text=p.get("text", ""),
-                created_at=p["created_at"],
-                media=p.get("media"),
-            )
-            sp = session.begin_nested()
-            try:
-                session.add(ctx)
-                session.flush()
-                sp.commit()
-            except IntegrityError:
-                sp.rollback()
-
-        for sib in result.get("siblings", []):
-            ctx = IntelThreadContext(
-                mention_id=mention.id,
-                tg_msg_id=sib["tg_msg_id"],
-                role="sibling",
-                depth=0,
-                author=sib.get("author", ""),
-                text=sib.get("text", ""),
-                created_at=sib["created_at"],
-            )
-            sp = session.begin_nested()
-            try:
-                session.add(ctx)
-                session.flush()
-                sp.commit()
-            except IntegrityError:
-                sp.rollback()
-
-        # Resolve reply_to_id and thread_root_id from index. Parent/root post_ids are
-        # built in the mention's own namespace (composite for chats, bare for channels).
-        if mention.reply_to_tg_id:
-            parent_post_id = _parent_post_id(mention, mention.reply_to_tg_id)
-            parent_in_index = (
-                session.query(IntelMention)
-                .filter(IntelMention.post_id == parent_post_id)
-                .first()
-            )
-            if parent_in_index:
-                mention.reply_to_id = parent_in_index.id
-
-        parents = result.get("parents", [])
-        if parents:
-            root_tg_id = parents[-1]["tg_msg_id"]
-            root_post_id = _parent_post_id(mention, root_tg_id)
-            root_in_index = (
-                session.query(IntelMention)
-                .filter(IntelMention.post_id == root_post_id)
-                .first()
-            )
-            if root_in_index:
-                mention.thread_root_id = root_in_index.id
-
-        mention.context_fetched = True
-        session.commit()
-        enriched += 1
 
     return enriched

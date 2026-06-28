@@ -11,22 +11,21 @@ import styles from '../intel.module.css';
 // KPI / hot / alerts refresh — not latency-critical, so a slow poll is fine. The event
 // FEED is fed by an SSE push stream (~1-2s latency), not this interval.
 const KPI_POLL_MS = 15000;
-const STREAM_MAX  = 40;   // cap the in-memory feed so it can't grow unbounded
 const FLASH_MS    = 2600; // how long a freshly arrived row stays highlighted
 
-export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
+export function IntelHome({ timeRange, liveEvents = [], hiddenIds, hideEvent, seenIdsRef, onOpenStory }) {
   const [data, setData]         = useState(null);
   const [stream, setStream]     = useState([]);
   const [flashIds, setFlashIds] = useState(() => new Set());
-  const [hiddenIds, setHiddenIds] = useState(() => new Set());
   const [paused, setPaused]     = useState(false);  // наведение курсора замораживает ленту
   const pausedRef               = useRef(false);     // чтобы merge-эффект читал актуальное значение
-  const seenRef                 = useRef(new Set());
 
   // Throw a post into the spam filter (kind="example") and hide it from the feed.
+  // hiddenIds/hideEvent live in IntelApp so the hide survives switching tabs (this
+  // component unmounts on tab change — local hide state would be lost).
   async function handleSpam(e, ev) {
     ev.stopPropagation();
-    setHiddenIds(prev => { const n = new Set(prev); n.add(e.id); return n; });
+    hideEvent(e.id);
     try {
       // Запоминаем как пример мусора И мягко скрываем упоминание — чтобы пост ушёл
       // не только из ленты, но и из сюжетов/агрегатов (soft-hide на бэке).
@@ -43,7 +42,6 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
 
   useEffect(() => {
     let alive = true;
-    seenRef.current = new Set();
 
     setStream([]);
     setFlashIds(new Set());
@@ -55,7 +53,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
     intelApi.stream(streamParams).then(events => {
       if (!alive) return;
       const arr = Array.isArray(events) ? events : [];
-      seenRef.current = new Set(arr.map(e => e.id));
+      arr.forEach(e => { if (e && e.id != null) seenIdsRef.current.add(e.id); });
       setStream(arr);
     }).catch(() => {});
 
@@ -86,6 +84,11 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
       );
       if (!add.length) return prev;
       add.forEach(e => {
+        // Only flash genuinely-new events. seenIdsRef survives tab switches, so on a
+        // remount the re-merge of the cumulative liveEvents buffer doesn't re-light
+        // posts the user already saw (the «всё уже было, но помечено сейчас» bug).
+        if (seenIdsRef.current.has(e.id)) return;
+        seenIdsRef.current.add(e.id);
         setFlashIds(f => { const n = new Set(f); n.add(e.id); return n; });
         setTimeout(() => {
           setFlashIds(f => { const n = new Set(f); n.delete(e.id); return n; });

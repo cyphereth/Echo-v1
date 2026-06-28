@@ -27,10 +27,11 @@ import time
 from sqlalchemy.exc import IntegrityError
 
 from ..core.db import get_session
-from ..core.providers.telegram import _parse_tg_message, _parse_tg_chat_message
+from ..core.providers.telegram import (
+    _parse_tg_message, _parse_tg_chat_message, chat_namespace,
+)
 from .models import IntelLexicon, IntelMention, IntelProbe
-from .geo import detect_direction
-from .tagging import resolve_direction_id
+from .tagging import tag_geo
 from .collector import (
     MIN_TEXT_LEN,
     _clean_handle,
@@ -38,6 +39,8 @@ from .collector import (
     keyword_relevant,
     chat_message_relevant,
 )
+from .translate import maybe_translate
+from .spam_filter import load_spam, load_keywords, is_spam_text, blocked_by_word
 
 log = logging.getLogger("radar.intel.realtime")
 
@@ -69,36 +72,60 @@ def build_source_map(session):
         handle = _clean_handle(raw).lstrip("@").lower()
         if not handle:
             continue
-        by_user[handle] = {"side": p.side, "kind": p.kind, "handle": "@" + handle}
+        by_user[handle] = {"side": p.side, "kind": p.kind, "handle": "@" + handle,
+                           "subject": p.subject, "direction_id": p.direction_id}
         join_handles.append("@" + handle)
     return by_user, join_handles, invite_links
 
 
 # ── Persistence ─────────────────────────────────────────────────────────────────
 
-def store_realtime_post(session, post, side, kind, lexicon_terms) -> bool:
+def store_realtime_post(session, post, side, kind, lexicon_terms,
+                        spam_words=None, spam_examples=None, keywords=None,
+                        subject=None, src_direction_id=None) -> bool:
     """Persist one parsed Post as an IntelMention, or skip it.
 
     Applies the same gate the poller uses (chat_message_relevant for chats; length +
-    keyword/geo for channels), tags a direction, and dedups on (platform, post_id) via
-    a savepoint. Returns True if a new row was stored. Caller commits.
+    keyword/geo for channels, OR'd with curator-managed positive keywords), drops
+    curator-marked spam (стоп-слово или дословный дубль примера — пост не пишется в БД
+    вообще, не попадает ни в ленту, ни в сюжеты), tags a direction, and dedups on
+    (platform, post_id) via a savepoint. Returns True if a new row was stored. Caller
+    commits.
     """
-    text = post.text or ""
+    # Перевод uk→ru ДО гейтов: лексикон/гео-фильтры русскоязычные, а часть
+    # источников (каналы тревог) пишут по-украински. Поллер уже так делает
+    # (collector.py); realtime раньше писал текст как есть — отсюда непереведённые
+    # посты в свежей ленте. Перевод сетевой, но вызывается off-loop (см. _on_message).
+    text = maybe_translate(post.text or "")
     author = post.author or ""
 
     if kind == "chat":
-        if not chat_message_relevant(text, author, lexicon_terms):
+        if not chat_message_relevant(text, author, lexicon_terms, keywords or ()):
             return False
     else:
-        clean = " ".join(w for w in text.split() if not w.startswith("#")).strip()
-        if len(clean) < MIN_TEXT_LEN:
-            return False
-        if not keyword_relevant(text, lexicon_terms):
-            return False
+        # Curator-keyword hit overrides the length gate (short replies/comments), same as
+        # the poller. Lexicon admission still requires the post to clear MIN_TEXT_LEN.
+        kw_hit = blocked_by_word(text, keywords or ())
+        if not kw_hit:
+            clean = " ".join(w for w in text.split() if not w.startswith("#")).strip()
+            if len(clean) < MIN_TEXT_LEN:
+                return False
+            if not keyword_relevant(text, lexicon_terms):
+                return False
 
-    dir_id = resolve_direction_id(session, detect_direction(text))
+    # Антиспам: дословный дубль примера или стоп-слово — выкидываем до записи.
+    if is_spam_text(text, spam_words, spam_examples):
+        return False
+
+    # Та же гео-привязка, что и у поллера (collector.py): текст решает область, а
+    # subject/область источника подставляются как fallback, если текст не назвал место
+    # (или назвал ту же область). Иначе live-посты теряли местоположение канала.
+    from types import SimpleNamespace
+    probe = SimpleNamespace(subject=subject, direction_id=src_direction_id)
+    dir_id, subject = tag_geo(session, probe, text)
     mention = IntelMention(
         direction_id=dir_id,
+        subject=subject,
         platform=post.platform or "telegram",
         post_id=post.post_id,
         author=author,
@@ -107,16 +134,30 @@ def store_realtime_post(session, post, side, kind, lexicon_terms) -> bool:
         url=getattr(post, "url", None),
         views=getattr(post, "views", 0) or 0,
         created_at=post.created_at,
+        reply_to_tg_id=getattr(post, "reply_to_tg_id", None),
+        media=getattr(post, "media", None),
     )
     sp = session.begin_nested()
     try:
         session.add(mention)
         session.flush()
         sp.commit()
-        return True
     except IntegrityError:
         sp.rollback()
         return False
+
+    # Мгновенное обогащение треда: если родитель уже в БД, собираем цепочку прямо
+    # сейчас (без сети) — кнопка «в ответ на» появляется в ту же секунду, не ждём
+    # тика. Родителя нет локально → context_fetched остаётся False, подтянет
+    # сетевой enrich_context на следующем тике. Ошибки не валят запись поста.
+    if mention.reply_to_tg_id:
+        from .context_pass import _resolve_locally
+        try:
+            _resolve_locally(session, mention)
+        except Exception:
+            log.exception("realtime: local thread resolve failed for %s", mention.post_id)
+            session.rollback()
+    return True
 
 
 # ── Listener ────────────────────────────────────────────────────────────────────
@@ -136,7 +177,13 @@ class IntelRealtime:
         self._by_user: dict[str, dict] = {}
         self._id_map: dict[int, dict] = {}
         self._lexicon: list[str] = []
+        self._spam_words: list[str] = []
+        self._spam_examples: list[str] = []
+        self._keywords: list[str] = []
         self._lex_loaded_at: float = 0.0
+        # Single-flight guard so a burst of replies spawns at most one network
+        # context-enrich pass at a time (keeps SQLite writes serialized, avoids floods).
+        self._enrich_lock = threading.Lock()
 
     def start(self) -> bool:
         client = getattr(self.provider, "_client", None)
@@ -151,6 +198,8 @@ class IntelRealtime:
         try:
             self._by_user, join_handles, invite_links = build_source_map(session)
             self._lexicon = [t for (t,) in session.query(IntelLexicon.term).all()]
+            self._spam_words, self._spam_examples = load_spam(session)
+            self._keywords = load_keywords(session)
         finally:
             session.close()
         self._lex_loaded_at = time.monotonic()
@@ -188,13 +237,15 @@ class IntelRealtime:
     # -- internals --
 
     def _refresh_lexicon(self) -> None:
-        """Reload the keyword lexicon from the DB if the TTL has elapsed, so live edits
-        to the filter take effect without restarting the backend."""
+        """Reload the keyword lexicon AND spam lists from the DB if the TTL has elapsed,
+        so live edits to the filter/antispam take effect without restarting the backend."""
         if time.monotonic() - self._lex_loaded_at < LEXICON_TTL_SEC:
             return
         session = get_session()
         try:
             self._lexicon = [t for (t,) in session.query(IntelLexicon.term).all()]
+            self._spam_words, self._spam_examples = load_spam(session)
+            self._keywords = load_keywords(session)
         finally:
             session.close()
         self._lex_loaded_at = time.monotonic()
@@ -224,7 +275,7 @@ class IntelRealtime:
         msg = event.message
         try:
             if kind == "chat":
-                ns = username or str(getattr(event, "chat_id", "chat"))
+                ns = chat_namespace(username, getattr(event, "chat_id", None))
                 post = _parse_tg_chat_message(msg, ns, "@" + username if username else "@chat")
             else:
                 followers = getattr(chat, "participants_count", 0) or 0
@@ -234,18 +285,75 @@ class IntelRealtime:
             log.exception("intel realtime: failed to parse message")
             return
 
+        # store_realtime_post does a synchronous uk→ru translate (network) before the
+        # relevance gates. Run it off the Telethon event-loop thread so a burst of
+        # translatable posts doesn't stall update processing for everyone else.
+        import asyncio
+        loop = asyncio.get_event_loop()
+        try:
+            stored = await loop.run_in_executor(
+                None, self._store_sync, post, side, kind,
+                info.get("subject"), info.get("direction_id"),
+            )
+        except Exception:
+            log.exception("intel realtime: store failed for %s", post.post_id)
+            return
+
+        if stored:
+            log.info("intel realtime stored %s (%s)", post.post_id, side)
+            # If this is a reply whose parent wasn't already local (so
+            # store_realtime_post couldn't assemble the chain offline), pull the
+            # thread from Telegram NOW instead of waiting up to a full tick
+            # (INTEL_TICK_SEC) for the poller's enrich pass.
+            if getattr(post, "reply_to_tg_id", None):
+                self._kick_enrich()
+
+    def _store_sync(self, post, side, kind, subject=None, src_direction_id=None) -> bool:
+        """Open a short-lived session, store the post (translate + gates + dedup),
+        commit, and report whether a new row landed. Runs in an executor thread."""
         session = get_session()
         try:
-            if store_realtime_post(session, post, side, kind, self._lexicon):
+            if store_realtime_post(session, post, side, kind, self._lexicon,
+                                   self._spam_words, self._spam_examples, self._keywords,
+                                   subject, src_direction_id):
                 session.commit()
-                log.info("intel realtime stored %s (%s)", post.post_id, side)
-            else:
-                session.rollback()
+                return True
+            session.rollback()
+            return False
         except Exception:
             session.rollback()
-            log.exception("intel realtime: store failed for %s", post.post_id)
+            raise
         finally:
             session.close()
+
+    def _kick_enrich(self) -> None:
+        """Drain pending reply-thread context in a background thread.
+
+        Runs OFF the Telethon event-loop thread on purpose: provider._await blocks on
+        run_coroutine_threadsafe(...).result(), which would deadlock if called from the
+        loop thread itself. The single-flight lock means a burst of replies triggers one
+        pass (it picks up every pending reply via the context_fetched=False query), not
+        one network storm per message.
+        """
+        if not self._enrich_lock.acquire(blocking=False):
+            return  # a pass is already running; it will pick up this reply too
+
+        def _run():
+            try:
+                from .context_pass import enrich_context
+                session = get_session()
+                try:
+                    n = enrich_context(session, self.provider, batch_size=20)
+                    if n:
+                        log.info("intel realtime: enriched %d reply thread(s) on arrival", n)
+                except Exception:
+                    log.exception("intel realtime: on-arrival enrich failed")
+                finally:
+                    session.close()
+            finally:
+                self._enrich_lock.release()
+
+        threading.Thread(target=_run, name="intel-rt-enrich", daemon=True).start()
 
     def _subscribe(self, join_handles: list[str], invite_links: list[tuple]) -> None:
         # Delegate to the shared sweep: it SKIPS already-joined sources (subscribed.json)

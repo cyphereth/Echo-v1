@@ -46,6 +46,18 @@ def _default_embed(text: str):
     return _batch_embed([text])[0]
 
 
+def _same_subject(candidate, item) -> bool:
+    """Clustering guard: keep posts of different localities in separate stories.
+
+    candidate = existing incident/story, item = mention/incident. Subjects compared
+    case-insensitively; a missing subject (None/"") forms its own bucket and never
+    merges into a city-tagged cluster. So «Шостка» and «Воронеж» of the same oblast
+    no longer collapse into one story."""
+    a = (getattr(candidate, "subject", None) or "").strip().lower()
+    b = (getattr(item, "subject", None) or "").strip().lower()
+    return a == b
+
+
 def update_stories(session: Session, direction_id: int, embed=None) -> None:
     """Cluster pending IntelMentions for *direction_id* into incidents/stories, then
     recompute source_count + verified for every story under that direction, and
@@ -55,6 +67,7 @@ def update_stories(session: Session, direction_id: int, embed=None) -> None:
         owner_id=direction_id,
         models=_MODELS,
         embed=embed if embed is not None else _default_embed,
+        match_guard=_same_subject,
     )
     _recompute_verification(session, direction_id)
     rebuild_points(session, direction_id)   # timeline buckets — must precede anomaly

@@ -54,7 +54,8 @@ def _title(text: str) -> str:
     return (t[:80] + "…") if len(t) > 80 else (t or "(без текста)")
 
 
-def _attach_to_incident(session, conn, models, owner_id: int, m, v: np.ndarray):
+def _attach_to_incident(session, conn, models, owner_id: int, m, v: np.ndarray,
+                        match_guard=None):
     """Attach mention *m* (with embedding *v*) to the best matching incident,
     or create a new one. Returns the incident ORM object."""
     created = _aware(m.created_at)
@@ -67,6 +68,8 @@ def _attach_to_incident(session, conn, models, owner_id: int, m, v: np.ndarray):
             continue
         if abs(_aware(inc.last_seen_at) - created) > INCIDENT_WINDOW:
             continue
+        if match_guard is not None and not match_guard(inc, m):
+            continue  # e.g. different locality — keep them apart
         old = _centroid(conn, "incident_vec", inc_id)
         n = inc.post_count
         merged = _normalize((old * n + v) / (n + 1))
@@ -83,6 +86,8 @@ def _attach_to_incident(session, conn, models, owner_id: int, m, v: np.ndarray):
                           first_seen_at=created, last_seen_at=created)
     if hasattr(inc, "sentiment"):
         inc.sentiment = _tone_score(tone)
+    if hasattr(inc, "subject"):
+        inc.subject = getattr(m, "subject", None)  # locality of the opening mention
     session.add(inc)
     session.flush()
     vec.store(conn, "incident_vec", inc.id, v)
@@ -100,7 +105,8 @@ def _bump_story(conn, st, inc, centroid: np.ndarray) -> None:
     st.post_count = (st.post_count or 0) + 1
 
 
-def _attach_to_story(session, conn, models, owner_id: int, inc, centroid: np.ndarray):
+def _attach_to_story(session, conn, models, owner_id: int, inc, centroid: np.ndarray,
+                     match_guard=None):
     """Attach incident *inc* to the best matching story, or create a new one.
     Returns the story ORM object."""
     if inc.story_id is not None:
@@ -115,11 +121,15 @@ def _attach_to_story(session, conn, models, owner_id: int, inc, centroid: np.nda
             continue
         if abs(_aware(st.last_seen_at) - _aware(inc.last_seen_at)) > STORY_WINDOW:
             continue
+        if match_guard is not None and not match_guard(st, inc):
+            continue  # e.g. different locality — keep them apart
         _bump_story(conn, st, inc, centroid)
         return st
     st = models.Story(**models.owner_kwargs(owner_id), title=inc.title,
                       first_seen_at=inc.first_seen_at, last_seen_at=inc.last_seen_at,
                       post_count=0)
+    if hasattr(st, "subject"):
+        st.subject = getattr(inc, "subject", None)  # locality of the opening incident
     session.add(st)
     session.flush()
     vec.store(conn, "story_vec", st.id, centroid)
@@ -132,13 +142,17 @@ def _attach_to_story(session, conn, models, owner_id: int, inc, centroid: np.nda
 # ---------------------------------------------------------------------------
 
 def cluster_owner(session, owner_id: int, models, embed: Callable,
-                  *, sim_threshold: float = 0.78, now=None) -> None:
+                  *, sim_threshold: float = 0.78, now=None, match_guard=None) -> None:
     """Generic story/incident clustering for one owner (brand or topic).
 
     Reads models.Mention rows for owner_id with incident_id IS NULL, embeds via
     ``embed(text) -> vector``, attaches to the nearest incident/story above
     sim_threshold or creates new ones, and refreshes story_points + counts.
     All table access goes through the ``models`` bundle — no Scope, no globals.
+
+    ``match_guard(candidate, item) -> bool`` is an optional extra compatibility check
+    applied alongside owner/time gates: candidate is an existing incident (item=mention)
+    or story (item=incident). Default None → behaviour unchanged for other domains.
     """
     conn = _raw(session)
     # Ensure vec tables exist (idempotent; real DBs already have them via init_db)
@@ -164,10 +178,10 @@ def cluster_owner(session, owner_id: int, models, embed: Callable,
         raw_v = embed(text)
         v = _normalize(np.asarray(raw_v, dtype=np.float32))
         vec.store(conn, "mention_vec", m.id, v)
-        inc = _attach_to_incident(session, conn, models, owner_id, m, v)
+        inc = _attach_to_incident(session, conn, models, owner_id, m, v, match_guard)
         m.incident_id = inc.id
         cen = _centroid(conn, "incident_vec", inc.id)
-        st = _attach_to_story(session, conn, models, owner_id, inc, cen)
+        st = _attach_to_story(session, conn, models, owner_id, inc, cen, match_guard)
         inc.story_id = st.id
 
     session.flush()

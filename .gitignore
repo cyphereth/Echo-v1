@@ -33,3 +33,6 @@ node_modules/
 
 # Intel realtime subscription state (per-account runtime, not code)
 backend/radar/intel/data/subscribed.json
+
+# Media cache directory (runtime, not code)
+backend/.media_cache/

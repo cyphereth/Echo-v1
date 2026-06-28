@@ -1,13 +1,17 @@
 // Intel closed contour — shell + 3 экрана.
 // Situational Center (home) / Stories / Operational Board.
 // Витринная тема «военный диспетчер»: темнее, координатная сетка, моно-данные.
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon } from '../../core/components/icons';
 import { IntelHome } from './components/IntelHome';
 import { IntelStories } from './components/IntelStories';
 import { IntelBoard } from './components/IntelBoard';
 import { IntelSources } from './components/IntelSources';
-import { intelApi } from './api';
+import { IntelSpam } from './components/IntelSpam';
+import { AlertBell } from './components/AlertBell';
+import { AlertToast } from './components/AlertToast';
+import { DateRangePicker } from './components/DateRangePicker';
+import { intelApi, streamLiveEvents } from './api';
 import { INTEL_USE_MOCK } from './data/mock';
 import styles from './intel.module.css';
 
@@ -16,6 +20,7 @@ const SCREENS = [
   { key: 'stories', label: 'Сюжеты',             icon: 'activity', hotkey: '2' },
   { key: 'board',   label: 'Оперативная доска',  icon: 'bar3',     hotkey: '3' },
   { key: 'sources', label: 'Источники',           icon: 'link',     hotkey: '4' },
+  { key: 'spam',    label: 'Антиспам',             icon: 'search',   hotkey: '5' },
 ];
 
 function NavItem({ item, active, onClick }) {
@@ -29,15 +34,107 @@ function NavItem({ item, active, onClick }) {
 }
 
 export function IntelApp({ onExit }) {
-  const [screen, setScreen]   = useState('home');
-  const [window, setWindow]   = useState('24h');
+  const [screen, setScreen]       = useState('home');
+  const [timeRange, setTimeRange] = useState({ window: '24h' });
+  const [openStoryId, setOpenStoryId] = useState(null);
+  const [openDirection, setOpenDirection] = useState(null);
+  const [navToken, setNavToken] = useState(0);
   const [search, setSearch]   = useState('');
   const [searchResults, setSearchResults] = useState(null);
+  const [liveEvents, setLiveEvents] = useState([]);
+  const [alerts, setAlerts]         = useState([]);
+  const [muted, setMuted] = useState({ stories: [], directions: [] });
+  const [toasts, setToasts]         = useState([]);
+  const seenAlert = useRef(new Set());
+
+  useEffect(() => {
+    let alive = true;
+    intelApi.alerts({ unread: true, limit: 50 }).then(rows => {
+      if (!alive || !Array.isArray(rows)) return;
+      rows.forEach(a => seenAlert.current.add(a.id));
+      setAlerts(rows);
+    }).catch(() => {});
+    intelApi.mutedList().then(setMuted).catch(() => {});
+
+    const stop = streamLiveEvents({
+      // -1 → сервер стартует с max(alert.id): шлёт ТОЛЬКО новые сигналы, появившиеся
+      // после подключения. Иначе при перезаходе все старые алерты летят тостами.
+      afterAlertId: -1,
+      onEvent: (e) => {
+        if (!alive || !e || e.id == null) return;
+        setLiveEvents(prev => [...prev, e].slice(-200));
+      },
+      onAlert: (a) => {
+        if (!alive || !a || a.id == null || seenAlert.current.has(a.id)) return;
+        seenAlert.current.add(a.id);
+        setAlerts(prev => [a, ...prev]);
+        setToasts(prev => [...prev, a]);
+      },
+    });
+    return () => { alive = false; stop(); };
+  }, []);
+
+  const dismissToast = useCallback((id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  const ackAlert = useCallback(async (id) => {
+    setAlerts(prev => prev.map(a => a.id === id ? { ...a, acknowledged: true } : a));
+    try { await intelApi.ackAlert(id); } catch { /* optimistic */ }
+  }, []);
+
+  const ackAll = useCallback(async () => {
+    setAlerts(prev => prev.map(a => ({ ...a, acknowledged: true })));
+    try { await intelApi.ackAllAlerts(); } catch { /* optimistic */ }
+  }, []);
+
+  const muteFromAlert = useCallback(async (a) => {
+    // оптимистично убираем все сигналы того же объекта из ленты
+    setAlerts(prev => prev.filter(x => a.scope === 'direction'
+      ? x.direction_id !== a.direction_id
+      : x.story_id !== a.story_id));
+    try {
+      if (a.scope === 'direction') await intelApi.muteDirection(a.direction_id);
+      else await intelApi.muteStory(a.story_id);
+      setMuted(await intelApi.mutedList());
+    } catch { /* optimistic */ }
+  }, []);
+
+  const unmute = useCallback(async (kind, id) => {
+    setMuted(prev => ({
+      stories: kind === 'story' ? prev.stories.filter(s => s.id !== id) : prev.stories,
+      directions: kind === 'direction' ? prev.directions.filter(d => d.id !== id) : prev.directions,
+    }));
+    try {
+      if (kind === 'direction') await intelApi.unmuteDirection(id);
+      else await intelApi.unmuteStory(id);
+    } catch { /* optimistic */ }
+  }, []);
+
+  const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+  const visibleAlerts = alerts.filter(a => a.at && (Date.now() - new Date(a.at).getTime()) < TWO_HOURS_MS);
+  const unreadCount = visibleAlerts.filter(a => !a.acknowledged).length;
 
   async function runSearch(q) {
     if (!q.trim()) { setSearchResults(null); return; }
     setSearchResults(await intelApi.search(q.trim()));
   }
+
+  // Открыть сигнал: ведём к КОНКРЕТНОМУ сюжету (scope=story) или направлению,
+  // а не просто на вкладку «Сюжеты». navToken гарантирует переход даже если экран
+  // уже открыт. Раньше onOpen только переключал screen — клик «не туда».
+  const openAlert = (a) => {
+    if (a.scope === 'story' && a.story_id != null) {
+      setOpenStoryId(a.story_id); setOpenDirection(null);
+    } else if (a.direction) {
+      setOpenDirection(a.direction); setOpenStoryId(null);
+    } else {
+      setScreen(a.scope === 'story' ? 'stories' : 'board');
+      return;
+    }
+    setNavToken(t => t + 1);
+    setScreen('stories');
+  };
 
   return (
     <div className={styles.app}>
@@ -50,7 +147,7 @@ export function IntelApp({ onExit }) {
         </div>
         <nav className={styles.nav}>
           {SCREENS.map(s => (
-            <NavItem key={s.key} item={s} active={screen === s.key} onClick={() => { setScreen(s.key); setSearchResults(null); }} />
+            <NavItem key={s.key} item={s} active={screen === s.key} onClick={() => { setScreen(s.key); setSearchResults(null); setOpenStoryId(null); setOpenDirection(null); }} />
           ))}
         </nav>
         <div className={styles.sidebarBottom}>
@@ -76,13 +173,9 @@ export function IntelApp({ onExit }) {
             </div>
           </div>
           <div className={styles.topgrow} />
-          <div className={styles.windowSel}>
-            {['1h', '24h', '7d'].map(w => (
-              <button key={w} className={styles.windowBtn} data-active={window === w ? '1' : '0'} onClick={() => setWindow(w)}>
-                {w}
-              </button>
-            ))}
-          </div>
+          <AlertBell alerts={visibleAlerts} unreadCount={unreadCount} onAck={ackAlert} onAckAll={ackAll}
+                     onOpen={openAlert} onMute={muteFromAlert} muted={muted} onUnmute={unmute} />
+          <DateRangePicker value={timeRange} onChange={setTimeRange} />
           <div className={styles.searchBox}>
             <Icon name="search" size={13} color="#4A6378" />
             <input
@@ -99,14 +192,18 @@ export function IntelApp({ onExit }) {
             <SearchResults results={searchResults} query={search} onOpenStory={() => { setScreen('stories'); setSearchResults(null); }} />
           </div>
         ) : screen === 'home' ? (
-          <IntelHome window={window} onOpenStory={() => setScreen('stories')} />
+          <IntelHome timeRange={timeRange} liveEvents={liveEvents} onOpenStory={(id) => { setOpenStoryId(id ?? null); setOpenDirection(null); setNavToken(t => t + 1); setScreen('stories'); }} />
         ) : screen === 'stories' ? (
-          <IntelStories window={window} />
+          <IntelStories timeRange={timeRange} openStoryId={openStoryId} openDirection={openDirection} navToken={navToken} />
         ) : screen === 'board' ? (
-          <IntelBoard window={window} onOpenDir={() => setScreen('stories')} />
-        ) : (
+          <IntelBoard timeRange={timeRange} onOpenDir={(dirKey) => { setOpenDirection(dirKey ?? null); setOpenStoryId(null); setNavToken(t => t + 1); setScreen('stories'); }} />
+        ) : screen === 'sources' ? (
           <IntelSources />
+        ) : (
+          <IntelSpam />
         )}
+        <AlertToast toasts={toasts} onDismiss={dismissToast}
+                    onOpen={(a) => { openAlert(a); dismissToast(a.id); }} />
       </div>
     </div>
   );

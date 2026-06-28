@@ -215,6 +215,40 @@
 }
 .workspace::-webkit-scrollbar { width: 8px; }
 
+/* ── Home workspace: fill height, no page scroll — each column scrolls itself ── */
+.homeWorkspace {
+  overflow: hidden;        /* the page itself never scrolls */
+}
+.homeWorkspace .kpis { flex-shrink: 0; }
+/* the two grid rows share the remaining vertical space */
+.homeWorkspace .grid2 {
+  flex: 1 1 0;
+  min-height: 0;
+  /* force the single grid row to fill the row height (not auto/content) and let
+     sections shrink, and stretch items so each section gets the full column height */
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
+}
+/* the event-feed row gets the lion's share of the height — it's the main thing the
+   operator watches. ~1 : 1.9 split vs the hot/alerts row above it. */
+.homeWorkspace .grid2.feedRow {
+  flex: 1.9 1 0;
+}
+/* sections inside the home grid become flex columns so their body can scroll */
+.homeWorkspace .section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex-shrink: 1;
+}
+/* scrollable body wrapper for a home section's row list */
+.scrollBody {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+.scrollBody::-webkit-scrollbar { width: 8px; }
+
 /* ── KPI strip ── */
 .kpis {
   display: grid;
@@ -427,6 +461,23 @@
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
 }
+/* Per-event "to spam" button — appears on row hover, stays out of the way otherwise. */
+.eventSpam {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgba(141,163,184,.18);
+  border-radius: 4px;
+  background: transparent;
+  color: #5A7488;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s, border-color .12s, color .12s, background .12s;
+}
+.eventRow:hover .eventSpam { opacity: 1; }
+.eventSpam:hover { border-color: #FF4D5E; color: #FF4D5E; background: rgba(255,77,94,.08); }
 
 /* ── Stories list ── */
 .storyList {
@@ -465,6 +516,7 @@
 .filterChip[data-active='1'] { background: rgba(43,179,199,.15); color: #57D2E2; border-color: rgba(43,179,199,.30); }
 
 .storyCard {
+  position: relative;
   padding: 12px 14px;
   border-bottom: 1px solid rgba(43,179,199,.06);
   cursor: pointer;
@@ -676,6 +728,54 @@
 }
 .srcDel:hover { border-color: #FF4D5E; color: #FF4D5E; background: rgba(255,77,94,.08); }
 
+/* ── Ключевые слова: компактная сетка-чипы в скролл-контейнере ── */
+.kwScroll {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+.kwGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.kwChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 4px 4px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(79,208,138,.22);
+  background: rgba(79,208,138,.06);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: #C2D8C8;
+}
+.kwChipText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kwChipDel {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  border: none;
+  background: none;
+  color: rgba(255,77,94,.55);
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.kwChipDel:hover { color: #FF4D5E; background: rgba(255,77,94,.12); }
+
 /* ── Add source form ── */
 .srcAddForm {
   display: flex;
@@ -701,6 +801,36 @@
 }
 .srcInput:focus { border-color: rgba(43,179,199,.35); }
 .srcInput::placeholder { color: #3A5263; }
+
+/* Search over already-added sources */
+.srcSearch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border-top: 1px solid rgba(43,179,199,.10);
+  border-bottom: 1px solid rgba(43,179,199,.08);
+  background: rgba(0,0,0,.10);
+}
+.srcSearch input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: #D8E4F0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.srcSearch input::placeholder { color: #3A5263; }
+.srcSearchClear {
+  background: none;
+  border: none;
+  color: #6A8499;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+.srcSearchClear:hover { color: #FF4D5E; }
 .srcSelect {
   background: rgba(255,255,255,.03);
   border: 1px solid rgba(255,255,255,.08);
@@ -736,3 +866,54 @@
   color: #FF7A87;
   letter-spacing: 0.04em;
 }
+
+/* ── Alert Bell ─────────────────────────────────────────────────────────────── */
+.bellWrap { position: relative; }
+.bellBtn { position: relative; display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: 8px; background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08); color: #9FB3C8; cursor: pointer; }
+.bellBtn:hover { background: rgba(255,255,255,0.08); }
+.bellBadge { position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px;
+  padding: 0 4px; border-radius: 8px; background: #FF4D5E; color: #fff;
+  font-size: 10px; line-height: 16px; text-align: center; font-weight: 700; }
+.bellMenu { position: absolute; top: 40px; right: 0; width: 320px; max-height: 60vh; overflow-y: auto;
+  background: #0E1622; border: 1px solid rgba(255,255,255,0.10); border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5); z-index: 50; }
+.bellHead { display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.08);
+  font-size: 12px; color: #C7D6E5; font-weight: 600; }
+.bellAckAll { background: none; border: none; color: #57D2E2; font-size: 11px; cursor: pointer; }
+.bellEmpty { padding: 18px 12px; color: #7E91A6; font-size: 12px; text-align: center; }
+.bellItem { display: flex; align-items: stretch; gap: 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.05); }
+.bellItem:hover { background: rgba(255,255,255,0.05); }
+.bellItem[data-unread="1"] { border-left: 2px solid #FF4D5E; }
+.bellItemMsg { font-size: 12px; color: #DCE7F2; }
+.bellItemMeta { font-size: 10px; color: #7E91A6; }
+.bellItemMain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+  background: none; border: none; text-align: left; cursor: pointer; padding: 8px 10px; color: inherit; }
+.bellMute, .bellUnmute { flex-shrink: 0; background: none; border: none; cursor: pointer;
+  color: #4A6378; padding: 0 8px; font-size: 13px; }
+.bellMute:hover { color: #e25a5a; }
+.bellUnmute { font-size: 12px; }
+.bellUnmute:hover { color: #6ea8ff; }
+.bellMutedBox { border-top: 1px solid rgba(255,255,255,0.08); margin-top: 4px; }
+.bellMutedToggle { width: 100%; text-align: left; background: none; border: none;
+  color: #4A6378; cursor: pointer; padding: 8px 10px; font-size: 12px; }
+.bellMutedList { display: flex; flex-direction: column; }
+.bellMutedRow { display: flex; align-items: center; gap: 6px; padding: 4px 10px; }
+.bellMutedRow .bellItemMsg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Alert Toast ────────────────────────────────────────────────────────────── */
+.toastStack { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column;
+  gap: 8px; z-index: 60; }
+.toast { display: flex; align-items: flex-start; gap: 8px; width: 320px; padding: 10px 12px;
+  background: #14202E; border: 1px solid rgba(255,77,94,0.45); border-left: 3px solid #FF4D5E;
+  border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); color: #DCE7F2; cursor: pointer;
+  animation: toastIn 160ms ease-out; }
+.toastBody { flex: 1; min-width: 0; }
+.toastTitle { font-size: 12px; font-weight: 700; color: #FF8A95; }
+.toastMsg { font-size: 12px; color: #C7D6E5; overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.toastClose { background: none; border: none; color: #7E91A6; cursor: pointer; padding: 0; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }

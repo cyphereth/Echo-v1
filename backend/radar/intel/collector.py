@@ -18,7 +18,9 @@ from sqlalchemy.orm import Session
 
 from .models import IntelLexicon, IntelMention, IntelProbe
 from .geo import detect_direction
-from .tagging import resolve_direction_id
+from .tagging import resolve_direction_id, tag_geo
+from .translate import maybe_translate
+from .spam_filter import load_spam, load_keywords, blocked_by_word, classify_spam_batch, is_exact_spam
 from ..core.spam import looks_like_ad_cheap
 
 log = logging.getLogger(__name__)
@@ -154,7 +156,8 @@ def keyword_relevant(text: str, lexicon_terms) -> bool:
     return True
 
 
-def chat_message_relevant(text: str, author: str, lexicon_terms: tuple = ()) -> bool:
+def chat_message_relevant(text: str, author: str, lexicon_terms: tuple = (),
+                          keywords: tuple = ()) -> bool:
     """Return True if a chat message is worth storing as an IntelMention.
 
     Hard drop conditions (any → False):
@@ -162,19 +165,56 @@ def chat_message_relevant(text: str, author: str, lexicon_terms: tuple = ()) -> 
     - text shorter than MIN_TEXT_LEN after stripping
     - no alphabetic word in the text
 
-    Admit: delegated to keyword_relevant (military keyword present, weather-guarded).
+    Admit: military lexicon term (keyword_relevant, weather-guarded) OR a curator-managed
+    positive keyword (``keywords``). A curator-keyword hit is an explicit signal, so it
+    BYPASSES the length gate (replies/comments are usually short — that's why keywords
+    "didn't work for replies"); the ad and alphabetic guards still win regardless.
     """
     stripped = (text or "").strip()
 
-    # Hard drops
-    if looks_like_ad_cheap(stripped, author):
-        return False
-    if len(stripped) < MIN_TEXT_LEN:
+    # Explicit curator-keyword hit — strong signal, overrides the length noise-gate.
+    kw_hit = blocked_by_word(stripped, keywords)
+
+    # Hard drops (apply even to keyword hits — sellers/empty text are never wanted).
+    # looks_like_ad_cheap also drops anything shorter than its own min_len; on a keyword
+    # hit we pass min_len=0 so only the seller-name guard remains (short reply admitted).
+    if kw_hit:
+        if looks_like_ad_cheap(stripped, author, min_len=0):
+            return False
+    elif looks_like_ad_cheap(stripped, author):
         return False
     if not re.search(r"[a-zA-Zа-яА-ЯёЁ]", stripped):
         return False
+    if not kw_hit and len(stripped) < MIN_TEXT_LEN:
+        return False
 
-    return keyword_relevant(stripped, lexicon_terms)
+    return kw_hit or keyword_relevant(stripped, lexicon_terms)
+
+
+# ── Spam-filter store helper ─────────────────────────────────────────────────
+
+def _filter_and_store(session: Session, pending: list, examples: list) -> int:
+    """Apply the LLM example-comparison layer to buffered mentions, then persist the
+    survivors. `pending` is a list of unsaved IntelMention objects (already past the
+    stop-word layer). Spam-flagged mentions are never written. Returns stored count."""
+    if not pending:
+        return 0
+    flags = classify_spam_batch([m.text for m in pending], examples)
+    count = 0
+    for mention, is_spam in zip(pending, flags):
+        # Дословный дубль примера-мусора дропаем всегда — даже если LLM-слой отключён
+        # (нет ключа) и вернул False. Идентичный спам не должен попасть в БД.
+        if is_spam or is_exact_spam(mention.text, examples):
+            continue
+        sp = session.begin_nested()
+        try:
+            session.add(mention)
+            session.flush()
+            sp.commit()
+            count += 1
+        except IntegrityError:
+            sp.rollback()  # already stored — skip, keep going
+    return count
 
 
 # ── Core collection ────────────────────────────────────────────────────────────
@@ -207,13 +247,16 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
         if not lexicon_terms:
             log.warning("intel lexicon is empty — channel posts kept only on geo match (run lexicon seed)")
 
-        if probe.kind == "chat":
-            # Normalize the stored query to a clean @handle (or detect invite links)
-            if _is_invite_link(probe.query):
-                log.warning("intel chat needs join, skipping: %s", probe.query)
-                return 0
+        # Spam filter: stop-words (fast layer) + examples (LLM layer). Loaded once.
+        blocklist, spam_examples = load_spam(session)
+        # Positive admission keywords (curator-managed) — OR'd into the lexicon gate.
+        keywords = load_keywords(session)
+        pending: list[IntelMention] = []
 
-            handle = _clean_handle(probe.query)
+        if probe.kind == "chat":
+            # After _ensure_joined() in passes.py the session is already a member.
+            # For invite links the handle is the link itself (provider resolves it).
+            handle = probe.query if _is_invite_link(probe.query) else _clean_handle(probe.query)
 
             # Determine min_id from watermark (if it is a numeric string)
             wm = probe.watermark or ""
@@ -233,16 +276,21 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                 if created is not None and created < cutoff:
                     continue
 
-                text = post.text or ""
+                text = maybe_translate(post.text or "")
                 author = post.author or ""
 
                 # Hard noise filter for chat
-                if not chat_message_relevant(text, author, lexicon_terms):
+                if not chat_message_relevant(text, author, lexicon_terms, keywords):
                     continue
 
-                dir_id = resolve_direction_id(session, detect_direction(text))
-                mention = IntelMention(
+                # Spam stop-word layer (fast, deterministic)
+                if blocked_by_word(text, blocklist):
+                    continue
+
+                dir_id, subject = tag_geo(session, probe, text)
+                pending.append(IntelMention(
                     direction_id=dir_id,
+                    subject=subject,
                     platform=probe.platform,
                     post_id=post.post_id,
                     author=author,
@@ -251,15 +299,9 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                     url=getattr(post, "url", None),
                     views=getattr(post, "likes", 0) or 0,
                     created_at=post.created_at,
-                )
-                sp = session.begin_nested()
-                try:
-                    session.add(mention)
-                    session.flush()
-                    sp.commit()
-                    count += 1
-                except IntegrityError:
-                    sp.rollback()
+                    reply_to_tg_id=getattr(post, "reply_to_tg_id", None),
+                    media=getattr(post, "media", None),
+                ))
 
         else:
             # Channel branch — paginated, light filter only
@@ -293,23 +335,32 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                         found_watermark = True
                         break
 
-                    # Length gate — drop media-only/very-short posts.
-                    clean = " ".join(
-                        w for w in (post.text or "").split()
-                        if not w.startswith("#")
-                    ).strip()
-                    if len(clean) < MIN_TEXT_LEN:
+                    # Keyword relevance gate — keep posts that hit the military lexicon
+                    # OR a curator-managed positive keyword (geo is for tagging, not admit).
+                    text = maybe_translate(post.text or "")
+                    kw_hit = blocked_by_word(text, keywords)
+
+                    # Length gate — drop media-only/very-short posts, UNLESS a curator
+                    # keyword matched (explicit signal overrides the length noise-gate;
+                    # short replies/comments are why keywords "didn't work for replies").
+                    if not kw_hit:
+                        clean = " ".join(
+                            w for w in (post.text or "").split()
+                            if not w.startswith("#")
+                        ).strip()
+                        if len(clean) < MIN_TEXT_LEN:
+                            continue
+                        if not keyword_relevant(text, lexicon_terms):
+                            continue
+
+                    # Spam stop-word layer (fast, deterministic)
+                    if blocked_by_word(text, blocklist):
                         continue
 
-                    # Keyword relevance gate — keep only military-relevant posts
-                    # (geo is used for tagging below, not as an admit path).
-                    text = post.text or ""
-                    if not keyword_relevant(text, lexicon_terms):
-                        continue
-
-                    dir_id = resolve_direction_id(session, detect_direction(text))
-                    mention = IntelMention(
+                    dir_id, subject = tag_geo(session, probe, text)
+                    pending.append(IntelMention(
                         direction_id=dir_id,
+                        subject=subject,
                         platform=probe.platform,
                         post_id=post.post_id,
                         author=post.author or "",
@@ -318,21 +369,17 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                         url=getattr(post, "url", None),
                         views=getattr(post, "likes", 0) or 0,
                         created_at=post.created_at,
-                    )
-                    sp = session.begin_nested()
-                    try:
-                        session.add(mention)
-                        session.flush()
-                        sp.commit()
-                        count += 1
-                    except IntegrityError:
-                        sp.rollback()
-                        # Post already stored — skip, but keep going.
+                        media=getattr(post, "media", None),
+                    ))
 
                 next_cursor = getattr(page, "next_cursor", None) or getattr(page, "cursor", None)
                 if next_cursor is None:
                     break
                 cursor = next_cursor
+
+        # Spam example-comparison layer (LLM, fail-open) over buffered survivors,
+        # then persist the non-spam ones. Spam is never written to the DB.
+        count = _filter_and_store(session, pending, spam_examples)
 
         if new_watermark:
             probe.watermark = new_watermark

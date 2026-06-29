@@ -48,6 +48,34 @@ def test_detect_place_place_only_cities_have_no_direction():
     # detect_direction (oblast-only callers) stays None for 📍-only cities
     assert detect_direction("ракетная опасность, Москва") is None
 
+def test_detect_place_skips_actor_capital_metonymy():
+    """Capital cities used as political actors («удары Киева», «Москва заявила») must NOT
+    be tagged as the event location — that mislabels e.g. a Russian-refinery post on a
+    Bryansk channel as 'Киев'. A locative preposition, comma, or sentence start keeps the
+    city as a real location."""
+    from radar.intel.geo import detect_place
+    # actor (genitive after a noun, no preposition) → not a place
+    assert detect_place("вследствие систематических ударов Киева по инфраструктуре") == (None, None)
+    assert detect_place("власти Москвы прокомментировали") == (None, None)
+    # actor (followed by a speech verb) → not a place
+    assert detect_place("Киев заявил о готовности к переговорам") == (None, None)
+    # real location (locative preposition) → still detected
+    assert detect_place("ППО работает над Киевом") == ("kyiv", "Киев")
+    assert detect_place("удар по Киеву") == ("kyiv", "Киев")
+    # real location (after comma / list, no actor grammar) → still detected
+    assert detect_place("ракетная опасность, Москва") == (None, "Москва")
+
+
+def test_detect_place_republic_abbreviations():
+    """Посты, где населённого пункта нет в газеттире, но указан регион-республика
+    («…, ДНР. фиксация БПЛА»), должны получать метку ДНР/ЛНР и привязку к фронту."""
+    from radar.intel.geo import detect_place
+    assert detect_place("Володарский район, Боевое, ДНР. фиксация БПЛА") == ("donetsk", "ДНР")
+    assert detect_place("обстрел по ЛНР") == ("luhansk", "ЛНР")
+    # не ломать обычные слова — «днр»/«лнр» не должны цепляться внутри слов
+    assert detect_place("просто новость про погоду") == (None, None)
+
+
 def test_resolve_direction_id_defaults_unassigned():
     from radar.intel import seed
     from radar.intel.tagging import resolve_direction_id

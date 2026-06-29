@@ -11,6 +11,40 @@ def _sess():
     Base.metadata.create_all(eng)
     return Session(eng)
 
+def test_enrich_one_translates_fetched_thread_text(monkeypatch):
+    """Parent/sibling text fetched from Telegram must pass through maybe_translate, so
+    Ukrainian replies render in Russian like the main feed (which translates on store).
+    The translator is stubbed to avoid a network round-trip."""
+    from types import SimpleNamespace
+    from radar.intel import seed, context_pass
+    from radar.intel.models import IntelDirection, IntelMention, IntelThreadContext
+
+    s = _sess()
+    seed.ensure_default_directions(s)
+    d = s.query(IntelDirection).first()
+    m = IntelMention(
+        direction_id=d.id, platform="telegram", post_id="grp/800",
+        author="@x", text="reply", created_at=datetime.now(timezone.utc),
+        reply_to_tg_id="799", context_fetched=False,
+    )
+    s.add(m); s.commit()
+
+    from radar.intel import translate
+    monkeypatch.setattr(translate, "maybe_translate",
+                        lambda t: "ПЕРЕВЕДЕНО" if t else t)
+    now = datetime.now(timezone.utc)
+    provider = SimpleNamespace(fetch_thread_context=lambda *a, **k: {
+        "parents": [{"tg_msg_id": "799", "depth": 1, "author": "@root",
+                     "text": "загроза БпЛА", "created_at": now, "media": None}],
+        "siblings": [{"tg_msg_id": "801", "author": "@sib",
+                      "text": "вибух", "created_at": now}],
+    })
+
+    assert context_pass.enrich_one(s, provider, m) is True
+    rows = s.query(IntelThreadContext).filter_by(mention_id=m.id).all()
+    assert {r.text for r in rows} == {"ПЕРЕВЕДЕНО"}
+
+
 def test_intel_mention_has_reply_fields():
     from radar.intel.models import IntelMention
     s = _sess()
@@ -417,3 +451,67 @@ def test_context_api_endpoint_reply_chain_depth_order_and_siblings_by_created_at
     # Check siblings: should have 1 sibling
     assert len(data["siblings"]) == 1
     assert data["siblings"][0]["tg_msg_id"] == "599"
+
+
+def test_context_api_endpoint_enriches_on_demand(monkeypatch):
+    """An un-enriched reply must be fetched synchronously when the thread is opened,
+    instead of waiting for the background pass. The endpoint calls the Telegram
+    provider, stores the parent, and returns it in the same response."""
+    from types import SimpleNamespace
+    from datetime import datetime, timezone
+    from fastapi.testclient import TestClient
+    from fastapi import FastAPI
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from radar.models import Base
+    import radar.intel.models  # noqa
+
+    from sqlalchemy.pool import StaticPool
+    # StaticPool shares one :memory: connection across threads, so the table created
+    # here is still there when enrich_one commits inside the TestClient worker thread
+    # (default per-thread pooling would hand that thread a fresh, empty DB after commit).
+    eng = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False},
+                        poolclass=StaticPool)
+    Base.metadata.create_all(eng)
+    s = Session(eng)
+
+    from radar.intel import seed
+    seed.ensure_default_directions(s)
+    from radar.intel.models import IntelDirection, IntelMention
+
+    d = s.query(IntelDirection).first()
+    m = IntelMention(
+        direction_id=d.id, platform="telegram", post_id="grp/700",
+        author="@x", text="reply", created_at=datetime.now(timezone.utc),
+        reply_to_tg_id="699", context_fetched=False,
+    )
+    s.add(m); s.commit()
+
+    now = datetime.now(timezone.utc)
+    fake_provider = SimpleNamespace(fetch_thread_context=lambda *a, **k: {
+        "parents": [{"tg_msg_id": "699", "depth": 1, "author": "@root",
+                     "text": "родитель", "created_at": now, "media": None}],
+        "siblings": [],
+    })
+    # The endpoint resolves the provider via api._get_tg_provider — patch it there.
+    import radar.intel.api as api_mod
+    monkeypatch.setattr(api_mod, "_get_tg_provider", lambda: fake_provider)
+
+    app = FastAPI()
+    app.include_router(api_mod.router)
+
+    def override_db():
+        yield s
+    app.dependency_overrides[api_mod.db] = override_db
+    from radar.models import User
+    app.dependency_overrides[api_mod.current_user] = lambda: User(email="t@t.com", password_hash="x")
+
+    client = TestClient(app)
+    resp = client.get(f"/intel/mention/{m.id}/context")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["reply_chain"]) == 1
+    assert data["reply_chain"][0]["tg_msg_id"] == "699"
+    assert data["reply_chain"][0]["author"] == "@root"
+    # Mention is now marked fetched so the next open hits the DB, not the network.
+    assert s.get(IntelMention, m.id).context_fetched is True

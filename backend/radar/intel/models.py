@@ -136,6 +136,7 @@ class IntelLexicon(Base):
     term:       Mapped[str]      = mapped_column(Text, unique=True, nullable=False)
     meaning:    Mapped[str]      = mapped_column(Text, default="")
     category:   Mapped[Optional[str]] = mapped_column(Text)
+    tier:       Mapped[str]      = mapped_column(Text, nullable=False, default="weak")
     created_at: Mapped[datetime] = mapped_column(default=_now)
 
 

@@ -64,7 +64,7 @@ def test_collect_drops_stop_word_post():
 
     s = _sess()
     seed.ensure_default_directions(s)
-    s.add(IntelLexicon(term="удар", meaning="strike", category="military"))
+    s.add(IntelLexicon(term="удар", meaning="strike", category="military", tier="strong"))
     s.add(IntelSpam(kind="word", value="реклама"))
     s.commit()
 
@@ -98,7 +98,7 @@ def test_collect_drops_llm_flagged_post(monkeypatch):
 
     s = _sess()
     seed.ensure_default_directions(s)
-    s.add(IntelLexicon(term="удар", meaning="strike", category="military"))
+    s.add(IntelLexicon(term="удар", meaning="strike", category="military", tier="strong"))
     s.add(IntelSpam(kind="example", value="подпишись на наш канал, лучшие новости"))
     s.commit()
 

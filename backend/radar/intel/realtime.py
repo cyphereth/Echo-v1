@@ -7,7 +7,7 @@ as IntelMention rows the instant they're published — no waiting for the next p
 Two halves, both pure-testable:
 - build_source_map(session): turn IntelProbe rows into a {username -> side/kind} lookup
   plus the join handles / invite links (used only when auto-join is enabled).
-- store_realtime_post(session, post, side, kind, lexicon_terms): apply the SAME
+- store_realtime_post(session, post, side, kind, lexicon_tiers): apply the SAME
   relevance gate + dedup the poller uses and persist one IntelMention. post_id comes
   from the provider's own parsers, so a post seen by BOTH realtime and polling
   collapses to one row via the (platform, post_id) unique key.
@@ -30,14 +30,16 @@ from ..core.db import get_session
 from ..core.providers.telegram import (
     _parse_tg_message, _parse_tg_chat_message, chat_namespace,
 )
-from .models import IntelLexicon, IntelMention, IntelProbe
+from .models import IntelMention, IntelProbe
 from .tagging import tag_geo
 from .collector import (
     MIN_TEXT_LEN,
     _clean_handle,
     _is_invite_link,
+    _geo_hit,
     keyword_relevant,
     chat_message_relevant,
+    load_lexicon_tiers,
 )
 from .translate import maybe_translate
 from .spam_filter import load_spam, load_keywords, is_spam_text, blocked_by_word
@@ -80,7 +82,7 @@ def build_source_map(session):
 
 # ── Persistence ─────────────────────────────────────────────────────────────────
 
-def store_realtime_post(session, post, side, kind, lexicon_terms,
+def store_realtime_post(session, post, side, kind, lexicon_tiers,
                         spam_words=None, spam_examples=None, keywords=None,
                         subject=None, src_direction_id=None) -> bool:
     """Persist one parsed Post as an IntelMention, or skip it.
@@ -99,8 +101,10 @@ def store_realtime_post(session, post, side, kind, lexicon_terms,
     text = maybe_translate(post.text or "")
     author = post.author or ""
 
+    geo_hit = _geo_hit(text)
     if kind == "chat":
-        if not chat_message_relevant(text, author, lexicon_terms, keywords or ()):
+        if not chat_message_relevant(text, author, lexicon_tiers, keywords or (),
+                                     geo_hit=geo_hit):
             return False
     else:
         # Curator-keyword hit overrides the length gate (short replies/comments), same as
@@ -110,7 +114,7 @@ def store_realtime_post(session, post, side, kind, lexicon_terms,
             clean = " ".join(w for w in text.split() if not w.startswith("#")).strip()
             if len(clean) < MIN_TEXT_LEN:
                 return False
-            if not keyword_relevant(text, lexicon_terms):
+            if not keyword_relevant(text, lexicon_tiers, geo_hit=geo_hit):
                 return False
 
     # Антиспам: дословный дубль примера или стоп-слово — выкидываем до записи.
@@ -176,7 +180,7 @@ class IntelRealtime:
         self._handler = None
         self._by_user: dict[str, dict] = {}
         self._id_map: dict[int, dict] = {}
-        self._lexicon: list[str] = []
+        self._lexicon: dict[str, str] = {}
         self._spam_words: list[str] = []
         self._spam_examples: list[str] = []
         self._keywords: list[str] = []
@@ -197,7 +201,7 @@ class IntelRealtime:
         session = get_session()
         try:
             self._by_user, join_handles, invite_links = build_source_map(session)
-            self._lexicon = [t for (t,) in session.query(IntelLexicon.term).all()]
+            self._lexicon = load_lexicon_tiers(session)
             self._spam_words, self._spam_examples = load_spam(session)
             self._keywords = load_keywords(session)
         finally:
@@ -243,7 +247,7 @@ class IntelRealtime:
             return
         session = get_session()
         try:
-            self._lexicon = [t for (t,) in session.query(IntelLexicon.term).all()]
+            self._lexicon = load_lexicon_tiers(session)
             self._spam_words, self._spam_examples = load_spam(session)
             self._keywords = load_keywords(session)
         finally:

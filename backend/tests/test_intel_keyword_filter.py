@@ -161,11 +161,11 @@ def test_curator_keyword_overrides_length_gate_for_chat():
     short = "наводнение!"  # < 20 chars — would normally be dropped by the length gate
     assert len(short) < MIN_TEXT_LEN
     # Without the keyword → dropped (too short, no lexicon hit)
-    assert chat_message_relevant(short, "@u", [], []) is False
+    assert chat_message_relevant(short, "@u", {}, []) is False
     # With the curator keyword → admitted despite being short
-    assert chat_message_relevant(short, "@u", [], ["наводнение"]) is True
+    assert chat_message_relevant(short, "@u", {}, ["наводнение"]) is True
     # Text with no alphabetic char is still dropped even on a keyword hit
-    assert chat_message_relevant("123 456", "@u", [], ["123"]) is False
+    assert chat_message_relevant("123 456", "@u", {}, ["123"]) is False
 
 
 def test_load_keywords_returns_only_keyword_kind():
@@ -190,19 +190,19 @@ def test_keyword_relevant():
     from radar.intel.collector import keyword_relevant
 
     # geo-only text with NO lexicon term → dropped (geo no longer admits)
-    assert keyword_relevant("бои под Суджей", []) is False
+    assert keyword_relevant("бои под Суджей", {}) is False
 
     # lexicon match
-    assert keyword_relevant("выпустили калибр", ["калибр"]) is True
+    assert keyword_relevant("выпустили калибр", {"калибр": "strong"}) is True
 
     # no match → dropped
-    assert keyword_relevant("обычная погода завтра", ["калибр"]) is False
+    assert keyword_relevant("обычная погода завтра", {"калибр": "strong"}) is False
 
     # term must match at word boundary — embedded substring should not match
-    assert keyword_relevant("некалибрный шуруп", ["калибр"]) is False
+    assert keyword_relevant("некалибрный шуруп", {"калибр": "strong"}) is False
 
     # multi-word term works
-    assert keyword_relevant("попал storm shadow точно в цель", ["storm shadow"]) is True
+    assert keyword_relevant("попал storm shadow точно в цель", {"storm shadow": "strong"}) is True
 
 
 def test_abbreviation_filter_case_sensitive():
@@ -210,16 +210,16 @@ def test_abbreviation_filter_case_sensitive():
     from radar.intel.collector import keyword_relevant
 
     # uppercase abbreviations match even with an empty word-lexicon
-    assert keyword_relevant("ночью работала ТА по переднему краю", []) is True
-    assert keyword_relevant("зафиксирован пуск ПКР по цели", []) is True
-    assert keyword_relevant("БПЛА над акваторией порта", []) is True
-    assert keyword_relevant("отработала РСЗО по позициям", []) is True
+    assert keyword_relevant("ночью работала ТА по переднему краю", {}) is True
+    assert keyword_relevant("зафиксирован пуск ПКР по цели", {}) is True
+    assert keyword_relevant("БПЛА над акваторией порта", {}) is True
+    assert keyword_relevant("отработала РСЗО по позициям", {}) is True
 
     # lowercase "та" (pronoun) must NOT trigger — the whole reason for case-sensitivity
-    assert keyword_relevant("та самая история повторяется снова и снова", []) is False
+    assert keyword_relevant("та самая история повторяется снова и снова", {}) is False
 
     # abbreviation embedded in a longer uppercase token does not match (word boundary)
-    assert keyword_relevant("колонна ВТА выдвинулась рано утром сегодня", []) is False
+    assert keyword_relevant("колонна ВТА выдвинулась рано утром сегодня", {}) is False
 
 
 def test_keyword_relevant_weather_stoplist():
@@ -227,11 +227,87 @@ def test_keyword_relevant_weather_stoplist():
     from radar.intel.collector import keyword_relevant
 
     # ambiguous-only + weather context → dropped (false positive)
-    assert keyword_relevant("прогноз погоды: ожидается град и гроза", ["град"]) is False
-    assert keyword_relevant("в регионе прошёл смерч, синоптики предупреждают", ["смерч"]) is False
+    assert keyword_relevant("прогноз погоды: ожидается град и гроза", {"град": "strong"}) is False
+    assert keyword_relevant("в регионе прошёл смерч, синоптики предупреждают", {"смерч": "strong"}) is False
 
     # ambiguous term but NO weather context → kept (real military "Град")
-    assert keyword_relevant("работает град по позициям противника", ["град"]) is True
+    assert keyword_relevant("работает град по позициям противника", {"град": "strong"}) is True
 
     # ambiguous + weather context BUT also a non-ambiguous military term → kept
-    assert keyword_relevant("несмотря на грозу, зафиксирован прилёт града", ["град", "прилёт"]) is True
+    assert keyword_relevant("несмотря на грозу, зафиксирован прилёт града", {"град": "strong", "прилёт": "strong"}) is True
+
+
+def test_keyword_relevant_tier_rule():
+    from radar.intel.collector import keyword_relevant
+    strong_only = {"шахед": "strong"}
+    weak_only   = {"сейчас": "weak", "работа": "weak"}
+
+    # 1 strong → впуск
+    assert keyword_relevant("летит шахед", strong_only) is True
+    # 1 weak без гео → отбой
+    assert keyword_relevant("прямо сейчас отвечу", weak_only) is False
+    # 2 weak → впуск
+    assert keyword_relevant("сейчас работа кипит", weak_only) is True
+    # 1 weak + гео → впуск
+    assert keyword_relevant("сейчас в Белгороде", weak_only, geo_hit=True) is True
+    # 0 совпадений → отбой
+    assert keyword_relevant("обычный текст", weak_only) is False
+
+
+def test_keyword_relevant_weather_guard_kept():
+    from radar.intel.collector import keyword_relevant
+    lex = {"град": "strong"}
+    # «град» в погодном контексте — не впуск даже как strong
+    assert keyword_relevant("завтра ожидается град и гроза, прогноз погоды", lex) is False
+    # «град» без погодного контекста — strong впуск
+    assert keyword_relevant("по позициям отработал град", lex) is True
+
+
+def test_matched_terms_returns_tiers():
+    from radar.intel.collector import matched_terms
+    out = matched_terms("выпустили калибр", {"калибр": "strong"})
+    assert ("калибр", "strong") in out
+
+
+def test_matched_terms_abbrev_is_strong():
+    from radar.intel.collector import matched_terms
+    out = matched_terms("замечен БПЛА над городом", {})
+    assert ("БПЛА", "strong") in out
+
+
+# ── 4. collect_probe: weak-only without geo is dropped ───────────────────────
+
+def test_collect_probe_drops_single_weak(monkeypatch):
+    from radar.intel import collector
+    from radar.intel.intake import ingest_lexicon_json
+    from radar.intel.models import IntelMention, IntelProbe
+    from radar.intel.seed import ensure_default_directions
+    s = _sess()
+    ensure_default_directions(s)
+    ingest_lexicon_json(s, _SEED_PATH)
+
+    probe = IntelProbe(query="@t", platform="telegram", side="ru",
+                       kind="channel", watermark=None)
+    s.add(probe); s.commit()
+
+    def _post(pid, text):
+        return SimpleNamespace(post_id=pid, text=text, author="a",
+                               created_at=datetime.now(timezone.utc),
+                               url=None, likes=0, reply_to_tg_id=None, media=None)
+
+    # один weak («сейчас»), без гео и без второго weak-термина — должен отсеяться;
+    # strong («прилёт») — пройти.
+    page = SimpleNamespace(posts=[
+        _post("1", "сейчас расскажу интересную новость про будущее экономики страны"),
+        _post("2", "прилёт по складу, есть разрушения в районе базы"),
+    ])
+
+    prov = SimpleNamespace(
+        search=lambda *a, **k: page,
+        search_chat=lambda *a, **k: [],
+    )
+
+    collector.collect_probe(s, probe, prov)
+    texts = [m.text for m in s.query(IntelMention).all()]
+    assert any("прилёт" in t for t in texts), "strong post must be stored"
+    assert not any("расскажу интересную" in t for t in texts), "single weak must be dropped"

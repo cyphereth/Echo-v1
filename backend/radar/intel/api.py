@@ -972,6 +972,19 @@ def intel_mention_context(
     if mention is None:
         raise HTTPException(404, "Mention not found")
 
+    # On-demand enrichment: if this is a reply we haven't enriched yet, fetch its
+    # thread NOW instead of waiting for the background pass (which runs every few
+    # minutes in 50-row batches, so a freshly-collected reply's parent can lag far
+    # behind). The curator is actively waiting on the expand, so a synchronous
+    # Telegram round-trip here is the right trade — same pattern as parent-media.
+    if mention.reply_to_tg_id and not mention.context_fetched:
+        from .context_pass import enrich_one
+        from ..core.providers.telegram import TelegramFloodWait
+        try:
+            enrich_one(session, _get_tg_provider(), mention)
+        except TelegramFloodWait:
+            pass  # account flood-parked — fall through to whatever's already stored
+
     rows = (session.query(IntelThreadContext)
             .filter(IntelThreadContext.mention_id == mention_id)
             .order_by(IntelThreadContext.role, IntelThreadContext.depth.asc())

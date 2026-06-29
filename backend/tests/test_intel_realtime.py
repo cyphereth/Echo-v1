@@ -70,7 +70,7 @@ def test_store_realtime_attaches_source_subject():
     seed.ensure_default_directions(s)
     bel = s.query(IntelDirection).filter_by(key="belgorod").one().id
     text = "прилёт по окраине, горит склад, без света полрайона сегодня вечером"
-    assert store_realtime_post(s, _post("c/77", text), "ru", "chat", ["прилёт"],
+    assert store_realtime_post(s, _post("c/77", text), "ru", "chat", {"прилёт": "strong"},
                                subject="Шебекино", src_direction_id=bel) is True
     s.commit()
     m = s.query(IntelMention).filter_by(post_id="c/77").one()
@@ -88,7 +88,7 @@ def test_store_realtime_curator_keyword_admits_non_lexicon_post():
     seed.ensure_default_directions(s)
     s.add(IntelLexicon(term="обстрел", meaning="shelling", category="military"))
     s.commit()
-    lex = ["обстрел"]
+    lex = {"обстрел": "strong"}
 
     text = "сильное наводнение затопило центральные улицы города сегодня утром"
     # No keyword → lexicon miss → dropped
@@ -108,7 +108,7 @@ def test_store_channel_post_relevance_and_dedup():
     seed.ensure_default_directions(s)
     s.add(IntelLexicon(term="обстрел", meaning="shelling", category="military"))
     s.commit()
-    lex = ["обстрел"]
+    lex = {"обстрел": "strong"}
 
     # irrelevant channel post → not stored
     assert store_realtime_post(s, _post("c/1", "сегодня хорошая погода и солнце светит ярко"), "ru", "channel", lex) is False
@@ -133,7 +133,7 @@ def test_store_realtime_translates_ukrainian_before_gates(monkeypatch):
     seed.ensure_default_directions(s)
     s.add(IntelLexicon(term="обстрел", meaning="shelling", category="military"))
     s.commit()
-    lex = ["обстрел"]
+    lex = {"обстрел": "strong"}
 
     ua = "ворог здійснив обстріл району увечері, є поранені серед мирних мешканців"
     monkeypatch.setattr(rt, "maybe_translate",
@@ -153,7 +153,7 @@ def test_store_short_channel_post_dropped():
     s.add(IntelLexicon(term="обстрел", meaning="shelling", category="military"))
     s.commit()
     # contains the keyword but too short after stripping → dropped by length gate
-    assert store_realtime_post(s, _post("c/3", "обстрел"), "ru", "channel", ["обстрел"]) is False
+    assert store_realtime_post(s, _post("c/3", "обстрел"), "ru", "channel", {"обстрел": "strong"}) is False
     s.commit()
     assert s.query(IntelMention).count() == 0
 
@@ -168,7 +168,7 @@ def test_store_realtime_reply_resolves_thread_locally():
     seed.ensure_default_directions(s)
     s.add(IntelLexicon(term="обстрел", meaning="shelling", category="military"))
     s.commit()
-    lex = ["обстрел"]
+    lex = {"обстрел": "strong"}
 
     # Parent already collected from the same chat.
     assert store_realtime_post(

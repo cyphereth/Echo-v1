@@ -11,22 +11,21 @@ import styles from '../intel.module.css';
 // KPI / hot / alerts refresh — not latency-critical, so a slow poll is fine. The event
 // FEED is fed by an SSE push stream (~1-2s latency), not this interval.
 const KPI_POLL_MS = 15000;
-const STREAM_MAX  = 40;   // cap the in-memory feed so it can't grow unbounded
 const FLASH_MS    = 2600; // how long a freshly arrived row stays highlighted
 
-export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
+export function IntelHome({ timeRange, liveEvents = [], hiddenIds, hideEvent, seenIdsRef, onOpenStory }) {
   const [data, setData]         = useState(null);
   const [stream, setStream]     = useState([]);
   const [flashIds, setFlashIds] = useState(() => new Set());
-  const [hiddenIds, setHiddenIds] = useState(() => new Set());
   const [paused, setPaused]     = useState(false);  // наведение курсора замораживает ленту
   const pausedRef               = useRef(false);     // чтобы merge-эффект читал актуальное значение
-  const seenRef                 = useRef(new Set());
 
   // Throw a post into the spam filter (kind="example") and hide it from the feed.
+  // hiddenIds/hideEvent live in IntelApp so the hide survives switching tabs (this
+  // component unmounts on tab change — local hide state would be lost).
   async function handleSpam(e, ev) {
     ev.stopPropagation();
-    setHiddenIds(prev => { const n = new Set(prev); n.add(e.id); return n; });
+    hideEvent(e.id);
     try {
       // Запоминаем как пример мусора И мягко скрываем упоминание — чтобы пост ушёл
       // не только из ленты, но и из сюжетов/агрегатов (soft-hide на бэке).
@@ -43,7 +42,6 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
 
   useEffect(() => {
     let alive = true;
-    seenRef.current = new Set();
 
     setStream([]);
     setFlashIds(new Set());
@@ -55,7 +53,7 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
     intelApi.stream(streamParams).then(events => {
       if (!alive) return;
       const arr = Array.isArray(events) ? events : [];
-      seenRef.current = new Set(arr.map(e => e.id));
+      arr.forEach(e => { if (e && e.id != null) seenIdsRef.current.add(e.id); });
       setStream(arr);
     }).catch(() => {});
 
@@ -86,14 +84,24 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
       );
       if (!add.length) return prev;
       add.forEach(e => {
+        // Only flash genuinely-new events. seenIdsRef survives tab switches, so on a
+        // remount the re-merge of the cumulative liveEvents buffer doesn't re-light
+        // posts the user already saw (the «всё уже было, но помечено сейчас» bug).
+        if (seenIdsRef.current.has(e.id)) return;
+        seenIdsRef.current.add(e.id);
         setFlashIds(f => { const n = new Set(f); n.add(e.id); return n; });
         setTimeout(() => {
           setFlashIds(f => { const n = new Set(f); n.delete(e.id); return n; });
         }, FLASH_MS);
       });
-      // Лента — newest-first. liveEvents приходят oldest→newest, поэтому разворачиваем
-      // и кладём в НАЧАЛО; slice(0,200) обрезает старые снизу, а не новые сверху.
-      return [...add.reverse(), ...prev].slice(0, 200);
+      // Лента — newest-first ПО ВРЕМЕНИ ПОСТА (created_at), а не по порядку вставки.
+      // Коллектор может затянуть пост, которому уже пара минут, ПОЗЖЕ свежих —
+      // у него больший id, и слепой prepend ставил бы «2м» над «сейчас». Поэтому
+      // мёржим и сортируем по created_at (id — тай-брейк для одинаковых меток).
+      const ts = e => (e.created_at ? Date.parse(e.created_at) : 0);
+      return [...add, ...prev]
+        .sort((a, b) => ts(b) - ts(a) || (b.id - a.id))
+        .slice(0, 200);
     });
   }, [win, isCustom]);
 
@@ -136,11 +144,11 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
   if (!data) return <div className={styles.workspace}><div className={styles.empty}>Загрузка обстановки…</div></div>;
 
   const { kpis, hot, alerts, top_stories } = data;
-  const SNIPPET_MAX = 160;
-  const snippet = (t) => {
-    const s = (t || '').replace(/\s+/g, ' ').trim();
-    return s.length > SNIPPET_MAX ? s.slice(0, SNIPPET_MAX) + '…' : s;
-  };
+  // Лента показывает ПОЛНЫЙ текст поста (без обрезки и без hover-всплывашки).
+  // Длинные посты рендерим чуть мельче, чтобы они не разрывали ленту, оставаясь
+  // полностью читаемыми. LONG_TEXT — порог, после которого включаем мелкий шрифт.
+  const LONG_TEXT = 240;
+  const cleanText = (t) => (t || '').replace(/\s+/g, ' ').trim();
 
   return (
     <div className={`${styles.workspace} ${styles.homeWorkspace}`}>
@@ -278,18 +286,21 @@ export function IntelHome({ timeRange, liveEvents = [], onOpenStory }) {
             const sd = SIDE[e.side] || SIDE.ru;
             const isNew = flashIds.has(e.id);
             const dups = e._dups || 1;
+            const text = cleanText(e.text);
+            const textClass = text.length > LONG_TEXT
+              ? `${styles.eventText} ${styles.eventTextLong}`
+              : styles.eventText;
             return (
-              <div key={e.id} className={isNew ? `${styles.eventRow} ${styles.eventRowNew}` : styles.eventRow}
-                   title={e.text}>
+              <div key={e.id} className={isNew ? `${styles.eventRow} ${styles.eventRowNew}` : styles.eventRow}>
                 <span className={styles.eventSide} style={{ color: sd.color, background: sd.color + '1A' }}>
                   {sd.label}
                 </span>
                 <div className={styles.eventBody}>
-                  <div className={styles.eventText}>
+                  <div className={textClass}>
                     {e.media && (
                       <MediaPreview kind={e.media} url={`/intel/mention/${e.id}/media`} label={e.text} />
                     )}
-                    {snippet(e.text)}
+                    {text}
                   </div>
                   <div className={styles.eventMeta}>
                     {e.subject && <span style={{ color: '#57D2E2' }}>📍 {e.subject} · </span>}

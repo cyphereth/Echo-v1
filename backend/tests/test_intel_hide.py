@@ -35,7 +35,7 @@ def test_store_realtime_sets_reply_to_tg_id():
         reply_to_tg_id="4",
     )
     stored = realtime.store_realtime_post(s, post, side="ru", kind="chat",
-                                          lexicon_terms=["удар"])
+                                          lexicon_tiers={"удар": "strong"})
     assert stored is True
     s.commit()
     m = s.query(IntelMention).filter_by(post_id="@chat/5").one()
@@ -90,7 +90,7 @@ def test_store_realtime_drops_exact_spam_example():
         created_at=datetime.now(timezone.utc), views=0, url=None, reply_to_tg_id=None,
     )
     stored = realtime.store_realtime_post(
-        s, post, side="ru", kind="chat", lexicon_terms=["удар"],
+        s, post, side="ru", kind="chat", lexicon_tiers={"удар": "strong"},
         spam_words=[], spam_examples=[spam_text],
     )
     assert stored is False, "exact spam-example dupe must be dropped before storing"

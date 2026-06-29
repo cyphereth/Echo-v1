@@ -48,6 +48,18 @@ export function IntelApp({ onExit }) {
   const [muted, setMuted] = useState({ stories: [], directions: [] });
   const [toasts, setToasts]         = useState([]);
   const seenAlert = useRef(new Set());
+  // Feed state that must SURVIVE switching tabs (IntelHome unmounts on tab change,
+  // so keeping these here is what stops hidden/seen posts from resurrecting as «new»
+  // out of the persistent liveEvents buffer when you come back to the home screen).
+  const [hiddenIds, setHiddenIds] = useState(() => new Set());
+  const seenIdsRef = useRef(new Set());
+
+  // Hide a feed event: remember it AND drop it from the live buffer so a later
+  // IntelHome remount can't re-merge it back in.
+  const hideEvent = useCallback((id) => {
+    setHiddenIds(prev => { const n = new Set(prev); n.add(id); return n; });
+    setLiveEvents(prev => prev.filter(e => e.id !== id));
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -194,7 +206,9 @@ export function IntelApp({ onExit }) {
             <SearchResults results={searchResults} query={search} onOpenStory={() => { setScreen('stories'); setSearchResults(null); }} />
           </div>
         ) : screen === 'home' ? (
-          <IntelHome timeRange={timeRange} liveEvents={liveEvents} onOpenStory={(id) => { setOpenStoryId(id ?? null); setOpenDirection(null); setNavToken(t => t + 1); setScreen('stories'); }} />
+          <IntelHome timeRange={timeRange} liveEvents={liveEvents}
+                     hiddenIds={hiddenIds} hideEvent={hideEvent} seenIdsRef={seenIdsRef}
+                     onOpenStory={(id) => { setOpenStoryId(id ?? null); setOpenDirection(null); setNavToken(t => t + 1); setScreen('stories'); }} />
         ) : screen === 'stories' ? (
           <IntelStories timeRange={timeRange} openStoryId={openStoryId} openDirection={openDirection} navToken={navToken} />
         ) : screen === 'board' ? (

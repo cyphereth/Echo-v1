@@ -93,6 +93,30 @@ def test_real_seed_tiers():
         assert tier(t) == "weak", f"{t} expected weak, got {tier(t)}"
 
 
+def test_seed_expansion_terms():
+    from radar.intel.intake import ingest_lexicon_json
+    from radar.intel.models import IntelLexicon
+    s = _sess()
+    ingest_lexicon_json(s, _REAL_SEED)
+
+    def tier(term):
+        row = s.query(IntelLexicon).filter_by(term=term).first()
+        assert row is not None, f"new term {term!r} missing"
+        return row.tier
+
+    # КАБ/ФАБ — strong
+    for t in ("каб", "фаб", "фаб-1500", "управляемая авиабомба"):
+        assert tier(t) == "strong", f"{t} expected strong"
+    # баллистика — strong
+    assert tier("баллистическая") == "strong"
+    # морские дроны — strong
+    assert tier("магура") == "strong"
+    # инфраструктура — weak (обычно с другим термином)
+    assert tier("нпз") == "weak"
+    # массированность — weak
+    assert tier("массированный") == "weak"
+
+
 def test_ingest_updates_tier_on_reingest(tmp_path):
     """Повторный ингест меняет tier у существующей строки, не плодит дубли."""
     import json

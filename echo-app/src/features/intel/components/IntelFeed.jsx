@@ -149,7 +149,7 @@ export function IntelFeed() {
 
       <div className={styles.feedColumns}>
         {activeKeys.length === 0
-          ? <div className={styles.feedEmpty}>Добавьте колонки через «+ колонки ▾».</div>
+          ? <div className={styles.feedEmpty}>Добавьте колонки через «+ колонки».</div>
           : activeKeys.map(k => (
               <FeedColumn key={k}
                           direction={dirByName[k] || { key: k, name: k }}

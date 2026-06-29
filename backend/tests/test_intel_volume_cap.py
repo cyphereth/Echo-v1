@@ -30,7 +30,7 @@ def test_channel_time_window_stops_at_old(monkeypatch):
     from radar.intel.models import IntelMention, IntelLexicon
     s = _sess(); seed.ensure_default_directions(s)
     # Seed lexicon so the keyword gate admits "обстрел" posts.
-    s.add(IntelLexicon(term="обстрел", meaning="shelling", category="military")); s.commit()
+    s.add(IntelLexicon(term="обстрел", meaning="shelling", category="military", tier="strong")); s.commit()
     p = _probe(s)
     now = datetime.now(timezone.utc)
     # newest-first: 4 fresh, then older-than-window — collection must stop at the old one
@@ -55,7 +55,7 @@ def test_channel_safety_cap(monkeypatch):
     from radar.intel.models import IntelMention, IntelLexicon
     s = _sess(); seed.ensure_default_directions(s)
     # Seed lexicon so the keyword gate admits "обстрел" posts.
-    s.add(IntelLexicon(term="обстрел", meaning="shelling", category="military")); s.commit()
+    s.add(IntelLexicon(term="обстрел", meaning="shelling", category="military", tier="strong")); s.commit()
     p = _probe(s)
     now = datetime.now(timezone.utc)
     posts = [SimpleNamespace(post_id=f"x/{i}", author="@x",

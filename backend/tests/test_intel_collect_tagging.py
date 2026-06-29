@@ -19,7 +19,7 @@ def test_channel_post_tagged_by_geo():
     from radar.intel import seed, collector
     from radar.intel.models import IntelProbe, IntelMention, IntelDirection, IntelLexicon
     s = _sess(); seed.ensure_default_directions(s)
-    s.add(IntelLexicon(term="удар", meaning="strike", category="military"))
+    s.add(IntelLexicon(term="удар", meaning="strike", category="military", tier="strong"))
     p = IntelProbe(platform="telegram", kind="channel", query="@rybar", side="ru"); s.add(p); s.commit()
     posts=[SimpleNamespace(post_id="@rybar/1", author="@rybar", text="удар по складу под Суджей",
                            followers=0, created_at=datetime.now(timezone.utc), hashtags=[], likes=0)]
@@ -49,7 +49,7 @@ def test_channel_keyword_match_no_geo_goes_unassigned():
     from radar.intel import seed, collector
     from radar.intel.models import IntelProbe, IntelMention, IntelDirection, IntelLexicon
     s = _sess(); seed.ensure_default_directions(s)
-    s.add(IntelLexicon(term="калибр", meaning="ракета", category="missiles_weapons")); s.commit()
+    s.add(IntelLexicon(term="калибр", meaning="ракета", category="missiles_weapons", tier="strong")); s.commit()
     p = IntelProbe(platform="telegram", kind="channel", query="@x", side="ua"); s.add(p); s.commit()
     posts=[SimpleNamespace(post_id="@x/2", author="@x",
                            text="выпустили несколько калибр по территории в ночь с субботы",
@@ -64,7 +64,7 @@ def test_chat_noise_filter_drops_irrelevant_keeps_relevant():
     from radar.intel import seed, collector
     from radar.intel.models import IntelProbe, IntelMention, IntelLexicon
     s = _sess(); seed.ensure_default_directions(s)
-    s.add(IntelLexicon(term="прилёт", meaning="strike arrival", category="explosions_sounds"))
+    s.add(IntelLexicon(term="прилёт", meaning="strike arrival", category="explosions_sounds", tier="strong"))
     p = IntelProbe(platform="telegram", kind="chat", query="@chat", side="ru"); s.add(p); s.commit()
     msgs = [
         SimpleNamespace(post_id="@chat/1", author="u1", text="ок", followers=0, created_at=datetime.now(timezone.utc), hashtags=[], likes=0),  # noise (too short)
@@ -86,7 +86,7 @@ def test_chat_lexicon_term_passes_gate(tmp_path):
     import radar.intel.models  # noqa
     eng = create_engine("sqlite:///:memory:"); Base.metadata.create_all(eng); s = Session(eng)
     seed.ensure_default_directions(s)
-    s.add(IntelLexicon(term="300", meaning="раненые", category="casualties")); s.commit()
+    s.add(IntelLexicon(term="300", meaning="раненые", category="casualties", tier="strong")); s.commit()
     p = IntelProbe(platform="telegram", kind="chat", query="@c", side="ru"); s.add(p); s.commit()
     msgs=[SimpleNamespace(post_id="@c/1", author="u", text="у них трое 300 после обстрела",
                           followers=0, created_at=datetime.now(timezone.utc), hashtags=[], likes=0)]  # no geo, but lexicon "300"

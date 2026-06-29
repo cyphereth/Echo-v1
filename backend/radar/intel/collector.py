@@ -267,10 +267,10 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
     count = 0
 
     try:
-        # Load lexicon terms once per call — shared by both channel and chat branches.
+        # Load lexicon tiers once per call — shared by both channel and chat branches.
         # Word-boundary matching is done inside keyword_relevant / chat_message_relevant.
-        lexicon_terms = load_lexicon_tiers(session)
-        if not lexicon_terms:
+        lexicon_tiers = load_lexicon_tiers(session)
+        if not lexicon_tiers:
             log.warning("intel lexicon is empty — channel posts kept only on geo match (run lexicon seed)")
 
         # Spam filter: stop-words (fast layer) + examples (LLM layer). Loaded once.
@@ -306,7 +306,8 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                 author = post.author or ""
 
                 # Hard noise filter for chat
-                if not chat_message_relevant(text, author, lexicon_terms, keywords):
+                if not chat_message_relevant(text, author, lexicon_tiers, keywords,
+                                             geo_hit=_geo_hit(text)):
                     continue
 
                 # Spam stop-word layer (fast, deterministic)
@@ -376,7 +377,7 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                         ).strip()
                         if len(clean) < MIN_TEXT_LEN:
                             continue
-                        if not keyword_relevant(text, lexicon_terms):
+                        if not keyword_relevant(text, lexicon_tiers, geo_hit=_geo_hit(text)):
                             continue
 
                     # Spam stop-word layer (fast, deterministic)

@@ -273,3 +273,41 @@ def test_matched_terms_abbrev_is_strong():
     from radar.intel.collector import matched_terms
     out = matched_terms("замечен БПЛА над городом", {})
     assert ("БПЛА", "strong") in out
+
+
+# ── 4. collect_probe: weak-only without geo is dropped ───────────────────────
+
+def test_collect_probe_drops_single_weak(monkeypatch):
+    from radar.intel import collector
+    from radar.intel.intake import ingest_lexicon_json
+    from radar.intel.models import IntelMention, IntelProbe
+    from radar.intel.seed import ensure_default_directions
+    s = _sess()
+    ensure_default_directions(s)
+    ingest_lexicon_json(s, _SEED_PATH)
+
+    probe = IntelProbe(query="@t", platform="telegram", side="ru",
+                       kind="channel", watermark=None)
+    s.add(probe); s.commit()
+
+    def _post(pid, text):
+        return SimpleNamespace(post_id=pid, text=text, author="a",
+                               created_at=datetime.now(timezone.utc),
+                               url=None, likes=0, reply_to_tg_id=None, media=None)
+
+    # один weak («сейчас»), без гео и без второго weak-термина — должен отсеяться;
+    # strong («прилёт») — пройти.
+    page = SimpleNamespace(posts=[
+        _post("1", "сейчас расскажу интересную новость про будущее экономики страны"),
+        _post("2", "прилёт по складу, есть разрушения в районе базы"),
+    ])
+
+    prov = SimpleNamespace(
+        search=lambda *a, **k: page,
+        search_chat=lambda *a, **k: [],
+    )
+
+    collector.collect_probe(s, probe, prov)
+    texts = [m.text for m in s.query(IntelMention).all()]
+    assert any("прилёт" in t for t in texts), "strong post must be stored"
+    assert not any("расскажу интересную" in t for t in texts), "single weak must be dropped"

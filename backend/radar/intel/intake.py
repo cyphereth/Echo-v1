@@ -1,7 +1,8 @@
 from __future__ import annotations
+import json
 from .models import IntelProbe, IntelLexicon
 
-_SIDES = {"ru", "ua"}
+_SIDES = {"ru", "ua", "by", "mx", "ge", "md", "pmr"}
 _KINDS = {"channel", "chat"}
 
 def ingest_sources(session, path: str) -> dict:
@@ -50,12 +51,60 @@ def ingest_lexicon(session, path: str) -> dict:
     session.commit()
     return {"added": added, "updated": updated}
 
+
+def ingest_lexicon_json(session, path: str) -> dict:
+    """Load the JSON military-keyword seed file and upsert IntelLexicon rows.
+
+    The file structure is::
+
+        {
+            "_meta": {...},
+            "<category_key>": {"description": "...", "words": ["term1", ...]},
+            ...
+        }
+
+    Every word in each category is normalised (strip + lower) and upserted:
+    - new term → INSERT, increments ``added``
+    - existing term → UPDATE meaning/category, increments ``updated``
+
+    Returns ``{"added": N, "updated": M}``. Idempotent: re-running returns
+    ``{"added": 0, "updated": M}`` (all rows exist, counts still track updates).
+    """
+    added = updated = 0
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    for category, obj in data.items():
+        if category == "_meta":
+            continue
+        if not isinstance(obj, dict):
+            continue
+        meaning = obj.get("description", "")
+        for word in obj.get("words", []):
+            term = word.strip().lower()
+            if not term:
+                continue
+            row = session.query(IntelLexicon).filter_by(term=term).first()
+            if row is None:
+                session.add(IntelLexicon(term=term, meaning=meaning, category=category))
+                added += 1
+            else:
+                row.meaning, row.category = meaning, category
+                updated += 1
+    session.commit()
+    return {"added": added, "updated": updated}
+
+
 if __name__ == "__main__":
     import sys
     from ..core.db import get_session
-    if len(sys.argv) < 3 or sys.argv[1] not in ("sources", "lexicon"):
-        sys.exit("usage: python -m radar.intel.intake {sources|lexicon} <path>")
+    if len(sys.argv) < 3 or sys.argv[1] not in ("sources", "lexicon", "lexicon_json"):
+        sys.exit("usage: python -m radar.intel.intake {sources|lexicon|lexicon_json} <path>")
     cmd, path = sys.argv[1], sys.argv[2]
     with get_session() as s:
-        out = ingest_sources(s, path) if cmd == "sources" else ingest_lexicon(s, path)
+        if cmd == "sources":
+            out = ingest_sources(s, path)
+        elif cmd == "lexicon_json":
+            out = ingest_lexicon_json(s, path)
+        else:
+            out = ingest_lexicon(s, path)
         print(out)

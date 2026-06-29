@@ -37,11 +37,38 @@ def _sum_reactions(msg) -> int:
     return sum(int(getattr(r, "count", 0) or 0) for r in results)
 
 
+def _media_kind(msg) -> Optional[str]:
+    """Classify any attachment on a Telethon message → "photo"|"video"|"file"|None.
+
+    Used to mark posts in the feed that carry a photo/video (the text alone hides that
+    a strike photo / damage video was attached). Robust to missing attrs so it never
+    raises during parsing."""
+    try:
+        if getattr(msg, "photo", None):
+            return "photo"
+        if getattr(msg, "video", None) or getattr(msg, "gif", None) or getattr(msg, "video_note", None):
+            return "video"
+        doc = getattr(msg, "document", None)
+        if doc is not None:
+            mime = getattr(doc, "mime_type", "") or ""
+            if mime.startswith("image/"):
+                return "photo"
+            if mime.startswith("video/"):
+                return "video"
+            return "file"
+        if getattr(msg, "media", None):
+            return "file"
+    except Exception:
+        return None
+    return None
+
+
 def _parse_tg_message(msg, author_handle: str, followers: int) -> Post:
     """Map a Telethon Message to a Post. `author_handle` is the channel @username,
     `followers` the channel participant count (both resolved by the caller)."""
     text = getattr(msg, "message", None) or ""
     replies = getattr(msg, "replies", None)
+    raw_reply = getattr(msg, "reply_to_msg_id", None)
     return Post(
         post_id    = str(msg.id),
         platform   = "telegram",
@@ -55,7 +82,29 @@ def _parse_tg_message(msg, author_handle: str, followers: int) -> Post:
         comments   = int(getattr(replies, "replies", 0) or 0) if replies else 0,
         shares     = int(getattr(msg, "forwards", 0) or 0),
         sound_id   = None,
+        reply_to_tg_id = str(raw_reply) if raw_reply is not None else None,
+        media      = _media_kind(msg),
     )
+
+
+def chat_namespace(username, chat_id) -> str:
+    """Канонический namespace составного post_id чата — единый для поллера и realtime.
+
+    Есть @username → он (без '@', lower). Иначе → unmarked peer_id строкой:
+    Telethon отдаёт chat_id супергрупп/каналов в marked-форме ('-100<id>'),
+    а резолв invite даёт '#<id>' (unmarked) — приводим оба к unmarked, чтобы одно
+    сообщение давало один post_id обоими путями. Нечисловой ввод без username
+    возвращаем как есть (не падаем)."""
+    if username:
+        return str(username).lstrip("@").lower()
+    raw = str(chat_id if chat_id is not None else "").strip().lstrip("#")
+    try:
+        from telethon.utils import resolve_id
+        marked = int(raw)
+        real_id, _ = resolve_id(marked)
+        return str(real_id)
+    except (ValueError, TypeError):
+        return raw
 
 
 def _parse_tg_chat_message(msg, namespace: str, fallback_author: str) -> Post:
@@ -68,19 +117,22 @@ def _parse_tg_chat_message(msg, namespace: str, fallback_author: str) -> Post:
     uname  = getattr(sender, "username", None) if sender else None
     author = f"@{uname}" if uname else fallback_author
     ns     = str(namespace).lstrip("@")
+    raw_reply = getattr(msg, "reply_to_msg_id", None)
     return Post(
-        post_id    = f"{ns}/{msg.id}",
-        platform   = "telegram",
-        author     = author,
-        followers  = 0,
-        text       = text,
-        hashtags   = _HASHTAG_RE.findall(text),
-        created_at = msg.date,
-        likes      = _sum_reactions(msg),
-        views      = int(getattr(msg, "views", 0) or 0),
-        comments   = 0,
-        shares     = int(getattr(msg, "forwards", 0) or 0),
-        sound_id   = None,
+        post_id        = f"{ns}/{msg.id}",
+        platform       = "telegram",
+        author         = author,
+        followers      = 0,
+        text           = text,
+        hashtags       = _HASHTAG_RE.findall(text),
+        created_at     = msg.date,
+        likes          = _sum_reactions(msg),
+        views          = int(getattr(msg, "views", 0) or 0),
+        comments       = 0,
+        shares         = int(getattr(msg, "forwards", 0) or 0),
+        sound_id       = None,
+        reply_to_tg_id = str(raw_reply) if raw_reply is not None else None,
+        media          = _media_kind(msg),
     )
 
 
@@ -120,6 +172,10 @@ class TelegramProvider(SearchProvider):
     def __init__(self, client=None):
         self._call_lock = threading.Lock()
         self._last_call = 0.0
+        # When a long flood-wait hits, park a cooldown so the WHOLE provider backs off
+        # until it expires. Repeatedly retrying ResolveUsername during a wait can extend
+        # the ban (that's how we earned a ~17h one that silently killed reply-context).
+        self._flood_until = 0.0
         if client is not None:
             # Test injection: methods return plain values, no loop/thread needed.
             self._client = client
@@ -137,6 +193,28 @@ class TelegramProvider(SearchProvider):
                                           flood_sleep_threshold=self._FLOOD_THRESHOLD)
             self._await(self._client.connect())
 
+    def ensure_connected(self) -> bool:
+        """Reconnect the client if the socket dropped (e.g. after the Mac sleeps the
+        Telethon connection dies as 'Cannot send requests while disconnected' and does
+        not always self-heal). Cheap to call often — no-op when already connected.
+        Returns True if connected after the attempt. Test clients (no loop) are no-ops."""
+        if self._loop is None:
+            return True
+        try:
+            if self._client.is_connected():
+                return True
+        except Exception:
+            pass
+        try:
+            asyncio.run_coroutine_threadsafe(self._client.connect(), self._loop).result(timeout=30)
+            ok = self._client.is_connected()
+            if ok:
+                log.info("Telegram client reconnected")
+            return ok
+        except Exception:
+            log.warning("Telegram reconnect attempt failed")
+            return False
+
     def _throttle(self):
         """Block until at least _MIN_CALL_INTERVAL has passed since the previous call,
         so the provider never bursts into a flood-wait."""
@@ -148,10 +226,27 @@ class TelegramProvider(SearchProvider):
 
     def _await(self, result):
         """Real client methods return coroutines — drive them on the dedicated loop
-        thread and block for the result. Injected test clients return plain values."""
+        thread and block for the result. Injected test clients return plain values.
+
+        Centralises flood handling: a long FloodWaitError is converted to the domain
+        TelegramFloodWait (so every caller's `except TelegramFloodWait` actually fires —
+        a raw telethon error used to slip past those handlers) and parks a cooldown so
+        we stop hammering the API until the wait elapses."""
         if self._loop is not None:
+            from telethon.errors import FloodWaitError
+            now = time.monotonic()
+            if now < self._flood_until:
+                # Still inside a parked flood window — fail fast without spending a call.
+                getattr(result, "close", lambda: None)()
+                raise TelegramFloodWait(int(self._flood_until - now))
             self._throttle()
-            return asyncio.run_coroutine_threadsafe(result, self._loop).result(timeout=60)
+            try:
+                return asyncio.run_coroutine_threadsafe(result, self._loop).result(timeout=60)
+            except FloodWaitError as e:
+                secs = int(getattr(e, "seconds", 0) or 0)
+                if secs > self._FLOOD_THRESHOLD:
+                    self._flood_until = time.monotonic() + secs
+                raise TelegramFloodWait(secs)
         return result
 
     def search(self, query: str, kind: str, cursor: Optional[str], platform: str = "telegram") -> SearchPage:
@@ -304,13 +399,108 @@ class TelegramProvider(SearchProvider):
             "participants": int(getattr(linked, "participants_count", 0) or 0),
         }
 
+    def join_channel(self, handle: str) -> bool:
+        """Subscribe the account to a public channel/group so its messages start
+        arriving on the realtime update stream. Idempotent — already-joined is a no-op.
+        Returns True on success (or already-member), False if the channel is
+        unavailable. Raises TelegramFloodWait so the caller can back off."""
+        from telethon.tl.functions.channels import JoinChannelRequest
+        from telethon.errors import (
+            FloodWaitError, UserAlreadyParticipantError, InviteRequestSentError,
+        )
+        h = handle if handle.startswith("@") else f"@{handle}"
+        try:
+            ent = self._await(self._client.get_entity(h))
+            self._await(self._client(JoinChannelRequest(ent)))
+            return True
+        except UserAlreadyParticipantError:
+            return True
+        except InviteRequestSentError:
+            # Moderated group — a join request was submitted and awaits admin approval.
+            # Treat as done so we don't keep re-requesting; membership (and realtime
+            # delivery) starts once an admin approves.
+            log.info("Telegram join request sent, awaiting approval (%s)", h)
+            return True
+        except FloodWaitError as e:
+            log.warning("Telegram flood wait %ds", e.seconds)
+            raise TelegramFloodWait(e.seconds)
+        except TelegramFloodWait:
+            # Parked-flood fast-fail from _await — propagate so the caller backs off
+            # instead of treating it as an ordinary join failure and moving on.
+            raise
+        except Exception as e:
+            log.warning("Telegram join failed (%s): %s", h, type(e).__name__)
+            return False
+
+    def join_invite(self, link: str) -> str | None:
+        """Join a private chat via its invite link (t.me/+HASH or t.me/joinchat/HASH).
+
+        Returns the resolved @username (if the group has one) or '#{peer_id}' so the
+        caller can replace the probe.query with a stable searchable identifier.
+        Returns None on hard failure (expired/invalid link). Raises TelegramFloodWait."""
+        from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest
+        from telethon.errors import (
+            FloodWaitError, UserAlreadyParticipantError, InviteHashExpiredError,
+            InviteHashInvalidError,
+        )
+        raw = (link or "").strip()
+        if "/+" in raw:
+            invite_hash = raw.split("/+", 1)[1]
+        elif "joinchat/" in raw:
+            invite_hash = raw.split("joinchat/", 1)[1]
+        else:
+            invite_hash = raw.lstrip("+")
+        invite_hash = invite_hash.strip("/").split("?", 1)[0]
+        if not invite_hash:
+            return None
+
+        def _resolve_handle(chat) -> str:
+            """Extract @username or fall back to #{id}."""
+            uname = getattr(chat, "username", None)
+            if uname:
+                return f"@{uname}"
+            return f"#{getattr(chat, 'id', 0)}"
+
+        try:
+            updates = self._await(self._client(ImportChatInviteRequest(invite_hash)))
+            # updates.chats contains the joined group entity
+            chats = getattr(updates, "chats", [])
+            return _resolve_handle(chats[0]) if chats else f"#{invite_hash}"
+        except UserAlreadyParticipantError:
+            # Already a member — resolve via CheckChatInvite to get the entity
+            try:
+                info = self._await(self._client(CheckChatInviteRequest(invite_hash)))
+                chat = getattr(info, "chat", None)
+                return _resolve_handle(chat) if chat else None
+            except Exception:
+                return None
+        except FloodWaitError as e:
+            log.warning("Telegram flood wait %ds", e.seconds)
+            raise TelegramFloodWait(e.seconds)
+        except (InviteHashExpiredError, InviteHashInvalidError) as e:
+            log.warning("Telegram invite invalid (%s): %s", raw, type(e).__name__)
+            return None
+        except TelegramFloodWait:
+            # Parked-flood fast-fail from _await — propagate so the caller backs off.
+            raise
+        except Exception as e:
+            log.warning("Telegram invite join failed (%s): %s", raw, type(e).__name__)
+            return None
+
     def search_chat(self, handle: str, term: str, limit: int = 20, min_id: int = 0) -> list[Post]:
         """Server-side search inside one public group for `term`, newest first.
         `min_id` returns only messages newer than that id (the chat's watermark), so
         already-seen messages aren't re-fetched. Returns [] if the chat is private,
         gone, or has no new matches."""
         from telethon.errors import FloodWaitError, ChannelPrivateError, UsernameNotOccupiedError
-        h = handle if handle.startswith("@") else f"@{handle}"
+        # #{peer_id} — numeric id from a joined private group (no public username)
+        if handle.startswith("#"):
+            try:
+                h = int(handle[1:])
+            except ValueError:
+                return []
+        else:
+            h = handle if handle.startswith("@") else f"@{handle}"
         try:
             entity = self._await(self._client.get_entity(h))
             msgs = self._await(self._client.get_messages(entity, search=term, limit=limit, min_id=min_id))
@@ -320,7 +510,147 @@ class TelegramProvider(SearchProvider):
         except (ChannelPrivateError, UsernameNotOccupiedError, ValueError) as e:
             log.warning("Telegram chat unavailable (%s): %s", h, type(e).__name__)
             return []
-        return [_parse_tg_chat_message(m, h, h) for m in msgs if getattr(m, "id", None)]
+        # username из resolved-entity каноничен; для публичной группы, открытой по
+        # @handle, сам handle и есть username — fallback, когда entity его не отдаёт.
+        uname = getattr(entity, "username", None)
+        if not uname and isinstance(h, str) and h.startswith("@"):
+            uname = h
+        ns = chat_namespace(uname, getattr(entity, "id", None))
+        return [_parse_tg_chat_message(m, ns, h) for m in msgs if getattr(m, "id", None)]
+
+    def fetch_thread_context(self, handle: str, reply_to_tg_id: Optional[str],
+                             current_tg_id: str, depth_limit: int = 5,
+                             sibling_limit: int = 10) -> dict:
+        """Fetch parent chain and siblings for a reply message.
+
+        Returns:
+          {"parents": [{tg_msg_id, depth, author, text, created_at}],
+           "siblings": [{tg_msg_id, author, text, created_at}]}
+
+        Raises TelegramFloodWait so callers can back off.
+        Parents are ordered depth=0 (direct parent) -> depth=N (root).
+        Siblings are messages that share the same root parent (excl. current_tg_id).
+        """
+        # _await converts long floods to TelegramFloodWait; catch that (not the raw
+        # telethon error) so a flood aborts the enrich batch instead of being swallowed
+        # by the generic `except Exception` and permanently marking the reply done.
+        if reply_to_tg_id is None:
+            return {"parents": [], "siblings": []}
+
+        h = handle if (not handle or handle.startswith("@") or handle.startswith("#")) else f"@{handle}"
+
+        def _author(msg) -> str:
+            sender = getattr(msg, "sender", None)
+            uname = getattr(sender, "username", None) if sender else None
+            return f"@{uname}" if uname else str(getattr(msg, "sender_id", "") or "")
+
+        def _get_one(entity, msg_id: int):
+            try:
+                # Pass ids as a list: Telethon returns a single Message (not a list)
+                # when ids is a scalar, which would break msgs[0]. A list request
+                # always yields a list (with None for a missing id).
+                msgs = self._await(self._client.get_messages(entity, ids=[msg_id]))
+                return msgs[0] if msgs else None
+            except TelegramFloodWait:
+                raise
+            except Exception as e:
+                log.warning("fetch_thread_context: _get_one(%s, %s) failed: %s", h, msg_id, type(e).__name__)
+                return None
+
+        try:
+            entity = self._await(self._client.get_entity(h))
+        except TelegramFloodWait:
+            raise
+        except Exception as e:
+            log.warning("fetch_thread_context: get_entity(%s) failed: %s", h, type(e).__name__)
+            return {"parents": [], "siblings": []}
+
+        # Walk up the parent chain
+        parents = []
+        depth = 0
+        next_id = int(reply_to_tg_id)
+        root_tg_id: Optional[int] = None
+
+        while next_id and depth < depth_limit:
+            try:
+                msg = _get_one(entity, next_id)
+            except TelegramFloodWait:
+                raise
+            if msg is None:
+                break
+            parents.append({
+                "tg_msg_id": str(msg.id),
+                "depth": depth,
+                "author": _author(msg),
+                "text": getattr(msg, "message", "") or "",
+                "created_at": msg.date,
+                "media": _media_kind(msg),
+            })
+            parent_of_parent = getattr(msg, "reply_to_msg_id", None)
+            if parent_of_parent:
+                next_id = int(parent_of_parent)
+                depth += 1
+            else:
+                root_tg_id = msg.id
+                break
+
+        if root_tg_id is None and parents:
+            root_tg_id = int(parents[-1]["tg_msg_id"])
+
+        # Fetch siblings (other replies to root, excluding current message)
+        siblings = []
+        if root_tg_id:
+            try:
+                sibling_msgs = self._await(self._client.get_messages(
+                    entity, reply_to=root_tg_id, limit=sibling_limit))
+                for m in (sibling_msgs or []):
+                    if str(m.id) == current_tg_id:
+                        continue
+                    siblings.append({
+                        "tg_msg_id": str(m.id),
+                        "author": _author(m),
+                        "text": getattr(m, "message", "") or "",
+                        "created_at": m.date,
+                    })
+            except TelegramFloodWait:
+                raise
+            except Exception as e:
+                log.warning("fetch_thread_context: siblings fetch failed for %s: %s", handle, type(e).__name__)
+
+        log.info("fetch_thread_context(%s reply=%s): %d parents, %d siblings",
+                 h, reply_to_tg_id, len(parents), len(siblings))
+        return {"parents": parents, "siblings": siblings}
+
+    def download_media_preview(self, handle: str, msg_id: int, kind: str) -> "tuple[bytes, str] | None":
+        """Скачать превью-thumbnail медиа сообщения. (bytes, mime) или None.
+
+        photo/video → наибольший thumbnail (постер), mime image/jpeg. file и отсутствие
+        превью → None. Бросает TelegramFloodWait (как fetch_thread_context)."""
+        if kind not in ("photo", "video"):
+            return None
+        h = handle if (not handle or handle.startswith("@") or handle.startswith("#")) else f"@{handle}"
+        try:
+            entity = self._await(self._client.get_entity(int(h[1:]) if h.startswith("#") else h))
+            msgs = self._await(self._client.get_messages(entity, ids=[int(msg_id)]))
+        except TelegramFloodWait:
+            raise
+        except Exception as e:
+            log.warning("download_media_preview: lookup failed (%s/%s): %s", h, msg_id, type(e).__name__)
+            return None
+        msg = msgs[0] if msgs else None
+        if msg is None:
+            return None
+        try:
+            # thumb=-1 → наибольший доступный thumbnail (постер), не оригинал.
+            data = self._await(self._client.download_media(msg, file=bytes, thumb=-1))
+        except TelegramFloodWait:
+            raise
+        except Exception as e:
+            log.warning("download_media_preview: download failed (%s/%s): %s", h, msg_id, type(e).__name__)
+            return None
+        if not data:
+            return None
+        return (data, "image/jpeg")
 
     def search_linked_chat(self, parent_handle: str, term: str, limit: int = 20, min_id: int = 0) -> list[Post]:
         """Search the discussion group LINKED to a (public) channel, for groups that have
@@ -346,4 +676,5 @@ class TelegramProvider(SearchProvider):
         except Exception as e:
             log.warning("Telegram linked-chat search failed (%s): %s", h, type(e).__name__)
             return []
-        return [_parse_tg_chat_message(m, lid, h) for m in msgs if getattr(m, "id", None)]
+        ns = chat_namespace(getattr(linked, "username", None), getattr(linked, "id", lid))
+        return [_parse_tg_chat_message(m, ns, h) for m in msgs if getattr(m, "id", None)]

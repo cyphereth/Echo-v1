@@ -1,13 +1,35 @@
-"""Seed default intel directions with geo-terms.
+"""Intel seed: default directions (with geo match-terms), sources, and lexicon.
 
-Idempotent on key; re-runs fully when GEO_DICT_VERSION is bumped
+`ensure_default_directions` re-runs fully when GEO_DICT_VERSION is bumped
 (tracked in a metadata row keyed by '__geo_dict_version__').
 """
+import os
 import json
 from .models import IntelDirection
 from .geo_dict import DEFAULT_DIRECTIONS, GEO_DICT_VERSION
 
 _META_KEY = "__geo_dict_version__"
+
+
+def ensure_sources_seed_loaded(session) -> dict:
+    from .intake import ingest_sources
+    path = os.path.join(os.path.dirname(__file__), "data", "sources.seed.txt")
+    if not os.path.exists(path):
+        return {"added": 0, "updated": 0}
+    return ingest_sources(session, path)
+
+
+def ensure_lexicon_seed_loaded(session) -> dict:
+    """Idempotent: ingest radar/intel/data/keywords.seed.json if it exists.
+
+    Called every startup — safe to re-run, only updates existing rows.
+    Returns {"added": N, "updated": M}.
+    """
+    from .intake import ingest_lexicon_json
+    path = os.path.join(os.path.dirname(__file__), "data", "keywords.seed.json")
+    if not os.path.exists(path):
+        return {"added": 0, "updated": 0}
+    return ingest_lexicon_json(session, path)
 
 
 def ensure_unassigned_direction(session) -> IntelDirection:

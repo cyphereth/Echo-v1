@@ -25,6 +25,8 @@ from . import seed as seed_module
 log = logging.getLogger(__name__)
 
 _scheduler = None
+_intel_realtime = None
+_intel_ticker = None
 
 
 @asynccontextmanager
@@ -38,6 +40,8 @@ async def lifespan(app: FastAPI):
         seed_module.ensure_default_topics(session)
         from .intel import seed as intel_seed
         intel_seed.ensure_default_directions(session)
+        intel_seed.ensure_sources_seed_loaded(session)
+        intel_seed.ensure_lexicon_seed_loaded(session)
 
         # Bootstrap: the first registered user is the contour admin (idempotent).
         from .core.db import SessionLocal
@@ -66,12 +70,44 @@ async def lifespan(app: FastAPI):
         _scheduler.start()
         log.info("Auto-collect scheduler started (tick=%ss)", _scheduler._tick_sec)
 
+    # Intel realtime listener — receives monitored channels/chats the instant they
+    # publish, on the SAME shared Telethon client the poller uses (one session file).
+    # Off by default so a console-only collect run doesn't open the update stream.
+    global _intel_realtime
+    if os.getenv("ENABLE_INTEL_REALTIME", "0") == "1" and _intel_realtime is None:
+        from .brand.api import _get_tg_provider
+        tg = _get_tg_provider()
+        if tg is not None:
+            from .intel.realtime import IntelRealtime
+            listener = IntelRealtime(tg)
+            if listener.start():
+                _intel_realtime = listener
+                log.info("Intel realtime listener started")
+        else:
+            log.warning("Intel realtime requested but no Telegram provider available")
+
+        # Process-only ticker: clusters new realtime mentions into stories, rebuilds
+        # timeline buckets, runs anomaly detection. Keeps Горит сейчас / Сигналы /
+        # Крупнейшие сюжеты fresh while the heavy brand scheduler stays disabled.
+        global _intel_ticker
+        if os.getenv("ENABLE_INTEL_TICK", "1") == "1" and _intel_ticker is None:
+            from .intel.ticker import IntelTicker
+            _intel_ticker = IntelTicker()
+            _intel_ticker.start()
+            log.info("Intel ticker started (every %ss)", _intel_ticker.interval)
+
     yield
 
     # --- shutdown ---
     if _scheduler is not None:
         _scheduler.stop()
         log.info("Auto-collect scheduler stopped")
+    if _intel_realtime is not None:
+        _intel_realtime.stop()
+        log.info("Intel realtime listener stopped")
+    if _intel_ticker is not None:
+        _intel_ticker.stop()
+        log.info("Intel ticker stopped")
 
 
 app = FastAPI(title="Echo API", version="4.0.0", lifespan=lifespan)

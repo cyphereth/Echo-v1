@@ -8,13 +8,14 @@ export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
 
 export async function request(path, opts = {}) {
   const token = getToken();
+  const { headers: optHeaders, ...restOpts } = opts;
   const res = await fetch(path, {
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...opts.headers,
+      ...(optHeaders || {}),
     },
-    ...opts,
+    ...restOpts,
   });
   if (res.status === 401 && !path.startsWith('/auth')) {
     clearToken();

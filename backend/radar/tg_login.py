@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 from telethon.sync import TelegramClient  # noqa: E402  (sync wrapper for a CLI script)
-from radar.providers.telegram import SESSION_FILE, API_ID, API_HASH  # noqa: E402
+from radar.core.providers.telegram import SESSION_FILE, API_ID, API_HASH  # noqa: E402
 
 
 def main() -> None:

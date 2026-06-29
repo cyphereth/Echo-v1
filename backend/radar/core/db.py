@@ -3,7 +3,7 @@ from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker, Session
 from ..models import Base
 
-_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///echo_radar.db")
+_DATABASE_URL = os.getenv("ECHO_DB") or os.getenv("DATABASE_URL", "sqlite:///echo_radar.db")
 _connect_args = {"check_same_thread": False} if _DATABASE_URL.startswith("sqlite") else {}
 engine = create_engine(
     _DATABASE_URL,
@@ -59,6 +59,34 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
     "incidents": {
         "topic_id": "INTEGER",
     },
+    "intel_mentions": {
+        "hidden": "BOOLEAN NOT NULL DEFAULT 0",
+        "media":  "TEXT",
+        "subject": "TEXT",
+    },
+    "intel_probes": {
+        "subject": "TEXT",
+    },
+    "intel_stories": {
+        "muted": "BOOLEAN NOT NULL DEFAULT 0",
+        "subject": "TEXT",
+    },
+    "intel_incidents": {
+        "subject": "TEXT",
+    },
+    "intel_directions": {
+        "muted":      "BOOLEAN NOT NULL DEFAULT 0",
+        "kind":       "TEXT DEFAULT 'region'",
+        "region_key": "TEXT",
+        "geo_terms":  "TEXT DEFAULT '[]'",
+    },
+    "intel_thread_context": {
+        "media": "TEXT",
+    },
+    "intel_alerts": {
+        "window_start": "DATETIME",
+        "window_end":   "DATETIME",
+    },
     "stories": {
         "topic_id":         "INTEGER",
         "source_count":     "INTEGER DEFAULT 0",
@@ -74,11 +102,6 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "is_opportunity": "BOOLEAN DEFAULT 0",
         "opportunity":    "TEXT",
         "is_spam":        "BOOLEAN DEFAULT 0",
-    },
-    "intel_directions": {
-        "kind":       "TEXT DEFAULT 'region'",
-        "region_key": "TEXT",
-        "geo_terms":  "TEXT DEFAULT '[]'",
     },
     "users": {
         "is_admin": "BOOLEAN DEFAULT 0",
@@ -153,5 +176,23 @@ def init_db() -> None:
         create_vec_tables(conn)
 
 
+_override_engines: dict[str, sessionmaker] = {}
+
+
 def get_session() -> Session:
+    """Return a session, respecting any runtime ECHO_DB override.
+
+    In tests, ECHO_DB is set via monkeypatch.setenv before the first request.
+    Because the module-level engine is bound to DATABASE_URL (set at import time),
+    we detect a per-process ECHO_DB override and create a separate engine/sessionmaker
+    for it, cached by URL so we don't recreate on every call."""
+    override_url = os.environ.get("ECHO_DB")
+    if override_url and override_url != _DATABASE_URL:
+        if override_url not in _override_engines:
+            _ca = {"check_same_thread": False} if override_url.startswith("sqlite") else {}
+            _eng = create_engine(override_url, connect_args=_ca, pool_pre_ping=True)
+            import radar.news.models, radar.brand.models, radar.intel.models  # noqa: F401
+            Base.metadata.create_all(_eng)
+            _override_engines[override_url] = sessionmaker(bind=_eng, expire_on_commit=False)
+        return _override_engines[override_url]()
     return SessionLocal()

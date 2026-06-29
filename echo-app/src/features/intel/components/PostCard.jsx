@@ -1,27 +1,56 @@
-// One post in a feed column. Side flag + author + time + clamped text + credibility dot.
-import { CREDIBILITY, SIDE, agoStrShort } from '../api';
+// One post in a feed column. Полная идентичность строке «Ленты событий» из
+// Ситуационного центра (IntelHome): флаг стороны + медиа + полный текст +
+// 📍местоположение + автор·направление + repost-счётчик + ✓ + ссылка TG +
+// контекст треда + время + ✕ удаление (в спам). Стили — те же классы eventRow*,
+// поэтому колонка выглядит так же, как ситуационная лента.
+import { SIDE, DIRECTION_NAMES, agoStrShort } from '../api';
+import { ThreadContext } from './ThreadContext';
+import MediaPreview from './MediaPreview';
 import styles from '../intel.module.css';
 
-export function PostCard({ event, isNew }) {
-  const cred = CREDIBILITY[event.credibility] || CREDIBILITY.unrated;
-  const side = SIDE[event.side] || { label: '—', color: '#6A8499' };
+const LONG_TEXT = 240;
+const cleanText = (t) => (t || '').replace(/\s+/g, ' ').trim();
+
+export function PostCard({ event, isNew, onSpam }) {
+  const sd = SIDE[event.side] || SIDE.ru;
+  const dups = event._dups || 1;
+  const text = cleanText(event.text);
+  const textClass = text.length > LONG_TEXT
+    ? `${styles.eventText} ${styles.eventTextLong}`
+    : styles.eventText;
   return (
-    <div className={styles.postCard} data-new={isNew ? '1' : '0'}>
-      <div className={styles.postMeta}>
-        <span style={{ color: side.color }}>{side.label}</span>
-        <span className={styles.postAuthor}>{event.author}</span>
-        <span className={styles.postTime}>{agoStrShort(event.created_at)}</span>
-        <span className={styles.postMatch} title={event.match_type === 'geo' ? 'по тексту' : 'по источнику'}>
-          {event.match_type === 'geo' ? 'G' : 'S'}
-        </span>
+    <div className={isNew ? `${styles.eventRow} ${styles.eventRowNew}` : styles.eventRow}>
+      <span className={styles.eventSide} style={{ color: sd.color, background: sd.color + '1A' }}>
+        {sd.label}
+      </span>
+      <div className={styles.eventBody}>
+        <div className={textClass}>
+          {event.media && (
+            <MediaPreview kind={event.media} url={`/intel/mention/${event.id}/media`} label={event.text} />
+          )}
+          {text}
+        </div>
+        <div className={styles.eventMeta}>
+          {event.subject && <span style={{ color: '#57D2E2' }}>📍 {event.subject} · </span>}
+          {event.author} · {DIRECTION_NAMES[event.direction]?.split(' ')[0] || event.direction}
+          {dups > 1 ? ` · ${dups} канал.` : ''}
+          {event.verified ? ' · ✓' : ''}
+          {event.url && (
+            <> · <a href={event.url} target="_blank" rel="noopener noreferrer"
+                   onClick={ev => ev.stopPropagation()}
+                   style={{ color: '#57D2E2', textDecoration: 'none' }}>↗ TG</a></>
+          )}
+        </div>
+        {event.is_reply && <ThreadContext mentionId={event.id} />}
       </div>
-      <div className={styles.postText}>{event.text}</div>
-      <div className={styles.postCredRow}>
-        <span className={styles.credDot} style={{ background: cred.color }} title={cred.label} />
-        {event.url
-          ? <a className={styles.postLink} href={event.url} target="_blank" rel="noreferrer">открыть</a>
-          : null}
-      </div>
+      <span className={styles.eventTime}>{agoStrShort(event.created_at)}</span>
+      {onSpam && (
+        <button
+          className={styles.eventSpam}
+          onClick={(ev) => onSpam(event, ev)}
+          title="В спам (скрыть и запомнить как мусор)"
+        >✕</button>
+      )}
     </div>
   );
 }

@@ -71,7 +71,7 @@ class IntelMention(Base):
     text:         Mapped[str]      = mapped_column(Text, default="")
     url:          Mapped[Optional[str]] = mapped_column(Text)
     views:        Mapped[int]      = mapped_column(Integer, default=0)
-    created_at:   Mapped[datetime] = mapped_column(nullable=False)
+    created_at:   Mapped[datetime] = mapped_column(nullable=False, index=True)  # feed/overview filter+sort — must be indexed
     incident_id:  Mapped[Optional[int]] = mapped_column(ForeignKey("intel_incidents.id"))
     verified:     Mapped[bool]     = mapped_column(Boolean, default=False)
     first_seen:   Mapped[datetime] = mapped_column(default=_now)

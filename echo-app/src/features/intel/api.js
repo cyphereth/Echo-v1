@@ -29,6 +29,7 @@ export const intelApi = {
   createDirection: (body) => request('/intel/directions', { method: 'POST', body: JSON.stringify(body) }),
   getLayout:       ()     => request('/intel/feed/layout'),
   saveLayout:      (body) => request('/intel/feed/layout', { method: 'PUT', body: JSON.stringify(body) }),
+  feedStream:      (keys, params = {}, onEvent) => feedStream(keys, params, onEvent),
 
   sources:   (params)         => passthrough('sources', params),
   addSource: (body)           => request('/intel/sources', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }),
@@ -145,6 +146,81 @@ export function streamLiveEvents({ afterId = 0, afterAlertId = 0, direction, onE
     if (currentCtrl) currentCtrl.abort();
     if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
   };
+}
+
+// ── Feed v2 multi-column live stream (SSE) ──────────────────────────────────
+// Opens ONE long-lived fetch stream to /intel/feed/stream for all active columns.
+// The backend fans each new mention out across the directions it belongs to (m2m)
+// and tags every frame with the direction KEY, so onEvent(ev) gets ev.direction =
+// the column key. Uses fetch (not EventSource) so the Bearer token rides in the
+// header. Auto-reconnects from the last id seen. Returns { close() }. No-op in mock.
+export function feedStream(directionKeys, { side } = {}, onEvent) {
+  if (INTEL_USE_MOCK || !directionKeys || !directionKeys.length) return { close() {} };
+  let stopped = false;
+  let lastId = 0;
+  let ctrl = null;
+  let reader = null;
+  const STALL_MS = 8000;
+  const abort = () => {
+    try { reader?.cancel(); } catch { /* ignore */ }
+    try { ctrl?.abort(); } catch { /* ignore */ }
+  };
+
+  async function loop() {
+    let backoff = 1000;
+    while (!stopped) {
+      ctrl = new AbortController();
+      reader = null;
+      let watchdog = setTimeout(abort, STALL_MS);
+      try {
+        const token = getToken();
+        const params = { after_id: String(lastId), directions: directionKeys.join(',') };
+        if (side) params.side = side;
+        const qs = new URLSearchParams(params).toString();
+        const res = await fetch(`/intel/feed/stream?${qs}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: ctrl.signal,
+        });
+        if (!res.ok || !res.body) throw new Error('sse ' + res.status);
+        backoff = 1000;
+        reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        while (!stopped) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          clearTimeout(watchdog);
+          watchdog = setTimeout(abort, STALL_MS);
+          buf += decoder.decode(value, { stream: true });
+          let sep;
+          while ((sep = buf.indexOf('\n\n')) >= 0) {
+            const frame = buf.slice(0, sep);
+            buf = buf.slice(sep + 2);
+            let dataRaw = '';
+            for (const line of frame.split('\n')) {
+              if (line.startsWith('data:')) dataRaw += line.slice(5).trim();
+            }
+            if (!dataRaw) continue;
+            try {
+              const ev = JSON.parse(dataRaw);
+              if (ev && ev.id) lastId = Math.max(lastId, ev.id);
+              if (onEvent) onEvent(ev);
+            } catch { /* ignore malformed frame */ }
+          }
+        }
+      } catch {
+        if (stopped) return;
+        backoff = Math.min(backoff * 1.5, 10000);
+      } finally {
+        clearTimeout(watchdog);
+        reader = null;
+      }
+      if (!stopped) await new Promise(r => setTimeout(r, backoff));
+    }
+  }
+
+  loop();
+  return { close() { stopped = true; if (ctrl) ctrl.abort(); } };
 }
 
 // ── Витринные форматтеры ────────────────────────────────────────────────────

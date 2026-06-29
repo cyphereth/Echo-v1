@@ -1048,35 +1048,93 @@ def intel_create_direction(
     return _direction_out_feed(session, d, 24)
 
 
-@router.get("/intel/feed")
-def intel_feed_column(
-    direction: str,
+# ── Feed v2 — multi-column live SSE ───────────────────────────────────────────
+
+@router.get("/intel/feed/stream")
+async def intel_feed_stream(
+    after_id: int = 0,
+    directions: Optional[str] = None,   # comma-separated direction keys
     side: Optional[str] = None,
-    window: str = "24h",
-    limit: int = 50,
-    user: User = Depends(current_user),
-    session: Session = Depends(db),
+    authorization: str = Header(None),
 ):
-    """Initial history for one Feed-v2 column — mentions linked to `direction`
-    via the m2m table (source-subscribed OR geo-text-matched)."""
-    d = session.query(IntelDirection).filter_by(key=direction).first()
-    if not d:
-        raise HTTPException(404, "direction not found")
-    since = datetime.now(timezone.utc) - timedelta(hours=_hours(window))
-    q = (session.query(IntelMention, IntelMentionDirection.match_type)
-         .join(IntelMentionDirection, IntelMentionDirection.mention_id == IntelMention.id)
-         .filter(IntelMentionDirection.direction_id == d.id,
-                 IntelMention.created_at >= since))
-    if side:
-        q = q.filter(IntelMention.side == side)
-    rows = q.order_by(IntelMention.created_at.desc()).limit(limit).all()
-    out = []
-    for (m, mt) in rows:
-        e = aggregate.event(m)
-        e["match_type"] = mt or "source"
-        e["direction"] = direction
-        out.append(e)
-    return out
+    """Server-Sent Events for the multi-column Feed v2.
+
+    Unlike /intel/stream/live (one frame per mention, tagged with its primary
+    direction_id), this fans a new mention OUT across every direction it belongs to
+    via the m2m table — the same membership the column history query uses — and tags
+    each frame with the direction KEY so the browser can route it to the right column.
+    A post matched to N columns yields N frames (same id, different `direction`)."""
+    _auth_user_from_header(authorization)
+
+    keys = [k for k in (directions or "").split(",") if k]
+    key_by_id: dict[int, str] = {}
+    if keys:
+        s = get_session()
+        try:
+            for d in s.query(IntelDirection).filter(IntelDirection.key.in_(keys)).all():
+                key_by_id[d.id] = d.key
+        finally:
+            s.close()
+    want_ids = set(key_by_id)
+
+    async def event_gen():
+        last_id = after_id
+        if last_id <= 0:
+            s = get_session()
+            try:
+                last_id = s.query(func.max(IntelMention.id)).scalar() or 0
+            finally:
+                s.close()
+        yield ": connected\n\n"
+        while True:
+            frames: list = []
+            try:
+                s = get_session()
+                try:
+                    # Advance the cursor across the whole scanned window (not just rows
+                    # that matched a requested direction) so unmatched newer posts don't
+                    # get re-scanned every tick.
+                    mids = [r[0] for r in
+                            s.query(IntelMention.id)
+                             .filter(IntelMention.id > last_id, IntelMention.hidden == False)  # noqa: E712
+                             .order_by(IntelMention.id.asc()).limit(200).all()]
+                    if mids:
+                        last_id = mids[-1]
+                        q = (s.query(IntelMention, IntelMentionDirection.direction_id,
+                                     IntelMentionDirection.match_type)
+                             .join(IntelMentionDirection,
+                                   IntelMentionDirection.mention_id == IntelMention.id)
+                             .filter(IntelMention.id.in_(mids)))
+                        if want_ids:
+                            q = q.filter(IntelMentionDirection.direction_id.in_(want_ids))
+                        if side:
+                            q = q.filter(IntelMention.side == side)
+                        for m, did, mt in q.order_by(IntelMention.id.asc()).all():
+                            key = key_by_id.get(did)
+                            if not key:
+                                continue
+                            e = aggregate.event(m)
+                            e["direction"] = key
+                            e["match_type"] = mt or "source"
+                            frames.append(json.dumps(e, ensure_ascii=False))
+                finally:
+                    s.close()
+            except Exception as exc:
+                log.warning("feed SSE tick db error (skipping): %s", exc)
+            for payload in frames:
+                yield f"data: {payload}\n\n"
+            yield ": ping\n\n"
+            await asyncio.sleep(INTEL_SSE_INTERVAL)
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ── Feed v2 — layout persistence (боевой дефолт) ──────────────────────────────

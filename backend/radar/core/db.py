@@ -174,6 +174,13 @@ def init_db() -> None:
     migrate_split(engine)
     _migrate()
     _fix_intel_probes_nullable()
+    # create_all() does not add indexes to a table that already exists — ensure the
+    # feed/overview hot-path index on intel_mentions.created_at exists on legacy DBs.
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_intel_mentions_created_at "
+            "ON intel_mentions (created_at)"
+        )
     from .vec import create_vec_tables
     with engine.begin() as conn:
         create_vec_tables(conn)

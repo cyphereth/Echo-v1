@@ -699,9 +699,10 @@
 .colPickerItem:hover { background: #161D24; }
 .colPickerKind { font-size: 10px; color: #6A8499; margin-left: 4px; }
 
-.feedColumns { flex: 1; display: flex; gap: 8px; padding: 10px; overflow-x: auto; min-height: 0; }
-.feedColumn { flex: 0 0 300px; background: #0E1419; border: 1px solid #1B2630;
-  border-radius: 8px; display: flex; flex-direction: column; max-height: 100%; }
+.feedColumns { flex: 1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr); gap: 8px; padding: 10px; overflow-y: auto; min-height: 0; }
+.feedColumn { background: #0E1419; border: 1px solid #1B2630;
+  border-radius: 8px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .feedColumnHead { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
   border-bottom: 1px solid #1B2630; }
 .feedColumnName { font-size: 12px; font-weight: 700; color: #E8EDF2; flex: 1; }

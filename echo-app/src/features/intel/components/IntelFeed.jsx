@@ -18,7 +18,22 @@ export function IntelFeed() {
   const [win, setWin]                 = useState('24h');
   const [side, setSide]               = useState(null);
   const [eventsByKey, setEventsByKey] = useState({});
-  const esRef = useRef(null);
+  const [hiddenIds, setHiddenIds]     = useState(() => new Set());
+  const [pausedKeys, setPausedKeys]   = useState(() => new Set()); // колонки под курсором
+  const [bufCounts, setBufCounts]     = useState({});              // сколько событий ждёт во время паузы
+  const esRef        = useRef(null);
+  const pausedRef    = useRef(new Set()); // актуальное состояние для SSE-колбэка
+  const bufferRef    = useRef({});        // {key: [событие,...]} — буфер на время паузы
+
+  // В спам: оптимистично прячем пост во всех колонках + запоминаем как пример мусора.
+  const handleSpam = useCallback((e, ev) => {
+    ev.stopPropagation();
+    setHiddenIds(prev => { const n = new Set(prev); n.add(e.id); return n; });
+    Promise.all([
+      intelApi.addSpam({ kind: 'example', value: e.text || '', author: e.author || null, source_post_id: e.post_id || null }),
+      intelApi.hideMention(e.id),
+    ]).catch(() => { /* optimistic — пост остаётся скрытым в любом случае */ });
+  }, []);
 
   // Load direction catalog + initial layout (localStorage → backend default).
   useEffect(() => {
@@ -48,28 +63,53 @@ export function IntelFeed() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKeys.join(','), win, side]);
 
+  // Влить одно событие в колонку с подсветкой; снять подсветку через 1с.
+  const applyEvent = useCallback((ev) => {
+    setEventsByKey(prev => {
+      const list = prev[ev.direction] || [];
+      if (list.some(e => e.id === ev.id)) return prev;
+      return { ...prev, [ev.direction]: [{ ...ev, _new: true }, ...list].slice(0, 200) };
+    });
+    setTimeout(() => {
+      setEventsByKey(prev => ({
+        ...prev,
+        [ev.direction]: (prev[ev.direction] || []).map(e =>
+          e.id === ev.id ? { ...e, _new: false } : e),
+      }));
+    }, 1000);
+  }, []);
+
   // SSE subscription — one connection for all columns.
   useEffect(() => {
     if (!activeKeys.length) return;
     const es = intelApi.feedStream(activeKeys, { window: win, side }, (ev) => {
-      setEventsByKey(prev => {
-        const list = prev[ev.direction] || [];
-        if (list.some(e => e.id === ev.id)) return prev;
-        return { ...prev, [ev.direction]: [{ ...ev, _new: true }, ...list].slice(0, 200) };
-      });
-      // Clear the _new highlight flag after 1s.
-      setTimeout(() => {
-        setEventsByKey(prev => ({
-          ...prev,
-          [ev.direction]: (prev[ev.direction] || []).map(e =>
-            e.id === ev.id ? { ...e, _new: false } : e),
-        }));
-      }, 1000);
+      // Колонка под курсором заморожена — копим события в буфер, не дёргаем строки
+      // под указателем. На уходе курсора (onColLeave) буфер вливается разом.
+      if (pausedRef.current.has(ev.direction)) {
+        (bufferRef.current[ev.direction] ||= []).push(ev);
+        setBufCounts(prev => ({ ...prev, [ev.direction]: (bufferRef.current[ev.direction] || []).length }));
+        return;
+      }
+      applyEvent(ev);
     });
     esRef.current = es;
     return () => { es.close(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeKeys.join(','), win, side]);
+  }, [activeKeys.join(','), win, side, applyEvent]);
+
+  const onColEnter = useCallback((key) => {
+    pausedRef.current.add(key);
+    setPausedKeys(prev => { const n = new Set(prev); n.add(key); return n; });
+  }, []);
+  const onColLeave = useCallback((key) => {
+    pausedRef.current.delete(key);
+    setPausedKeys(prev => { const n = new Set(prev); n.delete(key); return n; });
+    const buffered = bufferRef.current[key] || [];
+    bufferRef.current[key] = [];
+    setBufCounts(prev => ({ ...prev, [key]: 0 }));
+    // Вливаем накопленное (oldest→newest, чтобы порядок в колонке сохранился).
+    buffered.forEach(applyEvent);
+  }, [applyEvent]);
 
   const addColumn = useCallback((d) => {
     setActiveKeys(prev => prev.includes(d.key) ? prev : [...prev, d.key]);
@@ -114,6 +154,12 @@ export function IntelFeed() {
               <FeedColumn key={k}
                           direction={dirByName[k] || { key: k, name: k }}
                           events={eventsByKey[k] || []}
+                          paused={pausedKeys.has(k)}
+                          newCount={bufCounts[k] || 0}
+                          onEnter={() => onColEnter(k)}
+                          onLeave={() => onColLeave(k)}
+                          hiddenIds={hiddenIds}
+                          onSpam={handleSpam}
                           onRemove={() => removeColumn(k)} />
             ))}
       </div>

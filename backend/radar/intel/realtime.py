@@ -40,6 +40,7 @@ from .collector import (
     keyword_relevant,
     chat_message_relevant,
     load_lexicon_tiers,
+    _write_m2m_for_mention,
 )
 from .translate import maybe_translate
 from .spam_filter import load_spam, load_keywords, is_spam_text, blocked_by_word
@@ -149,6 +150,15 @@ def store_realtime_post(session, post, side, kind, lexicon_tiers,
     except IntegrityError:
         sp.rollback()
         return False
+
+    # Привязка к направлениям через m2m (intel_mention_directions) — ТАК ЖЕ, как поллер
+    # (collector._write_m2m_for_mention): direction_id поста = "source", совпавшие
+    # гео-термины = "geo". Без этого живые посты не попадают в колонки Ленты v2, которая
+    # читает именно m2m, а не одиночный mention.direction_id. Ошибки тут не валят запись.
+    try:
+        _write_m2m_for_mention(session, mention)
+    except Exception:
+        log.exception("realtime: m2m direction write failed for %s", mention.post_id)
 
     # Мгновенное обогащение треда: если родитель уже в БД, собираем цепочку прямо
     # сейчас (без сети) — кнопка «в ответ на» появляется в ту же секунду, не ждём

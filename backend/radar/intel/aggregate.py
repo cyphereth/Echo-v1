@@ -99,6 +99,66 @@ def story_summary(session, story, since=None) -> dict:
         "last_seen_at": _aware(story.last_seen_at).isoformat() if story.last_seen_at else None,
     }
 
+def _chunked(seq, n=900):
+    """Split ids into chunks that stay under SQLite's bound-variable limit (999)."""
+    for i in range(0, len(seq), n):
+        yield seq[i:i + n]
+
+
+def _summaries_batch(session, stories, since_naive=None) -> list:
+    """Build story_summary dicts for many stories with a constant number of
+    queries instead of the per-story N+1 (2-3 queries × N stories) that made
+    the situational-center overview take ~20s with thousands of active stories.
+
+    Output is identical to [story_summary(session, st, since=since_naive) ...]."""
+    if not stories:
+        return []
+    ids = [st.id for st in stories]
+
+    # Directions — one query for all referenced directions.
+    dir_ids = {st.direction_id for st in stories if st.direction_id is not None}
+    dirs = {}
+    if dir_ids:
+        for d in session.query(IntelDirection).filter(IntelDirection.id.in_(list(dir_ids))).all():
+            dirs[d.id] = d
+
+    # Story points — one (chunked) query; group into per-story lists.
+    pts_by_story: dict[int, list] = {sid: [] for sid in ids}
+    for chunk in _chunked(ids):
+        q = session.query(IntelStoryPoint).filter(IntelStoryPoint.story_id.in_(chunk))
+        if since_naive is not None:
+            q = q.filter(IntelStoryPoint.bucket_start >= since_naive)
+        for p in q.all():
+            pts_by_story.setdefault(p.story_id, []).append(p)
+
+    # Sides — one (chunked) join over mentions; group distinct sides per story.
+    sides_by_story: dict[int, set] = {sid: set() for sid in ids}
+    for chunk in _chunked(ids):
+        rows = (session.query(IntelIncident.story_id, IntelMention.side)
+                .join(IntelMention, IntelMention.incident_id == IntelIncident.id)
+                .filter(IntelIncident.story_id.in_(chunk),
+                        IntelMention.hidden == False).distinct().all())  # noqa: E712
+        for sid, side in rows:
+            s = (side or "").strip()
+            if s:
+                sides_by_story.setdefault(sid, set()).add(s)
+
+    out = []
+    for st in stories:
+        pts = pts_by_story.get(st.id, [])
+        d = dirs.get(st.direction_id)
+        out.append({
+            "id": st.id, "title": st.title, "direction": d.key if d else None,
+            "sides": sorted(sides_by_story.get(st.id, set())),
+            "source_count": st.source_count, "post_count": st.post_count,
+            "verified": bool(st.verified), "credibility": st.credibility,
+            "credibility_note": st.credibility_note or "",
+            "spike_pct": _spike_pct(pts), "sparkline": _sparkline(pts),
+            "last_seen_at": _aware(st.last_seen_at).isoformat() if st.last_seen_at else None,
+        })
+    return out
+
+
 def event(m) -> dict:
     return {"id": m.id, "platform": m.platform, "author": m.author, "side": m.side,
             "post_id": m.post_id,
@@ -179,7 +239,7 @@ def compute_overview(session, window_h=24) -> dict:
                         IntelStoryPoint.bucket_start >= since_naive)
                 .group_by(IntelStoryPoint.story_id).all())
         window_counts = {sid: int(cnt or 0) for sid, cnt in rows}
-    summaries = [story_summary(session, st, since=since_naive) for st in stories]
+    summaries = _summaries_batch(session, stories, since_naive)
     summary_map = {s["id"]: s for s in summaries}
 
     # "Горит сейчас" — только сюжеты созданные в пределах окна (24ч), сортировка по spike_pct.
@@ -252,7 +312,7 @@ def compute_overview_range(session, from_dt, to_dt) -> dict:
             pt_q = pt_q.filter(IntelStoryPoint.bucket_start >= frm_naive)
         rows = pt_q.group_by(IntelStoryPoint.story_id).all()
         window_counts = {sid: int(cnt or 0) for sid, cnt in rows}
-    summaries = [story_summary(session, st, since=frm_naive) for st in stories]
+    summaries = _summaries_batch(session, stories, frm_naive)
     summary_map_r = {s["id"]: s for s in summaries}
     hot_ids_r = {st.id for st in stories if frm_naive and st.created_at and st.created_at >= frm_naive}
     hot_candidates_r = [summary_map_r[sid] for sid in hot_ids_r if sid in summary_map_r] or summaries

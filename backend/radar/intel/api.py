@@ -431,7 +431,8 @@ def intel_feed(
     q = (session.query(IntelMention, IntelMentionDirection.match_type)
          .join(IntelMentionDirection, IntelMentionDirection.mention_id == IntelMention.id)
          .filter(IntelMentionDirection.direction_id == d.id,
-                 IntelMention.created_at >= since))
+                 IntelMention.created_at >= since,
+                 IntelMention.hidden == False))  # noqa: E712 — скрытые (спам) не показываем
     if side:
         q = q.filter(IntelMention.side == side)
     rows = q.order_by(IntelMention.created_at.desc()).limit(limit).all()

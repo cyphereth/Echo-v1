@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { intelApi } from '../api';
 import MediaPreview from './MediaPreview';
 
-export function ThreadContext({ mentionId }) {
+export function ThreadContext({ mentionId, compact = false }) {
   const [open, setOpen] = useState(false);
   const [ctx, setCtx] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -23,10 +23,10 @@ export function ThreadContext({ mentionId }) {
   // Подложка + светлый текст: в треде сообщения должны читаться так же легко, как
   // основная лента (раньше были тускло-серыми #4A6378 на тёмном фоне).
   const borderStyle = {
-    borderLeft: '2px solid #2BB3C7', padding: '6px 10px', margin: '4px 0',
+    borderLeft: '2px solid #2BB3C7', padding: compact ? '4px 8px' : '6px 10px', margin: '4px 0',
     background: 'rgba(43, 179, 199, 0.07)', borderRadius: 4,
   };
-  const msgStyle = { color: '#CBD9E3', fontSize: 12, lineHeight: 1.45, marginBottom: 4 };
+  const msgStyle = { color: '#CBD9E3', fontSize: compact ? 10.5 : 12, lineHeight: 1.4, marginBottom: compact ? 3 : 4 };
   const authorStyle = { color: '#5FB6C7', fontWeight: 600, marginRight: 4 };
   const hasCtx = ctx && ((ctx.reply_chain?.length || 0) + (ctx.siblings?.length || 0)) > 0;
 
@@ -34,7 +34,7 @@ export function ThreadContext({ mentionId }) {
     <div style={{ marginBottom: 4 }}>
       <button
         onClick={(ev) => { ev.stopPropagation(); toggle(); }}
-        style={{ background: 'none', border: 'none', color: '#4A6378', fontSize: 10,
+        style={{ background: 'none', border: 'none', color: '#4A6378', fontSize: compact ? 9 : 10,
                  fontFamily: 'var(--font-mono)', cursor: 'pointer', padding: '0 0 2px' }}>
         {loading ? '…' : open ? '↓ свернуть тред' : '↑ в ответ на'}
       </button>
@@ -61,7 +61,7 @@ export function ThreadContext({ mentionId }) {
             ))}
           </div>
         ) : (
-          <div style={{ ...borderStyle, color: '#8FA6B5', fontSize: 12 }}>
+          <div style={{ ...borderStyle, color: '#8FA6B5', fontSize: compact ? 10.5 : 12 }}>
             Родительское сообщение ещё не подгружено.
           </div>
         )

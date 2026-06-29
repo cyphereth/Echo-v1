@@ -41,7 +41,7 @@ export function PostCard({ event, isNew, onSpam }) {
                    style={{ color: '#57D2E2', textDecoration: 'none' }}>↗ TG</a></>
           )}
         </div>
-        {event.is_reply && <ThreadContext mentionId={event.id} />}
+        {event.is_reply && <ThreadContext mentionId={event.id} compact />}
       </div>
       <span className={styles.eventTime}>{agoStrShort(event.created_at)}</span>
       {onSpam && (

@@ -157,6 +157,15 @@ def enrich_one(session: Session, provider, mention: IntelMention) -> bool:
 
     _, current_tg_id = _parse_handle_and_msg_id(mention.post_id)
     handle = _handle_for(mention)
+    # Release any write lock BEFORE the Telegram round-trip. fetch_thread_context is
+    # network (and can flood-wait tens of seconds); SQLite allows one writer, so
+    # holding an open write transaction across it froze every other writer with
+    # "database is locked" and stalled the feed. Commit flushes pending savepoint
+    # writes and drops the lock for the network wait.
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
     try:
         result = provider.fetch_thread_context(
             handle,
@@ -265,6 +274,10 @@ def enrich_context(session: Session, provider, batch_size: int = 50) -> int:
         try:
             if enrich_one(session, provider, mention):
                 enriched += 1
+            # Persist + drop the write lock between items so a long batch never
+            # holds SQLite against the live feed. Also flushes the local fast-path
+            # writes, which enrich_one leaves uncommitted.
+            session.commit()
         except TelegramFloodWait as e:
             log.warning("context_pass flood-wait %ds — aborting batch", getattr(e, "seconds", "?"))
             session.commit()

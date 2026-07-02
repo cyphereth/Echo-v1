@@ -11,7 +11,7 @@ import styles from '../intel.module.css';
 const LONG_TEXT = 240;
 const cleanText = (t) => (t || '').replace(/\s+/g, ' ').trim();
 
-export function PostCard({ event, isNew, onSpam }) {
+export function PostCard({ event, isNew, onSpam, expandThreads = false }) {
   const sd = SIDE[event.side] || SIDE.ru;
   const dups = event._dups || 1;
   const text = cleanText(event.text);
@@ -41,7 +41,7 @@ export function PostCard({ event, isNew, onSpam }) {
                    style={{ color: '#57D2E2', textDecoration: 'none' }}>↗ TG</a></>
           )}
         </div>
-        {event.is_reply && <ThreadContext mentionId={event.id} compact />}
+        {event.is_reply && <ThreadContext mentionId={event.id} compact forceOpen={expandThreads} />}
       </div>
       <span className={styles.eventTime}>{agoStrShort(event.created_at)}</span>
       {onSpam && (

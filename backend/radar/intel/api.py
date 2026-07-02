@@ -448,6 +448,100 @@ def intel_feed(
     return [aggregate.feed_event(m, direction, mt) for (m, mt) in rows]
 
 
+@router.get("/intel/timeframe")
+def intel_timeframe(
+    from_dt: Optional[str] = None,
+    to_dt: Optional[str] = None,
+    window: str = "24h",
+    side: Optional[str] = None,
+    directions: Optional[str] = None,
+    include_radar: bool = False,
+    limit_per_source: int = 200,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    """Static snapshot of every mention in a time range, grouped
+    direction → source(chat) → posts. Powers the «Таймфрейм» archive screen.
+
+    Server-side grouping (thin client): one windowed query over IntelMention joined
+    to intel_mention_directions, bucketed in Python. Columns sorted by post count desc,
+    sources within a column by most-recent post desc, posts newest-first (feed order).
+    """
+    # Range: explicit from/to wins; otherwise fall back to the window preset.
+    if from_dt or to_dt:
+        try:
+            frm = datetime.fromisoformat(from_dt).replace(tzinfo=None) if from_dt else None
+            tod = (datetime.fromisoformat(to_dt).replace(tzinfo=None)
+                   if to_dt else datetime.now(timezone.utc).replace(tzinfo=None))
+        except ValueError:
+            raise HTTPException(400, "Invalid from_dt/to_dt ISO format")
+    else:
+        frm = (datetime.now(timezone.utc) - timedelta(hours=_hours(window))).replace(tzinfo=None)
+        tod = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    q = (session.query(IntelMention, IntelMentionDirection.direction_id,
+                       IntelMentionDirection.match_type)
+         .join(IntelMentionDirection,
+               IntelMentionDirection.mention_id == IntelMention.id)
+         .filter(IntelMention.created_at <= tod,
+                 IntelMention.hidden == False))  # noqa: E712 — спам не показываем
+    if frm is not None:
+        q = q.filter(IntelMention.created_at >= frm)
+    if not include_radar:
+        q = q.filter(IntelMention.is_radar == False)  # noqa: E712 — радары только в радарной ленте
+    if side:
+        q = q.filter(IntelMention.side == side)
+
+    # Optional column whitelist (the saved layout keys) → direction_id set.
+    want_dir_ids: Optional[set[int]] = None
+    if directions:
+        keys = [k.strip() for k in directions.split(",") if k.strip()]
+        if keys:
+            rows = session.query(IntelDirection).filter(IntelDirection.key.in_(keys)).all()
+            want_dir_ids = {d.id for d in rows}
+            q = q.filter(IntelMentionDirection.direction_id.in_(want_dir_ids))
+
+    q = q.order_by(IntelMention.created_at.desc())
+
+    # direction_id → name/key lookup (only the directions we actually need).
+    dir_meta = {d.id: d for d in session.query(IntelDirection).all()}
+
+    # cols[dir_id] = {"sources": {handle: {...}}}; posts appended newest-first.
+    cols: dict[int, dict] = {}
+    total = 0
+    for m, dir_id, match_type in q.all():
+        total += 1
+        col = cols.setdefault(dir_id, {"sources": {}})
+        handle = m.author or "—"
+        src = col["sources"].setdefault(
+            handle, {"handle": handle, "side": m.side, "count": 0, "last_at": None, "posts": []})
+        src["count"] += 1
+        at = aggregate._aware(m.created_at).isoformat()
+        if src["last_at"] is None or at > src["last_at"]:
+            src["last_at"] = at
+        if len(src["posts"]) < limit_per_source:
+            d = dir_meta.get(dir_id)
+            src["posts"].append(aggregate.feed_event(m, d.key if d else str(dir_id), match_type))
+
+    columns = []
+    for dir_id, col in cols.items():
+        d = dir_meta.get(dir_id)
+        sources = sorted(col["sources"].values(), key=lambda s: s["last_at"] or "", reverse=True)
+        columns.append({
+            "direction": {"key": d.key if d else str(dir_id), "name": d.name if d else str(dir_id)},
+            "count": sum(s["count"] for s in sources),
+            "sources": sources,
+        })
+    columns.sort(key=lambda c: c["count"], reverse=True)
+
+    return {
+        "from_dt": frm.isoformat() if frm else None,
+        "to_dt": tod.isoformat(),
+        "total": total,
+        "columns": columns,
+    }
+
+
 @router.get("/intel/directions/{key}")
 def intel_direction_detail(
     key: str,

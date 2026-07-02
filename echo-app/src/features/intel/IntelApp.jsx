@@ -6,6 +6,7 @@ import { Icon } from '../../core/components/icons';
 import { IntelHome } from './components/IntelHome';
 import { IntelStories } from './components/IntelStories';
 import { IntelFeed } from './components/IntelFeed';
+import { IntelTimeframe } from './components/IntelTimeframe';
 import { IntelSources } from './components/IntelSources';
 import { IntelSpam } from './components/IntelSpam';
 import { AlertBell } from './components/AlertBell';
@@ -21,6 +22,7 @@ const SCREENS = [
   { key: 'sources', label: 'Источники',           icon: 'link',     hotkey: '3' },
   { key: 'spam',    label: 'Антиспам',             icon: 'search',   hotkey: '4' },
   { key: 'feed',    label: 'Лента событий v2',   icon: 'radio',    hotkey: '5' },
+  { key: 'timeframe', label: 'Таймфрейм',         icon: 'activity', hotkey: '6' },
 ];
 
 function NavItem({ item, active, onClick }) {
@@ -127,6 +129,13 @@ export function IntelApp({ onExit }) {
   const visibleAlerts = alerts.filter(a => a.at && (Date.now() - new Date(a.at).getTime()) < TWO_HOURS_MS);
   const unreadCount = visibleAlerts.filter(a => !a.acknowledged).length;
 
+  // Пикер периода: пресет (1ч/24ч/…) просто меняет окно текущего экрана; кастомный
+  // диапазон (from/to) авто-открывает страницу-таймфрейм — как и вход через сайдбар.
+  const onTimeRange = useCallback((tr) => {
+    setTimeRange(tr);
+    if (tr && (tr.from_dt || tr.to_dt)) setScreen('timeframe');
+  }, []);
+
   async function runSearch(q) {
     if (!q.trim()) { setSearchResults(null); return; }
     setSearchResults(await intelApi.search(q.trim()));
@@ -187,7 +196,7 @@ export function IntelApp({ onExit }) {
           <div className={styles.topgrow} />
           <AlertBell alerts={visibleAlerts} unreadCount={unreadCount} onAck={ackAlert} onAckAll={ackAll}
                      onOpen={openAlert} onMute={muteFromAlert} muted={muted} onUnmute={unmute} />
-          <DateRangePicker value={timeRange} onChange={setTimeRange} />
+          <DateRangePicker value={timeRange} onChange={onTimeRange} />
           <div className={styles.searchBox}>
             <Icon name="search" size={13} color="#4A6378" />
             <input
@@ -213,6 +222,8 @@ export function IntelApp({ onExit }) {
           <IntelSources />
         ) : screen === 'feed' ? (
           <IntelFeed />
+        ) : screen === 'timeframe' ? (
+          <IntelTimeframe timeRange={timeRange} />
         ) : (
           <IntelSpam />
         )}

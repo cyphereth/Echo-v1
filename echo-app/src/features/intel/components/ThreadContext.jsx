@@ -1,11 +1,11 @@
 // Reply-thread context for a mention. Lazy-loads /intel/mention/{id}/context on
 // first expand and renders the reply chain + sibling replies inline. Shared by the
 // home feed («Лента событий») and the story-detail events list.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { intelApi } from '../api';
 import MediaPreview from './MediaPreview';
 
-export function ThreadContext({ mentionId, compact = false }) {
+export function ThreadContext({ mentionId, compact = false, forceOpen = false }) {
   const [open, setOpen] = useState(false);
   const [ctx, setCtx] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -19,6 +19,22 @@ export function ThreadContext({ mentionId, compact = false }) {
       .catch(() => { setCtx({ reply_chain: [], siblings: [] }); setOpen(true); })
       .finally(() => setLoading(false));
   }
+
+  // «Развернуть все треды»: forceOpen поднимает тред без клика. Грузим контекст один
+  // раз (если ещё не загружен), затем открываем. Снятие тумблера сворачивает.
+  useEffect(() => {
+    if (forceOpen) {
+      if (ctx) { setOpen(true); return; }
+      setLoading(true);
+      intelApi.mentionContext(mentionId)
+        .then(data => { setCtx(data); setOpen(true); })
+        .catch(() => { setCtx({ reply_chain: [], siblings: [] }); setOpen(true); })
+        .finally(() => setLoading(false));
+    } else {
+      setOpen(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forceOpen]);
 
   // Подложка + светлый текст: в треде сообщения должны читаться так же легко, как
   // основная лента (раньше были тускло-серыми #4A6378 на тёмном фоне).

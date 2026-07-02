@@ -30,6 +30,8 @@ export const intelApi = {
   // Возвращает { close() } (интерфейс EventSource-подобный — вызывающий закрывает).
   feedStream:      (directions, params, onEvent) => openFeedStream(directions, params, onEvent),
   createDirection: (body) => request('/intel/directions', { method: 'POST', body: JSON.stringify(body) }),
+  // Статичный срез архива: направление → источник → посты за период.
+  timeframe:       (params = {}) => passthrough('timeframe', params),
   getLayout:       ()     => request('/intel/feed/layout'),
   saveLayout:      (body) => request('/intel/feed/layout', { method: 'PUT', body: JSON.stringify(body) }),
 

@@ -9,7 +9,7 @@
 //    вешать в DOM тысячи узлов на первом кадре;
 //  • «развернуть все треды» тянет контекст ОДНИМ батч-запросом (/intel/mentions/context)
 //    вместо запроса на каждый пост, и раздаёт готовые данные в ThreadContext.
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { intelApi } from '../api';
 import { PostCard } from './PostCard';
 import { ColumnPicker } from './ColumnPicker';
@@ -33,7 +33,9 @@ function fmtRange(from_dt, to_dt) {
   return `${f(from_dt)} → ${f(to_dt)}`;
 }
 
-function SourceGroup({ source, expandThreads, threadCtx }) {
+function SourceGroup({ source, expandThreads, threadCtx, hiddenIds, onSpam }) {
+  const posts = source.posts.filter(e => !hiddenIds.has(e.id));
+  if (posts.length === 0) return null;
   return (
     <div style={{ marginBottom: 10 }}>
       <div style={{
@@ -45,8 +47,8 @@ function SourceGroup({ source, expandThreads, threadCtx }) {
         <span style={{ fontWeight: 700 }}>{source.handle}</span>
         <span style={{ color: '#6A8499' }}>· {source.count}{source.has_more ? '+' : ''}</span>
       </div>
-      {source.posts.map(e => (
-        <PostCard key={e.id} event={e} expandThreads={expandThreads}
+      {posts.map(e => (
+        <PostCard key={e.id} event={e} expandThreads={expandThreads} onSpam={onSpam}
                   threadData={threadCtx ? threadCtx[e.id] || null : null} />
       ))}
       {source.has_more && (
@@ -58,7 +60,7 @@ function SourceGroup({ source, expandThreads, threadCtx }) {
   );
 }
 
-function Column({ col, expandThreads, threadCtx }) {
+function Column({ col, expandThreads, threadCtx, hiddenIds, onSpam }) {
   const [visible, setVisible] = useState(SOURCES_PAGE);
   const shown = col.sources.slice(0, visible);
   const rest = col.sources.length - shown.length;
@@ -70,7 +72,7 @@ function Column({ col, expandThreads, threadCtx }) {
       </div>
       <div className={styles.feedColumnBody}>
         {shown.map(src => (
-          <SourceGroup key={src.handle} source={src}
+          <SourceGroup key={src.handle} source={src} hiddenIds={hiddenIds} onSpam={onSpam}
                        expandThreads={expandThreads} threadCtx={threadCtx} />
         ))}
         {rest > 0 && (
@@ -93,6 +95,17 @@ export function IntelTimeframe({ timeRange }) {
   const [threadCtx, setThreadCtx] = useState(null);   // {mentionId: {reply_chain, siblings}}
   const [allDirs, setAllDirs]     = useState([]);     // каталог направлений для фильтра
   const [pickDirs, setPickDirs]   = useState([]);     // выбранные колонки (как в Ленте v2)
+  const [hiddenIds, setHiddenIds] = useState(() => new Set());   // оптимистично скрытые (в спам)
+
+  // В спам: прячем пост локально + пишем как пример мусора и hideMention (как в Ленте v2).
+  const handleSpam = useCallback((e, ev) => {
+    ev.stopPropagation();
+    setHiddenIds(prev => { const n = new Set(prev); n.add(e.id); return n; });
+    Promise.all([
+      intelApi.addSpam({ kind: 'example', value: e.text || '', author: e.author || null, source_post_id: e.post_id || null }),
+      intelApi.hideMention(e.id),
+    ]).catch(() => { /* optimistic — пост остаётся скрытым в любом случае */ });
+  }, []);
 
   // Каталог направлений + стартовый расклад колонок (localStorage → боевой дефолт).
   useEffect(() => {
@@ -209,7 +222,7 @@ export function IntelTimeframe({ timeRange }) {
           : columns.length === 0
             ? <div className={styles.feedEmpty}>Нет сообщений за выбранный период.</div>
             : columns.map(col => (
-                <Column key={col.direction.key} col={col}
+                <Column key={col.direction.key} col={col} hiddenIds={hiddenIds} onSpam={handleSpam}
                         expandThreads={expandThreads} threadCtx={threadCtx} />
               ))}
       </div>

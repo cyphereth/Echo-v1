@@ -166,7 +166,10 @@ export function IntelTimeframe({ timeRange }) {
           выбранные показываем чипами с ✕, «Все области» сбрасывает. */}
       <div className={styles.feedColumnBar}>
         {pickDirs.length === 0
-          ? <span className={styles.colChip} style={{ opacity: 0.7 }}>Все области</span>
+          ? <span className={styles.colChip} data-active="1"
+                  title="Фильтр не задан — показаны все области. Нажми «+ колонки», чтобы сузить.">
+              ✓ Все области
+            </span>
           : (
             <>
               {pickDirs.map(k => (

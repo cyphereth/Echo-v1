@@ -537,9 +537,14 @@ def intel_timeframe(
         })
     columns.sort(key=lambda c: c["count"], reverse=True)
 
+    # frm/tod are naive-UTC (we stripped tzinfo for comparison against the naive-UTC
+    # created_at column). Return them tz-aware (…+00:00) so the client's new Date()
+    # localises them correctly — without the marker the browser reads them as LOCAL
+    # time, sliding the displayed range off the actual filter by the client's offset
+    # (e.g. MSK +3h → "date not the one I picked / no posts for it").
     return {
-        "from_dt": frm.isoformat() if frm else None,
-        "to_dt": tod.isoformat(),
+        "from_dt": frm.replace(tzinfo=timezone.utc).isoformat() if frm else None,
+        "to_dt": tod.replace(tzinfo=timezone.utc).isoformat(),
         "total": total,
         "columns": columns,
     }

@@ -46,7 +46,7 @@ from .collector import (
     _write_m2m_for_mention,
 )
 from .translate import maybe_translate
-from .spam_filter import load_spam, load_keywords, is_spam_text, blocked_by_word
+from .spam_filter import load_spam, load_keywords, is_spam_text, blocked_by_word, classify_spam_batch
 
 log = logging.getLogger("radar.intel.realtime")
 
@@ -126,8 +126,16 @@ def store_realtime_post(session, post, side, kind, lexicon_tiers,
             if not keyword_relevant(text, lexicon_tiers, geo_hit=geo_hit):
                 return False
 
-    # Антиспам: дословный дубль примера или стоп-слово — выкидываем до записи.
+    # Антиспам, слой 1 (дешёвый, без сети): дословный дубль примера или стоп-слово.
     if is_spam_text(text, spam_words, spam_examples):
+        return False
+
+    # Антиспам, слой 2 (семантический, LLM): куратор кидает пост в антиспам, а спамер
+    # чуть меняет формулировку — дословный матч мимо, и мусор снова в ленте. Поллер уже
+    # сравнивает выживших с примерами куратора через classify_spam_batch; realtime раньше
+    # этого не делал. Зовём тот же гейт (батч из одного текста). Fail-open: без ключа/
+    # примеров или при ошибке вернёт False. Сеть, но _store_sync уже off-loop.
+    if spam_examples and classify_spam_batch([text], spam_examples)[0]:
         return False
 
     # Та же гео-привязка, что и у поллера (collector.py): текст решает область, а

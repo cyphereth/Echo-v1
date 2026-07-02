@@ -9,6 +9,16 @@ export function ThreadContext({ mentionId, compact = false, forceOpen = false, d
   const [open, setOpen] = useState(false);
   const [ctx, setCtx] = useState(data);
   const [loading, setLoading] = useState(false);
+  const [muted, setMuted] = useState(false);
+
+  // Мут треда: последующие ответы в эту ветку больше не попадают в ленту.
+  // Необратимо — предупреждаем. Ретро-скрытия нет, текущая карточка остаётся.
+  function mute(ev) {
+    ev.stopPropagation();
+    if (!window.confirm('Заглушить этот тред? Новые ответы в ветку перестанут попадать в ленту. Действие необратимо.')) return;
+    setMuted(true);
+    intelApi.muteThread(mentionId).catch(() => setMuted(false));
+  }
 
   function toggle() {
     if (open) { setOpen(false); return; }
@@ -48,7 +58,7 @@ export function ThreadContext({ mentionId, compact = false, forceOpen = false, d
   };
   const msgStyle = { color: '#CBD9E3', fontSize: compact ? 10.5 : 12, lineHeight: 1.4, marginBottom: compact ? 3 : 4 };
   const authorStyle = { color: '#5FB6C7', fontWeight: 600, marginRight: 4 };
-  const hasCtx = ctx && ((ctx.reply_chain?.length || 0) + (ctx.siblings?.length || 0)) > 0;
+  const hasCtx = ctx && ((ctx.reply_chain?.length || 0) + (ctx.siblings?.length || 0) + (ctx.children?.length || 0)) > 0;
 
   return (
     <div style={{ marginBottom: 4 }}>
@@ -58,6 +68,18 @@ export function ThreadContext({ mentionId, compact = false, forceOpen = false, d
                  fontFamily: 'var(--font-mono)', cursor: 'pointer', padding: '0 0 2px' }}>
         {loading ? '…' : open ? '↓ свернуть тред' : '↑ в ответ на'}
       </button>
+      {muted ? (
+        <span style={{ color: '#6A8499', fontSize: compact ? 9 : 10, fontFamily: 'var(--font-mono)',
+                       marginLeft: 8 }}>🔇 тред заглушён</span>
+      ) : (
+        <button
+          onClick={mute}
+          title="Заглушить тред: новые ответы в ветку не попадут в ленту (необратимо)"
+          style={{ background: 'none', border: 'none', color: '#6A5A2E', fontSize: compact ? 9 : 10,
+                   fontFamily: 'var(--font-mono)', cursor: 'pointer', padding: '0 0 2px', marginLeft: 8 }}>
+          🔇 мут треда
+        </button>
+      )}
       {open && ctx && (
         hasCtx ? (
           <div style={borderStyle}>
@@ -77,6 +99,24 @@ export function ThreadContext({ mentionId, compact = false, forceOpen = false, d
                                               paddingLeft: (ctx.reply_chain?.length || 0) * 8 }}>
                 <span style={authorStyle}>{s.author}</span>
                 {s.text}
+              </div>
+            ))}
+            {(ctx.children?.length || 0) > 0 && (
+              <div style={{ color: '#5FB6C7', fontSize: compact ? 9 : 10, fontFamily: 'var(--font-mono)',
+                            margin: '4px 0 2px', paddingLeft: ((ctx.reply_chain?.length || 0) + 1) * 8 }}>
+                ↳ ответы ({ctx.children.length})
+              </div>
+            )}
+            {(ctx.children || []).map(c => (
+              <div key={`c${c.tg_msg_id}`} style={{ ...msgStyle,
+                                                    paddingLeft: ((ctx.reply_chain?.length || 0) + 1) * 8 }}>
+                <span style={authorStyle}>{c.author}</span>
+                {c.media && (
+                  <MediaPreview kind={c.media}
+                    url={`/intel/mention/${mentionId}/parent-media/${c.tg_msg_id}`}
+                    label={c.text} />
+                )}
+                {c.text}
               </div>
             ))}
           </div>

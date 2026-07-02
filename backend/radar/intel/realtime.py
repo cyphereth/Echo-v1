@@ -126,6 +126,12 @@ def store_realtime_post(session, post, side, kind, lexicon_tiers,
             if not keyword_relevant(text, lexicon_tiers, geo_hit=geo_hit):
                 return False
 
+    # Мут треда: куратор заглушил ветку — её ответы (на любую глубину) в ленту не
+    # пускаем. Каскад: дропнутый msgid дописывается в набор внутри gate_muted.
+    from .thread_mute import gate_muted
+    if gate_muted(session, post, post.platform or "telegram"):
+        return False
+
     # Антиспам, слой 1 (дешёвый, без сети): дословный дубль примера или стоп-слово.
     if is_spam_text(text, spam_words, spam_examples):
         return False

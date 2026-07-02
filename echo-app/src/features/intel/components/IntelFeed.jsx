@@ -18,6 +18,7 @@ export function IntelFeed() {
   const [win, setWin]                 = useState('24h');
   const [side, setSide]               = useState(null);
   const [showRadar, setShowRadar]     = useState(false);  // включать радарные источники в общую ленту
+  const [expandThreads, setExpandThreads] = useState(false); // развернуть треды во всех колонках
   const [eventsByKey, setEventsByKey] = useState({});
   const [hiddenIds, setHiddenIds]     = useState(() => new Set());
   const [pausedKeys, setPausedKeys]   = useState(() => new Set()); // колонки под курсором
@@ -150,6 +151,11 @@ export function IntelFeed() {
                   onClick={() => setShowRadar(v => !v)}
                   title="Показывать посты радар-источников в общей ленте">📡 Радар</button>
         </div>
+        <div className={styles.feedSeg}>
+          <button data-active={expandThreads ? '1' : '0'}
+                  onClick={() => setExpandThreads(v => !v)}
+                  title="Развернуть треды во всех колонках">🧵 Треды</button>
+        </div>
         <div style={{ flex: 1 }} />
         <button className={styles.feedResetBtn} onClick={resetToDefault}>Сбросить к боевому</button>
       </div>
@@ -177,6 +183,7 @@ export function IntelFeed() {
                           onLeave={() => onColLeave(k)}
                           hiddenIds={hiddenIds}
                           onSpam={handleSpam}
+                          expandThreads={expandThreads}
                           onRemove={() => removeColumn(k)} />
             ))}
       </div>

@@ -54,6 +54,7 @@ export const intelApi = {
   // Батч: контекст многих упоминаний за один запрос → {id: {reply_chain, siblings}}.
   mentionsContext: (ids)      => request(`/intel/mentions/context?ids=${ids.join(',')}`),
   hideMention: (id)           => request(`/intel/mention/${id}/hide`, { method: 'POST' }),
+  muteThread:  (id)           => request(`/intel/mention/${id}/mute-thread`, { method: 'POST' }),
   muteStory:      (id) => request(`/intel/stories/${id}/mute`, { method: 'POST' }),
   unmuteStory:    (id) => request(`/intel/stories/${id}/unmute`, { method: 'POST' }),
   muteDirection:  (id) => request(`/intel/directions/${id}/mute`, { method: 'POST' }),

@@ -27,6 +27,7 @@ from .geo import detect_direction
 from .tagging import resolve_direction_id, tag_geo
 from .translate import maybe_translate
 from .spam_filter import load_spam, load_keywords, blocked_by_word, classify_spam_batch, is_exact_spam
+from .thread_mute import gate_muted
 from ..core.spam import looks_like_ad_cheap
 
 log = logging.getLogger(__name__)
@@ -393,6 +394,11 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
 
                 # Spam stop-word layer (fast, deterministic)
                 if blocked_by_word(text, blocklist):
+                    continue
+
+                # Мут треда: ветка заглушена куратором — ответы (любая глубина)
+                # в ленту не пускаем. Каскад ведётся внутри gate_muted.
+                if gate_muted(session, post, probe.platform):
                     continue
 
                 dir_id, subject = tag_geo(session, probe, text)

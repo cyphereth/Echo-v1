@@ -1135,6 +1135,23 @@ def intel_mention_hide(
     return {"id": m.id, "hidden": True, "hidden_count": hidden}
 
 
+@router.post("/intel/mention/{mention_id}/mute-thread")
+def intel_mute_thread(
+    mention_id: int,
+    session: Session = Depends(db),
+    user: User = Depends(current_user),
+):
+    """Замутить тред этого упоминания: последующие ответы в ветку (на любую
+    глубину) больше не попадают в ленту. Необратимо. Ретро-скрытие уже
+    сохранённых ответов не делаем — только будущие входящие (каскад на ingest)."""
+    from .thread_mute import mute_thread
+    n = mute_thread(session, mention_id)
+    if n == 0:
+        raise HTTPException(404, "Mention not found or not a chat thread")
+    session.commit()
+    return {"id": mention_id, "muted": True, "seeded": n}
+
+
 def _preview_or_error(provider, post_id: str, handle: str, msg_id: int, kind: str):
     """Общая обвязка кэша+провайдера для media-эндпоинтов. Возвращает FileResponse или
     HTTPException-совместимый ответ через raise."""
@@ -1192,6 +1209,43 @@ def intel_parent_media(
     return _preview_or_error(_get_tg_provider(), parent_post_id, handle, int(tg_msg_id), ctx.media or "")
 
 
+def _children_map(session, mentions):
+    """{mention_id: [ответы на этот пост]}. Ребёнок — IntelMention с
+    reply_to_tg_id == msgid родителя в том же namespace чата. Хранятся как
+    обычные упоминания, но в тред не подтягивались — отсюда «нет ответов».
+    Локально, без сети. Скрытые (hidden) не отдаём."""
+    # (ns, msgid) для каждого запрошенного упоминания.
+    want = {}          # msgid -> [(ns, mention_id), ...]
+    for m in mentions:
+        pid = m.post_id or ""
+        if "/" not in pid:
+            continue   # каналы тредов не имеют
+        ns, msgid = pid.rsplit("/", 1)
+        want.setdefault(msgid, []).append((ns, m.id))
+    if not want:
+        return {}
+    kids = (session.query(IntelMention)
+            .filter(IntelMention.reply_to_tg_id.in_(list(want.keys())),
+                    IntelMention.hidden == False)  # noqa: E712
+            .all())
+    out = {}
+    for k in kids:
+        kpid = k.post_id or ""
+        kns = kpid.rsplit("/", 1)[0] if "/" in kpid else ""
+        for (ns, parent_id) in want.get(str(k.reply_to_tg_id), []):
+            if ns != kns:
+                continue   # тот же msgid в другом чате — не наш ребёнок
+            _, ktg = (kpid.rsplit("/", 1) if "/" in kpid else ("", kpid))
+            out.setdefault(parent_id, []).append({
+                "tg_msg_id": ktg, "author": k.author or "", "text": k.text or "",
+                "media": k.media, "side": k.side,
+                "created_at": aggregate._aware(k.created_at).isoformat(),
+            })
+    for lst in out.values():
+        lst.sort(key=lambda x: x["created_at"])
+    return out
+
+
 @router.get("/intel/mention/{mention_id}/context")
 def intel_mention_context(
     mention_id: int,
@@ -1235,7 +1289,9 @@ def intel_mention_context(
          for r in rows if r.role == "sibling"],
         key=lambda x: x["created_at"],
     )
-    return {"mention_id": mention_id, "reply_chain": reply_chain, "siblings": siblings}
+    children = _children_map(session, [mention]).get(mention_id, [])
+    return {"mention_id": mention_id, "reply_chain": reply_chain,
+            "siblings": siblings, "children": children}
 
 
 @router.get("/intel/mentions/context")
@@ -1274,11 +1330,19 @@ def intel_mentions_context_batch(
                  "created_at": aggregate._aware(r.created_at).isoformat()}
         bucket.setdefault(r.role, []).append(entry)
 
+    # Дети (ответы на пост) — локально, для всех запрошенных id сразу.
+    parents = session.query(IntelMention).filter(IntelMention.id.in_(id_list)).all()
+    children_by = _children_map(session, parents)
+
     out = {}
-    for mid, b in by_mention.items():
+    for mid in id_list:
+        b = by_mention.get(mid, {})
         reply_chain = sorted(b.get("parent", []), key=lambda x: x["depth"], reverse=True)
         siblings = sorted(b.get("sibling", []), key=lambda x: x["created_at"])
-        out[str(mid)] = {"reply_chain": reply_chain, "siblings": siblings}
+        children = children_by.get(mid, [])
+        if reply_chain or siblings or children:
+            out[str(mid)] = {"reply_chain": reply_chain, "siblings": siblings,
+                             "children": children}
     return out
 
 

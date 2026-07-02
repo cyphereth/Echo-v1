@@ -6,7 +6,7 @@ import { useMemo } from 'react';
 import { PostCard } from './PostCard';
 import styles from '../intel.module.css';
 
-export function FeedColumn({ direction, events, paused, newCount, onEnter, onLeave, onRemove, hiddenIds, onSpam }) {
+export function FeedColumn({ direction, events, paused, newCount, onEnter, onLeave, onRemove, hiddenIds, onSpam, expandThreads = false }) {
   // Схлопываем дубль-репосты (один sig → одна строка, newest) и убираем скрытые.
   const feed = useMemo(() => {
     const out = [];
@@ -40,7 +40,7 @@ export function FeedColumn({ direction, events, paused, newCount, onEnter, onLea
       <div className={styles.feedColumnBody}>
         {feed.length === 0
           ? <div className={styles.feedColumnEmpty}>нет событий в окне</div>
-          : feed.map((e) => <PostCard key={e.id} event={e} isNew={e._new} onSpam={onSpam} />)}
+          : feed.map((e) => <PostCard key={e.id} event={e} isNew={e._new} onSpam={onSpam} expandThreads={expandThreads} />)}
       </div>
     </div>
   );

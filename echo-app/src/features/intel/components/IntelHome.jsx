@@ -39,7 +39,7 @@ function collapseBySig(stream, hiddenIds) {
   return out;
 }
 
-function EventRow({ e, isNew, onSpam }) {
+function EventRow({ e, isNew, onSpam, expandThreads = false }) {
   const sd = SIDE[e.side] || SIDE.ru;
   const dups = e._dups || 1;
   const text = cleanText(e.text);
@@ -69,7 +69,7 @@ function EventRow({ e, isNew, onSpam }) {
                    style={{ color: '#57D2E2', textDecoration: 'none' }}>↗ TG</a></>
           )}
         </div>
-        {e.is_reply && <ThreadContext mentionId={e.id} />}
+        {e.is_reply && <ThreadContext mentionId={e.id} forceOpen={expandThreads} />}
       </div>
       <span className={styles.eventTime}>{agoStrShort(e.created_at)}</span>
       <button
@@ -87,6 +87,7 @@ export function IntelHome({ timeRange, liveEvents = [], hiddenIds, hideEvent, se
   const [radarStream, setRadarStream] = useState([]);  // радарная лента
   const [flashIds, setFlashIds]   = useState(() => new Set());
   const [paused, setPaused]       = useState(false);  // наведение курсора замораживает ленту
+  const [expandThreads, setExpandThreads] = useState(false); // развернуть треды в ленте событий
   const pausedRef                 = useRef(false);     // чтобы merge-эффект читал актуальное значение
 
   // Throw a post into the spam filter (kind="example") and hide it from the feed.
@@ -313,7 +314,7 @@ export function IntelHome({ timeRange, liveEvents = [], hiddenIds, hideEvent, se
             <div className={styles.empty}>Нет событий от радар-источников. Пометьте источники флагом «Радар» во вкладке «Источники».</div>
           ) : (
             radarFeed.map(e => (
-              <EventRow key={e.id} e={e} isNew={flashIds.has(e.id)} onSpam={handleSpam} />
+              <EventRow key={e.id} e={e} isNew={flashIds.has(e.id)} onSpam={handleSpam} expandThreads={expandThreads} />
             ))
           )}
           </div>
@@ -326,6 +327,13 @@ export function IntelHome({ timeRange, liveEvents = [], hiddenIds, hideEvent, se
               Лента событий
               <span className={styles.sectionCount}>{feed.length}</span>
             </span>
+            <button
+              onClick={() => setExpandThreads(v => !v)}
+              title="Развернуть треды в ленте"
+              style={{ marginLeft: 8, background: expandThreads ? 'rgba(87,210,226,.18)' : 'none',
+                       border: '1px solid rgba(87,210,226,.3)', borderRadius: 4, cursor: 'pointer',
+                       color: expandThreads ? '#57D2E2' : '#6A8499', fontSize: 10,
+                       fontFamily: 'var(--font-mono)', padding: '1px 6px' }}>🧵 Треды</button>
             {isCustom ? (
               <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 10, color: '#6A8499' }}>
                 АРХИВ
@@ -349,7 +357,7 @@ export function IntelHome({ timeRange, liveEvents = [], hiddenIds, hideEvent, se
           </div>
           <div className={styles.scrollBody}>
           {feed.map(e => (
-            <EventRow key={e.id} e={e} isNew={flashIds.has(e.id)} onSpam={handleSpam} />
+            <EventRow key={e.id} e={e} isNew={flashIds.has(e.id)} onSpam={handleSpam} expandThreads={expandThreads} />
           ))}
           </div>
         </div>

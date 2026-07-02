@@ -175,6 +175,21 @@ class IntelSpam(Base):
     created_at:     Mapped[datetime] = mapped_column(default=_now)
 
 
+class IntelThreadMute(Base):
+    """Заглушённые треды. Одна строка = одно tg-сообщение, принадлежащее
+    замученной ветке (в рамках namespace чата). Набор растёт каскадно: когда
+    приходит ответ на уже замученное сообщение, его msgid тоже пишется сюда,
+    так любые последующие ответы на любую глубину продолжают отсекаться.
+    Мут необратим (как спам-пример)."""
+    __tablename__ = "intel_thread_mute"
+    __table_args__ = (UniqueConstraint("platform", "ns", "tg_msg_id"),)
+    id:         Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
+    platform:   Mapped[str]      = mapped_column(Text, nullable=False, default="telegram")
+    ns:         Mapped[str]      = mapped_column(Text, nullable=False)      # namespace чата из post_id ("ns/msgid")
+    tg_msg_id:  Mapped[str]      = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
 class IntelThreadContext(Base):
     __tablename__ = "intel_thread_context"
     __table_args__ = (UniqueConstraint("mention_id", "tg_msg_id"),)

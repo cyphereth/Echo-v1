@@ -89,19 +89,25 @@ export function IntelTimeframe({ timeRange }) {
   const [radar, setRadar]     = useState(false);
   const [expandThreads, setExpandThreads] = useState(false);
   const [threadCtx, setThreadCtx] = useState(null);   // {mentionId: {reply_chain, siblings}}
+  const [allDirs, setAllDirs]     = useState([]);     // каталог направлений для фильтра
+  const [pickDirs, setPickDirs]   = useState([]);     // выбранные ключи; пусто = все
 
+  useEffect(() => { intelApi.directions().then(setAllDirs).catch(() => {}); }, []);
+
+  const dirCsv = pickDirs.join(',');
   useEffect(() => {
     let alive = true;
     setLoading(true);
     setThreadCtx(null);   // новый срез — старые треды не валидны
     intelApi.timeframe({ ...rangeParams(timeRange),
                          side: side || undefined,
-                         include_radar: radar || undefined })
+                         include_radar: radar || undefined,
+                         directions: dirCsv || undefined })
       .then(d => { if (alive) setData(d); })
       .catch(() => { if (alive) setData({ columns: [], total: 0 }); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [timeRange, side, radar]);
+  }, [timeRange, side, radar, dirCsv]);
 
   // Все id постов-ответов в срезе — кандидаты на треды.
   const replyIds = useMemo(() => {
@@ -153,6 +159,26 @@ export function IntelTimeframe({ timeRange }) {
                   title="Развернуть все треды">🧵 Треды</button>
         </div>
       </div>
+
+      {allDirs.length > 0 && (
+        <div className={styles.feedColumnBar} style={{ flexWrap: 'wrap' }}>
+          <button className={styles.colChip}
+                  data-active={pickDirs.length === 0 ? '1' : '0'}
+                  style={{ opacity: pickDirs.length === 0 ? 1 : 0.55 }}
+                  onClick={() => setPickDirs([])}>Все области</button>
+          {allDirs.map(d => {
+            const on = pickDirs.includes(d.key);
+            return (
+              <button key={d.key} className={styles.colChip}
+                      style={{ opacity: on ? 1 : 0.55 }}
+                      onClick={() => setPickDirs(prev =>
+                        on ? prev.filter(k => k !== d.key) : [...prev, d.key])}>
+                {on ? '✓ ' : ''}{d.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div className={styles.feedColumns}>
         {loading && !data

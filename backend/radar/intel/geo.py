@@ -238,7 +238,12 @@ def _actor_metonym(low: str, start: int, end: int, city: str | None) -> bool:
     m = re.search(r"([а-яёa-zії'\-]+)\s*$", pre)
     if m and m.group(1) not in _LOCATIVE_PREPS:
         return True  # «ударов Киева» — genitive actor, no locative preposition
-    if _ACTOR_VERB.search(low[end:end + 24]):
+    # Speech-verb check: skip the rest of the matched word (stem may end mid-word,
+    # e.g. «москв|а»), and never look past a sentence boundary — «Москва. Объявлена
+    # опасность…» is a location followed by a new sentence, not «Москва объявила».
+    tail = re.sub(r"^[а-яёa-zії'\-]*", "", low[end:])
+    vm = _ACTOR_VERB.search(tail[:24])
+    if vm and not re.search(r"[.!?;\n]", tail[:vm.start()]):
         return True  # «Киев заявил/решил…»
     return False
 

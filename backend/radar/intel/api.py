@@ -110,6 +110,7 @@ def intel_stream(
     from_dt: Optional[str] = None,
     to_dt: Optional[str] = None,
     direction: Optional[str] = None,
+    radar: bool = False,
     limit: int = 50,
     user: User = Depends(current_user),
     session: Session = Depends(db),
@@ -132,6 +133,9 @@ def intel_stream(
         if d:
             q = q.filter(IntelMention.direction_id == d.id)
     q = q.filter(IntelMention.hidden == False)  # noqa: E712  — soft-hidden (спам) не показываем
+    # Радар-источники живут в отдельной радарной ленте: radar=true — только они,
+    # по умолчанию — только обычные (радары из основной ленты исключены).
+    q = q.filter(IntelMention.is_radar == radar)
     rows = q.order_by(IntelMention.created_at.desc()).limit(limit).all()
     return [aggregate.event(m) for m in rows]
 
@@ -432,7 +436,8 @@ def intel_feed(
          .join(IntelMentionDirection, IntelMentionDirection.mention_id == IntelMention.id)
          .filter(IntelMentionDirection.direction_id == d.id,
                  IntelMention.created_at >= since,
-                 IntelMention.hidden == False))  # noqa: E712 — скрытые (спам) не показываем
+                 IntelMention.hidden == False,     # noqa: E712 — спам не показываем
+                 IntelMention.is_radar == False))  # noqa: E712 — радары только в радарной ленте
     if side:
         q = q.filter(IntelMention.side == side)
     rows = q.order_by(IntelMention.created_at.desc()).limit(limit).all()
@@ -497,6 +502,7 @@ def _probe_dict(p: IntelProbe, dir_key: str | None = None) -> dict:
         "side": p.side,
         "kind": p.kind,
         "subject": getattr(p, "subject", None),
+        "is_radar": bool(getattr(p, "is_radar", False)),
         "direction": dir_key,  # oblast key (None until set); resolved by caller
         "collected": p.watermark is not None,
         "last_collected": p.watermark,  # raw post_id string (None until first collect)
@@ -568,6 +574,7 @@ def intel_sources_create(
     # backlog of already-scheduled sources.
     probe = IntelProbe(platform="telegram", kind=kind, query=link, side=side,
                        subject=subject, direction_id=direction_id,
+                       is_radar=bool(body.get("is_radar", False)),
                        next_run_at=datetime(1970, 1, 1, tzinfo=timezone.utc))
     session.add(probe)
     session.commit()
@@ -598,6 +605,8 @@ def intel_sources_update(
         probe.side = side
     if "subject" in body:
         probe.subject = (body.get("subject") or "").strip() or None
+    if "is_radar" in body:
+        probe.is_radar = bool(body.get("is_radar"))
     if "direction" in body:
         probe.direction_id = _resolve_direction(session, (body.get("direction") or "").strip() or None)
     session.commit()
@@ -1009,74 +1018,39 @@ def intel_mention_context(
     return {"mention_id": mention_id, "reply_chain": reply_chain, "siblings": siblings}
 
 
-# ── Feed v2 — multi-column direction feed (m2m-based) ─────────────────────────
+# ── Feed v2 — multiplexed live SSE (m2m-based) ────────────────────────────────
 # Lives alongside /intel/stream/live (the realtime single-stream SSE). The Feed
-# v2 screen uses m2m to fan one mention out across several direction columns.
-
-def _direction_out_feed(session, d, window_h=24) -> dict:
-    since = datetime.now(timezone.utc) - timedelta(hours=window_h)
-    events_count = (session.query(IntelMentionDirection)
-                    .join(IntelMention, IntelMentionDirection.mention_id == IntelMention.id)
-                    .filter(IntelMentionDirection.direction_id == d.id,
-                            IntelMention.created_at >= since).count())
-    try:
-        terms = json.loads(getattr(d, "geo_terms", None) or "[]")
-    except (ValueError, TypeError):
-        terms = []
-    return {"id": d.id, "key": d.key, "name": d.name,
-            "kind": getattr(d, "kind", "region"),
-            "region_key": getattr(d, "region_key", None),
-            "geo_terms": terms, "events_count": events_count}
-
-
-@router.post("/intel/directions")
-def intel_create_direction(
-    body: dict,
-    user: User = Depends(current_user),
-    session: Session = Depends(db),
-):
-    key = (body.get("key") or "").strip().lower()
-    if not key:
-        raise HTTPException(400, "key required")
-    if session.query(IntelDirection).filter_by(key=key).first():
-        raise HTTPException(409, "direction already exists")
-    d = IntelDirection(
-        key=key, name=(body.get("name") or "").strip() or key, kind="custom",
-        region_key=body.get("region_key"),
-        geo_terms=json.dumps([t.lower() for t in body.get("geo_terms", [])], ensure_ascii=False),
-    )
-    session.add(d); session.commit()
-    return _direction_out_feed(session, d, 24)
-
-
-# ── Feed v2 — multi-column live SSE ───────────────────────────────────────────
+# v2 screen uses m2m to fan one mention out across several direction columns:
+# one connection carries events for ALL open columns, each tagged with the
+# direction key that matched it.
 
 @router.get("/intel/feed/stream")
 async def intel_feed_stream(
-    after_id: int = 0,
-    directions: Optional[str] = None,   # comma-separated direction keys
+    directions: str,
     side: Optional[str] = None,
+    window: str = "24h",
+    after_id: int = 0,
     authorization: str = Header(None),
 ):
-    """Server-Sent Events for the multi-column Feed v2.
-
-    Unlike /intel/stream/live (one frame per mention, tagged with its primary
-    direction_id), this fans a new mention OUT across every direction it belongs to
-    via the m2m table — the same membership the column history query uses — and tags
-    each frame with the direction KEY so the browser can route it to the right column.
-    A post matched to N columns yields N frames (same id, different `direction`)."""
+    """SSE: pushes each new mention linked (via m2m) to any of `directions`
+    (comma-separated keys) as it lands. One frame per (mention, direction) pair —
+    a post geo-matching two open columns arrives twice, once per column.
+    On reconnect the client passes the last mention id it saw via after_id."""
     _auth_user_from_header(authorization)
 
-    keys = [k for k in (directions or "").split(",") if k]
-    key_by_id: dict[int, str] = {}
-    if keys:
-        s = get_session()
-        try:
-            for d in s.query(IntelDirection).filter(IntelDirection.key.in_(keys)).all():
-                key_by_id[d.id] = d.key
-        finally:
-            s.close()
-    want_ids = set(key_by_id)
+    keys = [k.strip() for k in (directions or "").split(",") if k.strip()]
+    if not keys:
+        raise HTTPException(400, "at least one direction required")
+
+    s = get_session()
+    try:
+        dirs = s.query(IntelDirection).filter(IntelDirection.key.in_(keys)).all()
+        id_to_key = {d.id: d.key for d in dirs}
+    finally:
+        s.close()
+    if not id_to_key:
+        raise HTTPException(404, "no matching directions")
+    window_h = _hours(window)
 
     async def event_gen():
         last_id = after_id
@@ -1088,41 +1062,33 @@ async def intel_feed_stream(
                 s.close()
         yield ": connected\n\n"
         while True:
-            frames: list = []
+            payloads: list = []
             try:
                 s = get_session()
                 try:
-                    # Advance the cursor across the whole scanned window (not just rows
-                    # that matched a requested direction) so unmatched newer posts don't
-                    # get re-scanned every tick.
-                    mids = [r[0] for r in
-                            s.query(IntelMention.id)
-                             .filter(IntelMention.id > last_id, IntelMention.hidden == False)  # noqa: E712
-                             .order_by(IntelMention.id.asc()).limit(200).all()]
-                    if mids:
-                        last_id = mids[-1]
-                        q = (s.query(IntelMention, IntelMentionDirection.direction_id,
-                                     IntelMentionDirection.match_type)
-                             .join(IntelMentionDirection,
-                                   IntelMentionDirection.mention_id == IntelMention.id)
-                             .filter(IntelMention.id.in_(mids)))
-                        if want_ids:
-                            q = q.filter(IntelMentionDirection.direction_id.in_(want_ids))
-                        if side:
-                            q = q.filter(IntelMention.side == side)
-                        for m, did, mt in q.order_by(IntelMention.id.asc()).all():
-                            key = key_by_id.get(did)
-                            if not key:
-                                continue
-                            e = aggregate.event(m)
-                            e["direction"] = key
-                            e["match_type"] = mt or "source"
-                            frames.append(json.dumps(e, ensure_ascii=False))
+                    since = (datetime.now(timezone.utc) - timedelta(hours=window_h)).replace(tzinfo=None)
+                    q = (s.query(IntelMention, IntelMentionDirection.direction_id,
+                                 IntelMentionDirection.match_type)
+                         .join(IntelMentionDirection,
+                               IntelMentionDirection.mention_id == IntelMention.id)
+                         .filter(IntelMentionDirection.direction_id.in_(list(id_to_key)),
+                                 IntelMention.id > last_id,
+                                 IntelMention.created_at >= since,
+                                 IntelMention.hidden == False,     # noqa: E712
+                                 IntelMention.is_radar == False))  # noqa: E712
+                    if side:
+                        q = q.filter(IntelMention.side == side)
+                    rows = q.order_by(IntelMention.id.asc()).limit(300).all()
+                    for (m, did, mt) in rows:
+                        payloads.append((m.id, json.dumps(
+                            aggregate.feed_event(m, id_to_key.get(did, "?"), mt),
+                            ensure_ascii=False)))
                 finally:
                     s.close()
             except Exception as exc:
                 log.warning("feed SSE tick db error (skipping): %s", exc)
-            for payload in frames:
+            for mid, payload in payloads:
+                last_id = max(last_id, mid)
                 yield f"data: {payload}\n\n"
             yield ": ping\n\n"
             await asyncio.sleep(INTEL_SSE_INTERVAL)

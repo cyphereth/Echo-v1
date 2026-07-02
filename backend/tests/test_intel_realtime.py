@@ -188,3 +188,74 @@ def test_store_realtime_reply_resolves_thread_locally():
     assert r.reply_to_id == parent.id
     chain = s.query(IntelThreadContext).filter_by(mention_id=r.id, role="parent").all()
     assert [c.tg_msg_id for c in chain] == ["199"]
+
+
+def test_store_realtime_writes_m2m_rows():
+    """Realtime-пост получает m2m-теги направлений (source + geo) — как у поллера.
+    Без них пост НИКОГДА не попадает в колонки Ленты v2 (регрессия: ночные сообщения
+    гео-чатов были в основной ленте, но отсутствовали в v2)."""
+    from radar.intel import seed
+    from radar.intel.realtime import store_realtime_post
+    from radar.intel.models import IntelMention, IntelMentionDirection, IntelDirection
+    s = _sess()
+    seed.ensure_default_directions(s)
+    dnipro = s.query(IntelDirection).filter_by(key="dnipro").first()
+    text = "взрыв в днепре, работает пво по всему городу сейчас"
+    assert store_realtime_post(s, _post("c/501", text), "ua", "chat",
+                               {"взрыв": "strong", "пво": "strong"}) is True
+    s.commit()
+    m = s.query(IntelMention).filter_by(post_id="c/501").one()
+    rows = s.query(IntelMentionDirection).filter_by(mention_id=m.id).all()
+    assert rows, "realtime post must get m2m direction rows for Feed v2"
+    assert any(r.match_type == "source" for r in rows)
+    if dnipro is not None:
+        assert any(r.direction_id == dnipro.id for r in rows)
+
+
+def test_store_realtime_chat_reply_admitted_when_parent_stored():
+    """Короткий ответ без слов лексикона допускается, если родитель уже в БД —
+    продолжение живого обсуждения («громко было?» → «нет, ничего не слышала»)."""
+    from radar.intel import seed
+    from radar.intel.realtime import store_realtime_post
+    from radar.intel.models import IntelMention
+    s = _sess()
+    seed.ensure_default_directions(s)
+    lex = {"взрыв": "strong"}
+    parent = _post("dnipro_chat/100", "взрыв был слышен в центре города, очень громко")
+    assert store_realtime_post(s, parent, "ua", "chat", lex) is True
+    s.commit()
+    reply = _post("dnipro_chat/101", "нет, ничего не слышала, окна закрыты")
+    reply.reply_to_tg_id = "100"
+    assert store_realtime_post(s, reply, "ua", "chat", lex) is True
+    s.commit()
+    assert s.query(IntelMention).filter_by(post_id="dnipro_chat/101").count() == 1
+
+
+def test_store_realtime_chat_reply_dropped_when_parent_unknown():
+    """Тот же короткий ответ БЕЗ сохранённого родителя по-прежнему отсеивается."""
+    from radar.intel import seed
+    from radar.intel.realtime import store_realtime_post
+    from radar.intel.models import IntelMention
+    s = _sess()
+    seed.ensure_default_directions(s)
+    reply = _post("dnipro_chat/201", "нет, ничего не слышала, окна закрыты")
+    reply.reply_to_tg_id = "999"
+    assert store_realtime_post(s, reply, "ua", "chat", {"взрыв": "strong"}) is False
+    assert s.query(IntelMention).filter_by(post_id="dnipro_chat/201").count() == 0
+
+
+def test_store_realtime_stamps_is_radar():
+    """Флаг радар-источника штампуется на упоминание — радары живут только в
+    радарной ленте ситуационного центра."""
+    from radar.intel import seed
+    from radar.intel.realtime import store_realtime_post
+    from radar.intel.models import IntelMention
+    s = _sess()
+    seed.ensure_default_directions(s)
+    text = "пуски крылатых ракет с акватории, работает пво в области"
+    assert store_realtime_post(s, _post("radar/1", text), "ua", "channel",
+                               {"пуски": "strong", "пво": "strong"},
+                               is_radar=True) is True
+    s.commit()
+    m = s.query(IntelMention).filter_by(post_id="radar/1").one()
+    assert m.is_radar is True

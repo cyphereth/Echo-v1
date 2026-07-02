@@ -107,7 +107,9 @@ def run_intel_tick(session, tg_provider, web_provider=None, embed=None) -> None:
         log.exception("intel geo retag failed (skipped)")
         session.rollback()
     dir_ids = [d for (d,) in session.query(IntelMention.direction_id)
-               .filter(IntelMention.incident_id.is_(None), IntelMention.direction_id.isnot(None)).distinct().all() if d]
+               .filter(IntelMention.incident_id.is_(None), IntelMention.direction_id.isnot(None),
+                       IntelMention.is_radar == False)  # noqa: E712 — радары не кластеризуются
+               .distinct().all() if d]
     for did in dir_ids:
         try:
             stories.update_stories(session, did, embed=embed)

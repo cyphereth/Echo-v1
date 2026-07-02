@@ -169,6 +169,12 @@ def cluster_owner(session, owner_id: int, models, embed: Callable,
     if is_spam_attr is not None:
         q = q.filter(is_spam_attr.is_(False))
 
+    # Radar-source posts (intel domain) live only in the dedicated radar feed —
+    # they are high-volume tracker chatter and must not form stories.
+    is_radar_attr = getattr(models.Mention, "is_radar", None)
+    if is_radar_attr is not None:
+        q = q.filter(is_radar_attr.is_(False))
+
     new = q.all()
     if not new:
         return

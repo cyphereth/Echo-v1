@@ -26,10 +26,12 @@ export const intelApi = {
 
   // ── Feed v2 (multi-column direction feed) ──────────────────────────────────
   feed:            (direction, params = {}) => passthrough('feed', { direction, ...params }),
+  // Один SSE-коннект на все открытые колонки; каждый кадр помечен direction-ключом.
+  // Возвращает { close() } (интерфейс EventSource-подобный — вызывающий закрывает).
+  feedStream:      (directions, params, onEvent) => openFeedStream(directions, params, onEvent),
   createDirection: (body) => request('/intel/directions', { method: 'POST', body: JSON.stringify(body) }),
   getLayout:       ()     => request('/intel/feed/layout'),
   saveLayout:      (body) => request('/intel/feed/layout', { method: 'PUT', body: JSON.stringify(body) }),
-  feedStream:      (keys, params = {}, onEvent) => feedStream(keys, params, onEvent),
 
   sources:   (params)         => passthrough('sources', params),
   addSource: (body)           => request('/intel/sources', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }),
@@ -148,19 +150,19 @@ export function streamLiveEvents({ afterId = 0, afterAlertId = 0, direction, onE
   };
 }
 
-// ── Feed v2 multi-column live stream (SSE) ──────────────────────────────────
-// Opens ONE long-lived fetch stream to /intel/feed/stream for all active columns.
-// The backend fans each new mention out across the directions it belongs to (m2m)
-// and tags every frame with the direction KEY, so onEvent(ev) gets ev.direction =
-// the column key. Uses fetch (not EventSource) so the Bearer token rides in the
-// header. Auto-reconnects from the last id seen. Returns { close() }. No-op in mock.
-export function feedStream(directionKeys, { side } = {}, onEvent) {
-  if (INTEL_USE_MOCK || !directionKeys || !directionKeys.length) return { close() {} };
+// ── Feed v2 live stream (SSE) ───────────────────────────────────────────────
+// Opens a long-lived fetch stream to /intel/feed/stream multiplexing all open
+// columns. Same transport pattern as streamLiveEvents (fetch, not EventSource,
+// so the Bearer token rides in the Authorization header; auto-reconnect resuming
+// from the last mention id). Returns { close() }.
+export function openFeedStream(directions, params = {}, onEvent) {
+  if (INTEL_USE_MOCK || !directions?.length) return { close() {} };
   let stopped = false;
   let lastId = 0;
   let ctrl = null;
   let reader = null;
   const STALL_MS = 8000;
+
   const abort = () => {
     try { reader?.cancel(); } catch { /* ignore */ }
     try { ctrl?.abort(); } catch { /* ignore */ }
@@ -174,10 +176,11 @@ export function feedStream(directionKeys, { side } = {}, onEvent) {
       let watchdog = setTimeout(abort, STALL_MS);
       try {
         const token = getToken();
-        const params = { after_id: String(lastId), directions: directionKeys.join(',') };
-        if (side) params.side = side;
-        const qs = new URLSearchParams(params).toString();
-        const res = await fetch(`/intel/feed/stream?${qs}`, {
+        const qp = { directions: directions.join(','), after_id: String(lastId) };
+        for (const [k, v] of Object.entries(params || {})) {
+          if (v != null && v !== '') qp[k] = String(v);
+        }
+        const res = await fetch(`/intel/feed/stream?${new URLSearchParams(qp)}`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           signal: ctrl.signal,
         });
@@ -209,7 +212,7 @@ export function feedStream(directionKeys, { side } = {}, onEvent) {
           }
         }
       } catch {
-        if (stopped) return;
+        if (stopped) break;
         backoff = Math.min(backoff * 1.5, 10000);
       } finally {
         clearTimeout(watchdog);
@@ -220,7 +223,7 @@ export function feedStream(directionKeys, { side } = {}, onEvent) {
   }
 
   loop();
-  return { close() { stopped = true; if (ctrl) ctrl.abort(); } };
+  return { close() { stopped = true; abort(); } };
 }
 
 // ── Витринные форматтеры ────────────────────────────────────────────────────

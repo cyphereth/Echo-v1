@@ -223,6 +223,34 @@ def chat_message_relevant(text: str, author: str, lexicon_tiers=(),
     return kw_hit or keyword_relevant(stripped, lexicon_tiers, geo_hit=geo_hit)
 
 
+def chat_reply_relevant(text: str, author: str) -> bool:
+    """Гейт для ОТВЕТА на уже сохранённое упоминание: продолжение живого обсуждения
+    («слышала?» — «нет», «громковато как-то») ценно само по себе, даже без слов из
+    лексикона. Остаются только жёсткие гарды: непустой текст с буквами и не продавец.
+    Длинный noise-гейт (MIN_TEXT_LEN) намеренно НЕ применяется — ответы короткие."""
+    stripped = (text or "").strip()
+    if not stripped or not re.search(r"[a-zA-Zа-яА-ЯёЁ]", stripped):
+        return False
+    if looks_like_ad_cheap(stripped, author, min_len=0):
+        return False
+    return True
+
+
+def parent_mention_stored(session, post, platform: str = "telegram") -> bool:
+    """True, если родитель этого чат-ответа уже лежит в intel_mentions.
+
+    post_id чат-сообщения имеет вид "namespace/msgid"; родитель того же чата —
+    "namespace/<reply_to_tg_id>". Каналы (numeric post_id без namespace) не участвуют."""
+    rid = getattr(post, "reply_to_tg_id", None)
+    pid = (post.post_id or "")
+    if not rid or "/" not in pid:
+        return False
+    ns = pid.rsplit("/", 1)[0]
+    return (session.query(IntelMention.id)
+            .filter_by(platform=platform, post_id=f"{ns}/{rid}")
+            .first() is not None)
+
+
 # ── Feed v2 — m2m direction tagging ──────────────────────────────────────────
 
 def _write_m2m_for_mention(session, mention) -> None:
@@ -355,10 +383,13 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                 text = maybe_translate(post.text or "")
                 author = post.author or ""
 
-                # Hard noise filter for chat
+                # Hard noise filter for chat. Ответ на уже сохранённое сообщение —
+                # продолжение живого обсуждения, допускаем и без лексикона.
                 if not chat_message_relevant(text, author, lexicon_tiers, keywords,
                                              geo_hit=_geo_hit(text)):
-                    continue
+                    if not (chat_reply_relevant(text, author)
+                            and parent_mention_stored(session, post, probe.platform)):
+                        continue
 
                 # Spam stop-word layer (fast, deterministic)
                 if blocked_by_word(text, blocklist):
@@ -378,6 +409,7 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                     created_at=post.created_at,
                     reply_to_tg_id=getattr(post, "reply_to_tg_id", None),
                     media=getattr(post, "media", None),
+                    is_radar=bool(getattr(probe, "is_radar", False)),
                 ))
 
         else:
@@ -447,6 +479,7 @@ def collect_probe(session: Session, probe: IntelProbe, provider) -> int:
                         views=getattr(post, "likes", 0) or 0,
                         created_at=post.created_at,
                         media=getattr(post, "media", None),
+                        is_radar=bool(getattr(probe, "is_radar", False)),
                     ))
 
                 next_cursor = getattr(page, "next_cursor", None) or getattr(page, "cursor", None)

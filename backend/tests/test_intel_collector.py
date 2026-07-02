@@ -77,8 +77,10 @@ def test_collect_probe_writes_geo_m2m_row_for_text_mention():
     s.add(IntelLexicon(term="обстрел", meaning="обстрел", category="events")); s.commit()
     p = IntelProbe(platform="telegram", kind="channel", query="@ua", side="ua"); s.add(p); s.commit()
     # Post mentions both Брянск and Харьков — both seeded with geo_terms.
+    # Русский текст: тест должен быть офлайн-детерминированным (украинский вариант
+    # требовал сетевого uk→ru перевода, чтобы «обстріл» совпал с термином «обстрел»).
     post = SimpleNamespace(post_id="@ua/9", author="@ua",
-                           text="зафіксовано обстріл під Брянськом, також дані по харькову",
+                           text="зафиксирован обстрел под Брянском, также данные по харькову",
                            followers=0, created_at=datetime.now(timezone.utc), hashtags=[], likes=0)
     prov = SimpleNamespace(search=lambda q, kind, cursor: SimpleNamespace(posts=[post], cursor=None))
     n = collector.collect_probe(s, p, prov)

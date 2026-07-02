@@ -108,7 +108,8 @@ def event(m) -> dict:
             "sig": content_sig(m.text),
             "is_reply": bool(getattr(m, "reply_to_tg_id", None)),
             "reply_to_tg_id": getattr(m, "reply_to_tg_id", None),
-            "media": getattr(m, "media", None)}
+            "media": getattr(m, "media", None),
+            "is_radar": bool(getattr(m, "is_radar", False))}
 
 
 def feed_event(m, direction_key, match_type=None) -> dict:
@@ -166,7 +167,8 @@ def compute_overview(session, window_h=24) -> dict:
     # IntelStoryPoint.bucket_start is stored as naive UTC — strip tz for SQL comparison.
     since_naive = since.replace(tzinfo=None)
     events = session.query(func.count(IntelMention.id)).filter(
-        IntelMention.created_at >= since_naive, IntelMention.hidden == False).scalar() or 0  # noqa: E712
+        IntelMention.created_at >= since_naive, IntelMention.hidden == False,  # noqa: E712
+        IntelMention.is_radar == False).scalar() or 0  # noqa: E712 — радары считаем отдельно
     # Only stories that had activity within the window.
     stories = (session.query(IntelStory)
                .filter(IntelStory.status == "active", IntelStory.last_seen_at >= since_naive).all())

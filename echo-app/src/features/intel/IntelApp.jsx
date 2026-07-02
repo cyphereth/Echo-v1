@@ -1,11 +1,10 @@
-// Intel closed contour — shell + 3 экрана.
-// Situational Center (home) / Stories / Operational Board.
+// Intel closed contour — shell + экраны.
+// Situational Center (home) / Stories / Sources / Antispam / Feed v2.
 // Витринная тема «военный диспетчер»: темнее, координатная сетка, моно-данные.
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon } from '../../core/components/icons';
 import { IntelHome } from './components/IntelHome';
 import { IntelStories } from './components/IntelStories';
-import { IntelBoard } from './components/IntelBoard';
 import { IntelFeed } from './components/IntelFeed';
 import { IntelSources } from './components/IntelSources';
 import { IntelSpam } from './components/IntelSpam';
@@ -19,10 +18,9 @@ import styles from './intel.module.css';
 const SCREENS = [
   { key: 'home',    label: 'Ситуационный центр', icon: 'radio',    hotkey: '1' },
   { key: 'stories', label: 'Сюжеты',             icon: 'activity', hotkey: '2' },
-  { key: 'board',   label: 'Оперативная доска',  icon: 'bar3',     hotkey: '3' },
-  { key: 'sources', label: 'Источники',           icon: 'link',     hotkey: '4' },
-  { key: 'spam',    label: 'Антиспам',             icon: 'search',   hotkey: '5' },
-  { key: 'feed',    label: 'Лента событий v2',   icon: 'radio',    hotkey: '6' },
+  { key: 'sources', label: 'Источники',           icon: 'link',     hotkey: '3' },
+  { key: 'spam',    label: 'Антиспам',             icon: 'search',   hotkey: '4' },
+  { key: 'feed',    label: 'Лента событий v2',   icon: 'radio',    hotkey: '5' },
 ];
 
 function NavItem({ item, active, onClick }) {
@@ -143,7 +141,7 @@ export function IntelApp({ onExit }) {
     } else if (a.direction) {
       setOpenDirection(a.direction); setOpenStoryId(null);
     } else {
-      setScreen(a.scope === 'story' ? 'stories' : 'board');
+      setScreen('stories');
       return;
     }
     setNavToken(t => t + 1);
@@ -211,8 +209,6 @@ export function IntelApp({ onExit }) {
                      onOpenStory={(id) => { setOpenStoryId(id ?? null); setOpenDirection(null); setNavToken(t => t + 1); setScreen('stories'); }} />
         ) : screen === 'stories' ? (
           <IntelStories timeRange={timeRange} openStoryId={openStoryId} openDirection={openDirection} navToken={navToken} />
-        ) : screen === 'board' ? (
-          <IntelBoard timeRange={timeRange} onOpenDir={(dirKey) => { setOpenDirection(dirKey ?? null); setOpenStoryId(null); setNavToken(t => t + 1); setScreen('stories'); }} />
         ) : screen === 'sources' ? (
           <IntelSources />
         ) : screen === 'feed' ? (

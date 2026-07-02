@@ -170,3 +170,100 @@ def test_put_layout_403_for_non_admin(tmp_path, monkeypatch):
                                 "Content-Type": "application/json"},
                        json={"direction_keys": ["bryansk"]})
         assert r.status_code == 403
+
+
+def test_feed_excludes_hidden_and_radar(tmp_path, monkeypatch):
+    """Колонка Ленты v2 не показывает soft-hidden спам и посты радар-источников."""
+    monkeypatch.setenv("ECHO_DB", f"sqlite:///{tmp_path / 'feed7.db'}")
+    import sys
+    for mod in list(sys.modules):
+        if mod.startswith("radar.core.db") or mod == "radar.app":
+            del sys.modules[mod]
+    from fastapi.testclient import TestClient
+    from radar.app import app
+    with TestClient(app) as client:
+        client.post("/auth/register", json={"email": "op@test.local", "password": "secret123"})
+        tok = client.post("/auth/login", json={"email": "op@test.local", "password": "secret123"}).json()["token"]
+        from radar.core.db import SessionLocal
+        from radar.intel.models import IntelDirection, IntelMention, IntelMentionDirection
+        from datetime import datetime, timezone
+        with SessionLocal() as s:
+            d = s.query(IntelDirection).filter_by(key="bryansk").first()
+            now = datetime.now(timezone.utc)
+            rows = [
+                IntelMention(direction_id=d.id, platform="telegram", post_id="feed-ok",
+                             author="@ua", side="ua", text="обычный пост", created_at=now),
+                IntelMention(direction_id=d.id, platform="telegram", post_id="feed-hid",
+                             author="@ua", side="ua", text="скрытый спам", created_at=now,
+                             hidden=True),
+                IntelMention(direction_id=d.id, platform="telegram", post_id="feed-rad",
+                             author="@radar", side="ua", text="радарный трек", created_at=now,
+                             is_radar=True),
+            ]
+            s.add_all(rows); s.flush()
+            for m in rows:
+                s.add(IntelMentionDirection(mention_id=m.id, direction_id=d.id, match_type="source"))
+            s.commit()
+        r = client.get("/intel/feed?direction=bryansk",
+                       headers={"Authorization": f"Bearer {tok}"})
+        assert r.status_code == 200, r.text
+        ids = {e["post_id"] for e in r.json()}
+        assert ids == {"feed-ok"}
+
+
+def test_stream_radar_param_splits_feeds(tmp_path, monkeypatch):
+    """/intel/stream: по умолчанию — только обычные посты; radar=true — только радары."""
+    monkeypatch.setenv("ECHO_DB", f"sqlite:///{tmp_path / 'feed8.db'}")
+    import sys
+    for mod in list(sys.modules):
+        if mod.startswith("radar.core.db") or mod == "radar.app":
+            del sys.modules[mod]
+    from fastapi.testclient import TestClient
+    from radar.app import app
+    with TestClient(app) as client:
+        client.post("/auth/register", json={"email": "op@test.local", "password": "secret123"})
+        tok = client.post("/auth/login", json={"email": "op@test.local", "password": "secret123"}).json()["token"]
+        from radar.core.db import SessionLocal
+        from radar.intel.models import IntelDirection, IntelMention
+        from datetime import datetime, timezone
+        with SessionLocal() as s:
+            d = s.query(IntelDirection).filter_by(key="bryansk").first()
+            now = datetime.now(timezone.utc)
+            s.add_all([
+                IntelMention(direction_id=d.id, platform="telegram", post_id="s-plain",
+                             author="@ua", side="ua", text="обычный пост", created_at=now),
+                IntelMention(direction_id=d.id, platform="telegram", post_id="s-radar",
+                             author="@radar", side="ua", text="радарный трек", created_at=now,
+                             is_radar=True),
+            ])
+            s.commit()
+        hdr = {"Authorization": f"Bearer {tok}"}
+        plain = {e["post_id"] for e in client.get("/intel/stream", headers=hdr).json()}
+        radar = {e["post_id"] for e in client.get("/intel/stream?radar=true", headers=hdr).json()}
+        assert "s-plain" in plain and "s-radar" not in plain
+        assert radar == {"s-radar"}
+
+
+def test_sources_is_radar_roundtrip(tmp_path, monkeypatch):
+    """POST /intel/sources принимает is_radar, PATCH переключает его."""
+    monkeypatch.setenv("ECHO_DB", f"sqlite:///{tmp_path / 'feed9.db'}")
+    import sys
+    for mod in list(sys.modules):
+        if mod.startswith("radar.core.db") or mod == "radar.app":
+            del sys.modules[mod]
+    from fastapi.testclient import TestClient
+    from radar.app import app
+    with TestClient(app) as client:
+        client.post("/auth/register", json={"email": "op@test.local", "password": "secret123"})
+        tok = client.post("/auth/login", json={"email": "op@test.local", "password": "secret123"}).json()["token"]
+        hdr = {"Authorization": f"Bearer {tok}", "Content-Type": "application/json"}
+        r = client.post("/intel/sources", headers=hdr,
+                        json={"link": "@radar_channel", "side": "ua", "kind": "channel",
+                              "is_radar": True})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["is_radar"] is True
+        sid = body["id"]
+        r2 = client.patch(f"/intel/sources/{sid}", headers=hdr, json={"is_radar": False})
+        assert r2.status_code == 200
+        assert r2.json()["is_radar"] is False

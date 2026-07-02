@@ -34,10 +34,26 @@ function KindBadge({ kind, onToggle, busy }) {
   );
 }
 
+// Радар-источник: его посты идут только в радарную ленту ситуационного центра.
+function RadarBadge({ on, onToggle, busy }) {
+  const color = on ? '#FFB23E' : '#4A6378';
+  return (
+    <span
+      className={styles.srcBadge}
+      style={{ color, background: on ? 'rgba(255,178,62,.12)' : 'rgba(74,99,120,.10)', border: `1px solid ${color}40`, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.5 : 1 }}
+      onClick={busy ? undefined : onToggle}
+      title={on ? 'Радар: посты только в радарной ленте. Клик — снять флаг.' : 'Не радар. Клик — пометить радаром.'}
+    >
+      {busy ? '…' : '📡 РАДАР'}
+    </span>
+  );
+}
+
 export function IntelSources() {
   const [sources, setSources]     = useState([]);
   const [loading, setLoading]     = useState(true);
   const [sideFilter, setSideFilter] = useState('all');
+  const [radarFilter, setRadarFilter] = useState('all'); // all | radar | plain
   const [query, setQuery]         = useState('');
 
   // Add-form state
@@ -46,6 +62,7 @@ export function IntelSources() {
   const [kind, setKind]       = useState('channel');
   const [subject, setSubject] = useState('');
   const [direction, setDirection] = useState('');
+  const [isRadar, setIsRadar] = useState(false);
   const [adding, setAdding]   = useState(false);
   const [deleting, setDeleting] = useState(null); // id being deleted
   const [toggling, setToggling] = useState(null); // id whose kind is being switched
@@ -73,14 +90,31 @@ export function IntelSources() {
     setErr('');
     setAdding(true);
     try {
-      await intelApi.addSource({ link: link.trim(), side, kind, subject: subject.trim(), direction });
+      await intelApi.addSource({ link: link.trim(), side, kind, subject: subject.trim(), direction, is_radar: isRadar });
       setLink('');
       setSubject('');
+      setIsRadar(false);
       await load();
     } catch (e) {
       setErr(e.message || 'Ошибка добавления');
     } finally {
       setAdding(false);
+    }
+  }
+
+  async function handleToggleRadar(src) {
+    if (toggling) return;
+    const next = !src.is_radar;
+    setToggling(src.id);
+    try {
+      const updated = await intelApi.updateSource(src.id, { is_radar: next });
+      setSources(prev => prev.map(s =>
+        s.id === src.id ? { ...s, ...(updated && updated.id ? updated : { is_radar: next }) } : s
+      ));
+    } catch (e) {
+      setErr(e.message || 'Ошибка смены радар-флага');
+    } finally {
+      setToggling(null);
     }
   }
 
@@ -136,6 +170,7 @@ export function IntelSources() {
   const q = query.trim().toLowerCase();
   const visible = sources.filter(s =>
     (sideFilter === 'all' || s.side === sideFilter) &&
+    (radarFilter === 'all' || (radarFilter === 'radar' ? !!s.is_radar : !s.is_radar)) &&
     (!q || String(s.handle || s.id).toLowerCase().includes(q))
   );
 
@@ -158,6 +193,17 @@ export function IntelSources() {
                 onClick={() => setSideFilter(s)}
               >
                 {s === 'all' ? 'ВСЕ' : (SIDE[s]?.label || s.toUpperCase())}
+              </button>
+            ))}
+            <span style={{ width: 8 }} />
+            {[['all', 'ВСЕ ТИПЫ'], ['radar', '📡 РАДАРЫ'], ['plain', 'ОБЫЧНЫЕ']].map(([k, label]) => (
+              <button
+                key={k}
+                className={styles.filterChip}
+                data-active={radarFilter === k ? '1' : '0'}
+                onClick={() => setRadarFilter(k)}
+              >
+                {label}
               </button>
             ))}
           </div>
@@ -211,6 +257,18 @@ export function IntelSources() {
               <option key={k} value={k}>{name}</option>
             ))}
           </select>
+          <label
+            title="Радар-источник: посты только в радарной ленте ситуационного центра"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: isRadar ? '#FFB23E' : '#8DA3B8', cursor: 'pointer', whiteSpace: 'nowrap' }}
+          >
+            <input
+              type="checkbox"
+              checked={isRadar}
+              onChange={e => setIsRadar(e.target.checked)}
+              disabled={adding}
+            />
+            📡 радар
+          </label>
           <button
             type="submit"
             className={styles.srcAddBtn}
@@ -247,6 +305,7 @@ export function IntelSources() {
               <div key={src.id} className={styles.srcRow}>
                 <SideBadge side={src.side} />
                 <KindBadge kind={src.kind} busy={toggling === src.id} onToggle={() => handleToggleKind(src)} />
+                <RadarBadge on={!!src.is_radar} busy={toggling === src.id} onToggle={() => handleToggleRadar(src)} />
                 <span className={styles.srcHandle}>
                   {src.handle || src.id}
                 </span>

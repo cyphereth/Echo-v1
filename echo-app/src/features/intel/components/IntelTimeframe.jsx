@@ -1,14 +1,21 @@
 // Таймфрейм — статичный архив за выбранный период.
 // Колонки по направлению (сортировка по числу постов), внутри колонки посты
 // сгруппированы по источнику-чату. Группировку делает backend (/intel/timeframe),
-// клиент только рисует. Треды сворачиваемы; тумблер «развернуть все» поднимает их
-// разом через forceOpen у ThreadContext. Никакого SSE — это снимок, не live.
-import { useEffect, useState } from 'react';
+// клиент только рисует. Никакого SSE — это снимок, не live.
+//
+// Производительность:
+//  • backend отдаёт до limit_per_source постов на источник (+has_more), не всё разом;
+//  • источники в колонке рендерятся порциями («показать ещё N источников»), чтобы не
+//    вешать в DOM тысячи узлов на первом кадре;
+//  • «развернуть все треды» тянет контекст ОДНИМ батч-запросом (/intel/mentions/context)
+//    вместо запроса на каждый пост, и раздаёт готовые данные в ThreadContext.
+import { useEffect, useMemo, useState } from 'react';
 import { intelApi } from '../api';
 import { PostCard } from './PostCard';
 import styles from '../intel.module.css';
 
 const SIDES = [[null, '🇷🇺+🇺🇦'], ['ru', '🇷🇺'], ['ua', '🇺🇦']];
+const SOURCES_PAGE = 12;   // сколько источников в колонке показываем за раз
 
 // timeRange → query-параметры для /intel/timeframe.
 function rangeParams(timeRange) {
@@ -24,7 +31,7 @@ function fmtRange(from_dt, to_dt) {
   return `${f(from_dt)} → ${f(to_dt)}`;
 }
 
-function SourceGroup({ source, expandThreads }) {
+function SourceGroup({ source, expandThreads, threadCtx }) {
   return (
     <div style={{ marginBottom: 10 }}>
       <div style={{
@@ -34,11 +41,43 @@ function SourceGroup({ source, expandThreads }) {
         position: 'sticky', top: 0, background: '#0B121C', zIndex: 1,
       }}>
         <span style={{ fontWeight: 700 }}>{source.handle}</span>
-        <span style={{ color: '#6A8499' }}>· {source.count}</span>
+        <span style={{ color: '#6A8499' }}>· {source.count}{source.has_more ? '+' : ''}</span>
       </div>
       {source.posts.map(e => (
-        <PostCard key={e.id} event={e} expandThreads={expandThreads} />
+        <PostCard key={e.id} event={e} expandThreads={expandThreads}
+                  threadData={threadCtx ? threadCtx[e.id] || null : null} />
       ))}
+      {source.has_more && (
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#6A8499', padding: '2px' }}>
+          …ещё {source.count - source.posts.length} (сузь период)
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Column({ col, expandThreads, threadCtx }) {
+  const [visible, setVisible] = useState(SOURCES_PAGE);
+  const shown = col.sources.slice(0, visible);
+  const rest = col.sources.length - shown.length;
+  return (
+    <div className={styles.feedColumn}>
+      <div className={styles.feedColumnHead}>
+        <span className={styles.feedColumnName}>{col.direction.name}</span>
+        <span className={styles.feedColumnCount}>{col.count}</span>
+      </div>
+      <div className={styles.feedColumnBody}>
+        {shown.map(src => (
+          <SourceGroup key={src.handle} source={src}
+                       expandThreads={expandThreads} threadCtx={threadCtx} />
+        ))}
+        {rest > 0 && (
+          <button className={styles.feedResetBtn} style={{ width: '100%', marginTop: 6 }}
+                  onClick={() => setVisible(v => v + SOURCES_PAGE)}>
+            показать ещё {Math.min(rest, SOURCES_PAGE)} источн. ({rest})
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -49,10 +88,12 @@ export function IntelTimeframe({ timeRange }) {
   const [side, setSide]       = useState(null);
   const [radar, setRadar]     = useState(false);
   const [expandThreads, setExpandThreads] = useState(false);
+  const [threadCtx, setThreadCtx] = useState(null);   // {mentionId: {reply_chain, siblings}}
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
+    setThreadCtx(null);   // новый срез — старые треды не валидны
     intelApi.timeframe({ ...rangeParams(timeRange),
                          side: side || undefined,
                          include_radar: radar || undefined })
@@ -61,6 +102,31 @@ export function IntelTimeframe({ timeRange }) {
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [timeRange, side, radar]);
+
+  // Все id постов-ответов в срезе — кандидаты на треды.
+  const replyIds = useMemo(() => {
+    if (!data) return [];
+    const ids = [];
+    for (const c of data.columns) for (const s of c.sources) for (const p of s.posts) {
+      if (p.is_reply) ids.push(p.id);
+    }
+    return ids;
+  }, [data]);
+
+  // Тумблер «треды»: один батч-запрос на весь срез (чанки по 500), готовые данные
+  // раздаём постам через threadData → ThreadContext не ходит в сеть на каждый пост.
+  useEffect(() => {
+    if (!expandThreads || threadCtx || replyIds.length === 0) return;
+    let alive = true;
+    const chunks = [];
+    for (let i = 0; i < replyIds.length; i += 500) chunks.push(replyIds.slice(i, i + 500));
+    Promise.all(chunks.map(c => intelApi.mentionsContext(c).catch(() => ({}))))
+      .then(parts => {
+        if (!alive) return;
+        setThreadCtx(Object.assign({}, ...parts));
+      });
+    return () => { alive = false; };
+  }, [expandThreads, replyIds, threadCtx]);
 
   const columns = data?.columns || [];
 
@@ -94,17 +160,8 @@ export function IntelTimeframe({ timeRange }) {
           : columns.length === 0
             ? <div className={styles.feedEmpty}>Нет сообщений за выбранный период.</div>
             : columns.map(col => (
-                <div key={col.direction.key} className={styles.feedColumn}>
-                  <div className={styles.feedColumnHead}>
-                    <span className={styles.feedColumnName}>{col.direction.name}</span>
-                    <span className={styles.feedColumnCount}>{col.count}</span>
-                  </div>
-                  <div className={styles.feedColumnBody}>
-                    {col.sources.map(src => (
-                      <SourceGroup key={src.handle} source={src} expandThreads={expandThreads} />
-                    ))}
-                  </div>
-                </div>
+                <Column key={col.direction.key} col={col}
+                        expandThreads={expandThreads} threadCtx={threadCtx} />
               ))}
       </div>
     </div>

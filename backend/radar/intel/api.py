@@ -456,7 +456,7 @@ def intel_timeframe(
     side: Optional[str] = None,
     directions: Optional[str] = None,
     include_radar: bool = False,
-    limit_per_source: int = 200,
+    limit_per_source: int = 30,
     user: User = Depends(current_user),
     session: Session = Depends(db),
 ):
@@ -527,6 +527,9 @@ def intel_timeframe(
     for dir_id, col in cols.items():
         d = dir_meta.get(dir_id)
         sources = sorted(col["sources"].values(), key=lambda s: s["last_at"] or "", reverse=True)
+        for s in sources:
+            # posts capped at limit_per_source; flag so the client can offer «показать ещё».
+            s["has_more"] = s["count"] > len(s["posts"])
         columns.append({
             "direction": {"key": d.key if d else str(dir_id), "name": d.name if d else str(dir_id)},
             "count": sum(s["count"] for s in sources),
@@ -1233,6 +1236,50 @@ def intel_mention_context(
         key=lambda x: x["created_at"],
     )
     return {"mention_id": mention_id, "reply_chain": reply_chain, "siblings": siblings}
+
+
+@router.get("/intel/mentions/context")
+def intel_mentions_context_batch(
+    ids: str,
+    session: Session = Depends(db),
+    user: User = Depends(current_user),
+):
+    """Locally-stored thread context for MANY mentions in one round trip.
+
+    Powers «развернуть все треды» on the Timeframe screen: instead of N separate
+    /mention/{id}/context calls (a request storm), the client sends every visible
+    reply id and gets back {id: {reply_chain, siblings}}. Unlike the single-mention
+    endpoint this does NOT do a synchronous Telegram enrich — a batch could trigger
+    dozens of round trips. Not-yet-fetched threads come back empty; the background
+    enrich pass fills them, and a per-post click still enriches on demand.
+    """
+    id_list = []
+    for tok in (ids or "").split(","):
+        tok = tok.strip()
+        if tok.isdigit():
+            id_list.append(int(tok))
+    if not id_list:
+        return {}
+    id_list = id_list[:500]  # bound the batch
+
+    rows = (session.query(IntelThreadContext)
+            .filter(IntelThreadContext.mention_id.in_(id_list))
+            .order_by(IntelThreadContext.role, IntelThreadContext.depth.asc())
+            .all())
+    by_mention: dict[int, dict] = {}
+    for r in rows:
+        bucket = by_mention.setdefault(r.mention_id, {"parent": [], "sibling": []})
+        entry = {"tg_msg_id": r.tg_msg_id, "depth": r.depth, "author": r.author,
+                 "text": r.text, "media": r.media,
+                 "created_at": aggregate._aware(r.created_at).isoformat()}
+        bucket.setdefault(r.role, []).append(entry)
+
+    out = {}
+    for mid, b in by_mention.items():
+        reply_chain = sorted(b.get("parent", []), key=lambda x: x["depth"], reverse=True)
+        siblings = sorted(b.get("sibling", []), key=lambda x: x["created_at"])
+        out[str(mid)] = {"reply_chain": reply_chain, "siblings": siblings}
+    return out
 
 
 # ── Feed v2 — multiplexed live SSE (m2m-based) ────────────────────────────────

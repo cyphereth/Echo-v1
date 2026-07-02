@@ -5,9 +5,9 @@ import { useState, useEffect } from 'react';
 import { intelApi } from '../api';
 import MediaPreview from './MediaPreview';
 
-export function ThreadContext({ mentionId, compact = false, forceOpen = false }) {
+export function ThreadContext({ mentionId, compact = false, forceOpen = false, data = null }) {
   const [open, setOpen] = useState(false);
-  const [ctx, setCtx] = useState(null);
+  const [ctx, setCtx] = useState(data);
   const [loading, setLoading] = useState(false);
 
   function toggle() {
@@ -20,21 +20,25 @@ export function ThreadContext({ mentionId, compact = false, forceOpen = false })
       .finally(() => setLoading(false));
   }
 
-  // «Развернуть все треды»: forceOpen поднимает тред без клика. Грузим контекст один
-  // раз (если ещё не загружен), затем открываем. Снятие тумблера сворачивает.
+  // Готовые данные из батча (Таймфрейм) — синхронизируем, без сетевого запроса.
+  useEffect(() => { if (data) setCtx(data); }, [data]);
+
+  // «Развернуть все треды»: forceOpen поднимает тред без клика. Если контекст уже
+  // есть (из батча или предыдущего клика) — просто открываем, БЕЗ запроса. Иначе
+  // одиночный fallback-fetch. Снятие тумблера сворачивает.
   useEffect(() => {
     if (forceOpen) {
       if (ctx) { setOpen(true); return; }
       setLoading(true);
       intelApi.mentionContext(mentionId)
-        .then(data => { setCtx(data); setOpen(true); })
+        .then(d => { setCtx(d); setOpen(true); })
         .catch(() => { setCtx({ reply_chain: [], siblings: [] }); setOpen(true); })
         .finally(() => setLoading(false));
     } else {
       setOpen(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [forceOpen]);
+  }, [forceOpen, ctx]);
 
   // Подложка + светлый текст: в треде сообщения должны читаться так же легко, как
   // основная лента (раньше были тускло-серыми #4A6378 на тёмном фоне).

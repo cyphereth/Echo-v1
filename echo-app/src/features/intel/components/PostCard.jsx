@@ -3,7 +3,7 @@
 // 📍местоположение + автор·направление + repost-счётчик + ✓ + ссылка TG +
 // контекст треда + время + ✕ удаление (в спам). Стили — те же классы eventRow*,
 // поэтому колонка выглядит так же, как ситуационная лента.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { SIDE, DIRECTION_NAMES, agoStrShort } from '../api';
 import { ThreadContext } from './ThreadContext';
 import MediaPreview from './MediaPreview';
@@ -13,7 +13,10 @@ const LONG_TEXT = 240;
 const cleanText = (t) => (t || '').replace(/\s+/g, ' ').trim();
 
 export function PostCard({ event, isNew, onSpam, expandThreads = false, threadData = null }) {
-  const [threadOpen, setThreadOpen] = useState(false);
+  // Глобальный тумблер «🧵 Треды» раскрывает все фолды полностью; кнопка на
+  // карточке переопределяет для одного треда. При смене глобального — следуем ему.
+  const [threadOpen, setThreadOpen] = useState(expandThreads);
+  useEffect(() => { setThreadOpen(expandThreads); }, [expandThreads]);
   const sd = SIDE[event.side] || SIDE.ru;
   const dups = event._dups || 1;
   const text = cleanText(event.text);

@@ -488,7 +488,19 @@ def intel_timeframe(
     if frm is not None:
         q = q.filter(IntelMention.created_at >= frm)
     if not include_radar:
+        # Radar posts live only in the radar feed. The per-mention is_radar flag is
+        # the primary gate, but it's frozen at ingest — a source flagged radar AFTER
+        # its posts were collected leaves ~thousands of old mentions with is_radar=0
+        # that would otherwise leak into the columns. Also exclude by the source
+        # handle of every radar probe so «убрать радар» is complete, not partial.
+        from .collector import _clean_handle
+        radar_handles = {
+            h for (raw,) in session.query(IntelProbe.query).filter(IntelProbe.is_radar == True)  # noqa: E712
+            for h in (_clean_handle(raw),) if h.startswith("@")
+        }
         q = q.filter(IntelMention.is_radar == False)  # noqa: E712 — радары только в радарной ленте
+        if radar_handles:
+            q = q.filter(IntelMention.author.notin_(radar_handles))
     if side:
         q = q.filter(IntelMention.side == side)
 

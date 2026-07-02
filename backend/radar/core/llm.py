@@ -5,7 +5,7 @@ import httpx
 # Reuse the existing proxy integration (same as drafts.py).
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_API_URL = os.getenv("LLM_API_URL", "https://api.anthropic.com/v1/messages")
-MODEL_DIGEST = os.getenv("LLM_MODEL_DIGEST", "claude-haiku-4-5-20251001")
+MODEL_DIGEST = os.getenv("LLM_MODEL_DIGEST", "claude-haiku-4-5")
 
 
 class LLMNotConfigured(RuntimeError):

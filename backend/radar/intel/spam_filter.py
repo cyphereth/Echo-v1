@@ -23,6 +23,9 @@ log = logging.getLogger(__name__)
 
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_API_URL = os.getenv("LLM_API_URL", "https://api.anthropic.com/v1/messages")
+# Dated model ids (…-20251001) 429/time out on the aiprimetech proxy; the undated
+# alias resolves fine. Override via LLM_MODEL if the provider wants a specific id.
+LLM_MODEL = os.getenv("LLM_MODEL", "claude-haiku-4-5")
 
 # Cap how many example posts we ship as reference per classify call — keeps the
 # prompt bounded as the curator's example list grows. Newest examples win.
@@ -140,7 +143,7 @@ def classify_spam_batch(texts: list, examples: list) -> list:
         resp = httpx.post(
             LLM_API_URL,
             headers={"x-api-key": LLM_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-            json={"model": "claude-haiku-4-5-20251001", "max_tokens": 40 + n * 20,
+            json={"model": LLM_MODEL, "max_tokens": 40 + n * 20,
                   "system": system, "messages": [{"role": "user", "content": user}]},
             timeout=60,
         )

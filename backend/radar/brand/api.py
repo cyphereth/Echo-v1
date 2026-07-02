@@ -639,7 +639,7 @@ def _build_suggest_payload(name: str) -> dict:
         f'"audience_terms":[],"market":""}}'
     )
     return {
-        "model": "claude-haiku-4-5-20251001",
+        "model": "claude-haiku-4-5",
         "max_tokens": 4000,
         "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}],
         "system": system,
@@ -678,7 +678,7 @@ def _profile_with_claude(name_hint, bio, followers, posts_text,
             LLM_API_URL,
             headers={"x-api-key": LLM_API_KEY, "anthropic-version": "2023-06-01",
                      "content-type": "application/json"},
-            json={"model": "claude-haiku-4-5-20251001", "max_tokens": 600,
+            json={"model": "claude-haiku-4-5", "max_tokens": 600,
                   "system": system, "messages": [{"role": "user", "content": user_msg}]},
             timeout=60,
         )

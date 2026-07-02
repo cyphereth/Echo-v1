@@ -89,7 +89,7 @@ def summarize_city(city: str, agg_posts: list[dict]) -> dict:
             LLM_API_URL,
             headers={"x-api-key": LLM_API_KEY, "anthropic-version": "2023-06-01",
                      "content-type": "application/json"},
-            json={"model": "claude-haiku-4-5-20251001", "max_tokens": 900,
+            json={"model": "claude-haiku-4-5", "max_tokens": 900,
                   "system": system, "messages": [{"role": "user", "content": user}]},
             timeout=60,
         )

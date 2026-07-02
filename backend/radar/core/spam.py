@@ -68,7 +68,7 @@ def classify_providers_batch(texts: list) -> list:
         resp = httpx.post(
             LLM_API_URL,
             headers={"x-api-key": LLM_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-            json={"model": "claude-haiku-4-5-20251001", "max_tokens": 40 + n * 20,
+            json={"model": "claude-haiku-4-5", "max_tokens": 40 + n * 20,
                   "system": system, "messages": [{"role": "user", "content": user}]},
             timeout=60,
         )
@@ -128,7 +128,7 @@ def _build_ads_classify_payload(texts: list, sphere: str = "") -> dict:
         f'Верни JSON-массив по одному объекту на текст: '
         f'[{{"i":0,"is_ad":false}}, ...]. is_ad=true только для шума.'
     )
-    return {"model": "claude-haiku-4-5-20251001", "max_tokens": 40 + len(texts) * 20,
+    return {"model": "claude-haiku-4-5", "max_tokens": 40 + len(texts) * 20,
             "system": system, "messages": [{"role": "user", "content": user}]}
 
 
@@ -149,7 +149,7 @@ def _build_disambiguate_payload(texts: list, brand_name: str, sphere: str = "") 
         f'Верни JSON-массив по одному объекту на текст: '
         f'[{{"i":0,"is_offtopic":false}}, ...]. is_offtopic=true только для явного оффтопа.'
     )
-    return {"model": "claude-haiku-4-5-20251001", "max_tokens": 40 + len(texts) * 20,
+    return {"model": "claude-haiku-4-5", "max_tokens": 40 + len(texts) * 20,
             "system": system, "messages": [{"role": "user", "content": user}]}
 
 

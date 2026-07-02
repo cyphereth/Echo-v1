@@ -17,6 +17,7 @@ export function IntelFeed() {
   const [activeKeys, setActiveKeys]   = useState([]);
   const [win, setWin]                 = useState('24h');
   const [side, setSide]               = useState(null);
+  const [showRadar, setShowRadar]     = useState(false);  // включать радарные источники в общую ленту
   const [eventsByKey, setEventsByKey] = useState({});
   const [hiddenIds, setHiddenIds]     = useState(() => new Set());
   const [pausedKeys, setPausedKeys]   = useState(() => new Set()); // колонки под курсором
@@ -39,10 +40,21 @@ export function IntelFeed() {
   useEffect(() => {
     intelApi.directions().then(setAllDirs).catch(() => {});
     const stored = localStorage.getItem(LS_KEY);
+    let parsed = null;
     if (stored) {
-      try { setActiveKeys(JSON.parse(stored)); return; } catch {}
+      try { parsed = JSON.parse(stored); } catch { parsed = null; }
     }
-    intelApi.getLayout().then(l => setActiveKeys(l.direction_keys || [])).catch(() => {});
+    // Если в localStorage что-то есть и не пусто — используем.
+    if (parsed && parsed.length > 0) {
+      setActiveKeys(parsed);
+      return;
+    }
+    // Иначе спрашиваем backend (там боевой дефолт или сохранённый admin-расклад).
+    intelApi.getLayout().then(l => {
+      const keys = l.direction_keys || [];
+      setActiveKeys(keys);
+      if (keys.length) localStorage.setItem(LS_KEY, JSON.stringify(keys));
+    }).catch(() => {});
   }, []);
 
   // Persist to localStorage on change.
@@ -57,11 +69,11 @@ export function IntelFeed() {
     setEventsByKey({});
     let alive = true;
     Promise.all(activeKeys.map(k =>
-      intelApi.feed(k, { window: win, side }).then(rows => [k, rows]).catch(() => [k, []])
+      intelApi.feed(k, { window: win, side, include_radar: showRadar || undefined }).then(rows => [k, rows]).catch(() => [k, []])
     )).then(pairs => { if (alive) setEventsByKey(Object.fromEntries(pairs)); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeKeys.join(','), win, side]);
+  }, [activeKeys.join(','), win, side, showRadar]);
 
   // Влить одно событие в колонку с подсветкой; снять подсветку через 1с.
   const applyEvent = useCallback((ev) => {
@@ -82,7 +94,7 @@ export function IntelFeed() {
   // SSE subscription — one connection for all columns.
   useEffect(() => {
     if (!activeKeys.length) return;
-    const es = intelApi.feedStream(activeKeys, { window: win, side }, (ev) => {
+    const es = intelApi.feedStream(activeKeys, { window: win, side, include_radar: showRadar || undefined }, (ev) => {
       // Колонка под курсором заморожена — копим события в буфер, не дёргаем строки
       // под указателем. На уходе курсора (onColLeave) буфер вливается разом.
       if (pausedRef.current.has(ev.direction)) {
@@ -95,7 +107,7 @@ export function IntelFeed() {
     esRef.current = es;
     return () => { es.close(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeKeys.join(','), win, side, applyEvent]);
+  }, [activeKeys.join(','), win, side, showRadar, applyEvent]);
 
   const onColEnter = useCallback((key) => {
     pausedRef.current.add(key);
@@ -132,6 +144,11 @@ export function IntelFeed() {
         <div className={styles.feedSeg}>
           {SIDES.map(([s, label]) =>
             <button key={label} data-active={String(side) === String(s) ? '1' : '0'} onClick={() => setSide(s)}>{label}</button>)}
+        </div>
+        <div className={styles.feedSeg}>
+          <button data-active={showRadar ? '1' : '0'}
+                  onClick={() => setShowRadar(v => !v)}
+                  title="Показывать посты радар-источников в общей ленте">📡 Радар</button>
         </div>
         <div style={{ flex: 1 }} />
         <button className={styles.feedResetBtn} onClick={resetToDefault}>Сбросить к боевому</button>

@@ -34,6 +34,8 @@ from . import media_cache
 from .spam_filter import _norm, is_exact_spam
 from .context_pass import _handle_for, _parse_handle_and_msg_id, _parent_post_id
 from ..brand.api import _get_tg_provider
+from .discovery import discover_for_direction, default_side, available_directions
+from ..core.providers.telegram import TelegramFloodWait
 
 _VALID_SIDES = {"ru", "ua", "by", "mx", "ge", "md", "pmr"}
 _VALID_KINDS = {"channel", "chat"}
@@ -424,6 +426,7 @@ def intel_feed(
     side: Optional[str] = None,
     window: str = "24h",
     limit: int = 50,
+    include_radar: bool = False,
     user: User = Depends(current_user),
     session: Session = Depends(db),
 ):
@@ -436,8 +439,9 @@ def intel_feed(
          .join(IntelMentionDirection, IntelMentionDirection.mention_id == IntelMention.id)
          .filter(IntelMentionDirection.direction_id == d.id,
                  IntelMention.created_at >= since,
-                 IntelMention.hidden == False,     # noqa: E712 — спам не показываем
-                 IntelMention.is_radar == False))  # noqa: E712 — радары только в радарной ленте
+                 IntelMention.hidden == False))    # noqa: E712 — спам не показываем
+    if not include_radar:
+        q = q.filter(IntelMention.is_radar == False)  # noqa: E712 — радары только в радарной ленте
     if side:
         q = q.filter(IntelMention.side == side)
     rows = q.order_by(IntelMention.created_at.desc()).limit(limit).all()
@@ -627,6 +631,125 @@ def intel_sources_delete(
     session.delete(probe)
     session.commit()
     return {"deleted": True}
+
+
+# ── Discovery ─────────────────────────────────────────────────────────────────
+
+@router.get("/intel/discover/directions")
+def intel_discover_directions(
+    user: User = Depends(current_user),
+):
+    """Return list of directions that have TG discovery configured with their search cities."""
+    return available_directions()
+
+
+@router.post("/intel/discover")
+def intel_discover(
+    body: dict,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    """Search Telegram for channels/chats matching a direction.
+
+    Accepts: {"direction": "belgorod"} or {"city": "Белгород"}.
+    Returns a list of candidate channels/chats that can be bulk-accepted via
+    POST /intel/discover/accept.
+    """
+    direction_key = (body.get("direction") or "").strip()
+    city = (body.get("city") or "").strip()
+
+    if not direction_key and not city:
+        raise HTTPException(400, "Either 'direction' or 'city' is required")
+
+    # Resolve direction_key if only city given (try to match)
+    if not direction_key and city:
+        from .discovery import _DIRECTION_CITIES
+        for dk, cities in _DIRECTION_CITIES.items():
+            if city.lower() in [c.lower() for c in cities]:
+                direction_key = dk
+                break
+
+    if not direction_key:
+        raise HTTPException(400, f"City '{city}' not found in discovery configuration. "
+                                 "Pass 'direction' key explicitly or use a known city.")
+
+    tg = _get_tg_provider()
+    if tg is None:
+        raise HTTPException(503, "Telegram provider not available")
+
+    try:
+        candidates = discover_for_direction(direction_key, tg, session)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except TelegramFloodWait as e:
+        raise HTTPException(429, f"Telegram rate limit: подождите {e.seconds} секунд и попробуйте снова")
+    except Exception as e:
+        log.exception("Discovery failed for direction %s", direction_key)
+        raise HTTPException(500, f"Discovery failed: {e}")
+
+    return {
+        "direction": direction_key,
+        "total": len(candidates),
+        "candidates": candidates,
+    }
+
+
+@router.post("/intel/discover/accept")
+def intel_discover_accept(
+    body: dict,
+    user: User = Depends(current_user),
+    session: Session = Depends(db),
+):
+    """Bulk-accept discovery candidates as new IntelProbe sources.
+
+    Accepts: {
+        "items": [
+            {"handle": "@chat1", "kind": "channel", "subject": "Белгород", "direction": "belgorod", "side": "ru"},
+            ...
+        ]
+    }
+    Returns list of created (or already-existing) probes.
+    """
+    items = body.get("items") or []
+    if not items:
+        raise HTTPException(400, "items is required and must be non-empty")
+
+    direction_id_map = _resolve_direction(session, None)  # placeholder
+    created = []
+
+    for item in items:
+        handle = (item.get("handle") or "").strip()
+        if not handle:
+            continue
+        kind = (item.get("kind") or "channel").strip().lower()
+        if kind not in _VALID_KINDS:
+            kind = "channel"
+        side = (item.get("side") or "").strip().lower()
+        if side not in _VALID_SIDES:
+            side = default_side((item.get("direction") or ""))
+        subject = (item.get("subject") or "").strip() or None
+        dir_key = (item.get("direction") or "").strip() or None
+        did = _resolve_direction(session, dir_key) if dir_key else None
+
+        # Dedup check
+        existing = session.query(IntelProbe).filter_by(query=handle).first()
+        if existing:
+            keys = _dir_keys(session, [existing])
+            created.append({**_probe_dict(existing, keys.get(existing.direction_id)), "created": False})
+            continue
+
+        probe = IntelProbe(
+            platform="telegram", kind=kind, query=handle, side=side,
+            subject=subject, direction_id=did,
+            next_run_at=datetime(1970, 1, 1, tzinfo=timezone.utc),
+        )
+        session.add(probe)
+        session.flush()
+        keys = _dir_keys(session, [probe])
+        created.append({**_probe_dict(probe, keys.get(probe.direction_id)), "created": True})
+
+    session.commit()
+    return {"accepted": len(created), "sources": created}
 
 
 _VALID_SPAM_KINDS = {"word", "example", "keyword"}
@@ -1030,6 +1153,7 @@ async def intel_feed_stream(
     side: Optional[str] = None,
     window: str = "24h",
     after_id: int = 0,
+    include_radar: bool = False,
     authorization: str = Header(None),
 ):
     """SSE: pushes each new mention linked (via m2m) to any of `directions`
@@ -1074,8 +1198,9 @@ async def intel_feed_stream(
                          .filter(IntelMentionDirection.direction_id.in_(list(id_to_key)),
                                  IntelMention.id > last_id,
                                  IntelMention.created_at >= since,
-                                 IntelMention.hidden == False,     # noqa: E712
-                                 IntelMention.is_radar == False))  # noqa: E712
+                                 IntelMention.hidden == False))    # noqa: E712
+                    if not include_radar:
+                        q = q.filter(IntelMention.is_radar == False)  # noqa: E712
                     if side:
                         q = q.filter(IntelMention.side == side)
                     rows = q.order_by(IntelMention.id.asc()).limit(300).all()
@@ -1106,6 +1231,10 @@ async def intel_feed_stream(
 
 # ── Feed v2 — layout persistence (боевой дефолт) ──────────────────────────────
 
+_FEED_DEFAULT_KEYS = ["belgorod", "bryansk", "kharkiv", "kursk", "zaporizhzhia", "sumy",
+                      "dnr", "lnr", "moscow"]
+
+
 @router.get("/intel/feed/layout")
 def intel_feed_layout_get(
     user: User = Depends(current_user),
@@ -1116,6 +1245,10 @@ def intel_feed_layout_get(
         keys = json.loads(row.direction_ids) if row else []
     except (ValueError, TypeError):
         keys = []
+    # Боевой дефолт: если в БД пусто — отдаём предустановленные ключи, чтобы
+    # оператор не видел пустую страницу при первом открытии Feed v2.
+    if not keys:
+        keys = _FEED_DEFAULT_KEYS
     return {"direction_keys": keys,
             "updated_at": row.updated_at.isoformat() if row else None}
 

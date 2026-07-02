@@ -20,8 +20,10 @@ export const DIRECTIONS_TAXONOMY = [
   'belgorod', 'crimea', 'sumy',
 ];
 
+// Ключи и названия синхронизированы с backend geo_dict.py (DEFAULT_DIRECTIONS).
+// Всё — области/края/ДНР-ЛНР, без старых «направлений».
 export const DIRECTION_NAMES = {
-  // RU border regions + Crimea
+  // RF border regions
   bryansk: 'Брянская обл.',
   belgorod: 'Белгородская обл.',
   kursk: 'Курская обл.',
@@ -29,16 +31,36 @@ export const DIRECTION_NAMES = {
   oryol: 'Орловская обл.',
   rostov: 'Ростовская обл.',
   crimea: 'Крым',
-  // UA directions / fronts
-  sumy: 'Сумское',
-  chernihiv: 'Черниговское',
-  kharkiv: 'Харьковское',
-  luhansk: 'Луганское (ЛНР)',
-  donetsk: 'Донецкое (ДНР)',
-  zaporizhzhia: 'Запорожское',
-  kherson: 'Херсонское',
-  dnipro: 'Днепропетровское',
-  kyiv: 'Киевское',
+  krasnodar: 'Краснодарский край',
+  smolensk: 'Смоленская обл.',
+  pskov: 'Псковская обл.',
+  moscow: 'Московская обл.',
+  // DNR / LNR
+  dnr: 'ДНР',
+  lnr: 'ЛНР',
+  // Ukraine — all oblasts + Kyiv
+  kyiv: 'Киевская обл.',
+  kharkiv: 'Харьковская обл.',
+  kherson: 'Херсонская обл.',
+  zaporizhzhia: 'Запорожская обл.',
+  dnipropetrovsk: 'Днепропетровская обл.',
+  odesa: 'Одесская обл.',
+  mykolaiv: 'Николаевская обл.',
+  vinnytsia: 'Винницкая обл.',
+  zhytomyr: 'Житомирская обл.',
+  chernihiv: 'Черниговская обл.',
+  sumy: 'Сумская обл.',
+  poltava: 'Полтавская обл.',
+  cherkasy: 'Черкасская обл.',
+  kirovohrad: 'Кировоградская обл.',
+  ternopil: 'Тернопольская обл.',
+  khmelnytskyi: 'Хмельницкая обл.',
+  'ivano-frankivsk': 'Ивано-Франковская обл.',
+  lviv: 'Львовская обл.',
+  rivne: 'Ровенская обл.',
+  volyn: 'Волынская обл.',
+  zakarpattia: 'Закарпатская обл.',
+  chernivtsi: 'Черновицкая обл.',
   unassigned: 'Без направления',
 };
 

@@ -5,7 +5,7 @@
 """
 import os
 import json
-from .models import IntelDirection
+from .models import IntelDirection, IntelMentionDirection
 from .geo_dict import DEFAULT_DIRECTIONS, GEO_DICT_VERSION
 
 _META_KEY = "__geo_dict_version__"
@@ -47,6 +47,7 @@ def ensure_default_directions(session) -> None:
     stored_version = int(meta.name) if meta and (meta.name or "").isdigit() else 0
     refresh = stored_version != GEO_DICT_VERSION
 
+    canonical = {key for (key, *_rest) in DEFAULT_DIRECTIONS}
     existing = {d.key: d for d in session.query(IntelDirection).all()}
     for key, name, kind, region_key, terms in DEFAULT_DIRECTIONS:
         d = existing.get(key)
@@ -61,6 +62,19 @@ def ensure_default_directions(session) -> None:
             d.geo_terms = json.dumps(terms, ensure_ascii=False)
 
     if refresh:
+        # Prune orphaned seed directions: keys renamed/removed between versions
+        # (e.g. old "dnipro"→"dnipropetrovsk", "donetsk"→"dnr") otherwise linger
+        # as duplicate columns. Custom user directions (kind="custom"), the meta
+        # row and "unassigned" are never touched.
+        protected = {_META_KEY, "unassigned"}
+        for d in list(existing.values()):
+            if d.key in canonical or d.key in protected or d.kind == "custom":
+                continue
+            # Drop m2m mention links first to satisfy FK, then the direction.
+            session.query(IntelMentionDirection).filter_by(
+                direction_id=d.id).delete(synchronize_session=False)
+            session.delete(d)
+
         if meta is None:
             session.add(IntelDirection(key=_META_KEY, name=str(GEO_DICT_VERSION),
                                        kind="meta", geo_terms="[]"))

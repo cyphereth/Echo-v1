@@ -9,11 +9,11 @@ import {
 import { Icon } from '../../../core/components/icons';
 import { intelApi, CREDIBILITY, DIRECTION_NAMES, SIDE, spikeLevel, agoStrShort } from '../api';
 import { ThreadContext } from './ThreadContext';
+import { DirectionPicker } from './DirectionPicker';
 import styles from '../intel.module.css';
 
 const C = { bar: '#2BB3C7', line: '#34D8A0', grid: 'rgba(43,179,199,.10)', fg3: '#6A8499' };
 const tooltipStyle = { background: '#0A0F16', border: '1px solid rgba(43,179,199,.20)', borderRadius: '6px', color: '#D8E4F0', fontSize: '11px' };
-const DIRECTION_OPTS = Object.keys(DIRECTION_NAMES);
 
 export function IntelStories({ timeRange, openStoryId, openDirection, navToken }) {
   const [list, setList]         = useState([]);
@@ -84,14 +84,10 @@ export function IntelStories({ timeRange, openStoryId, openDirection, navToken }
           {/* direction filter */}
           <div className={styles.filters}>
             <div className={styles.filterRow}>
-              <button className={styles.filterChip} data-active={!filters.direction ? '1' : '0'}
-                onClick={() => setFilters(f => ({ ...f, direction: '' }))}>Все</button>
-              {DIRECTION_OPTS.slice(0, 6).map(d => (
-                <button key={d} className={styles.filterChip} data-active={filters.direction === d ? '1' : '0'}
-                  onClick={() => setFilters(f => ({ ...f, direction: f.direction === d ? '' : d }))}>
-                  {DIRECTION_NAMES[d].split(' ')[0]}
-                </button>
-              ))}
+              <DirectionPicker
+                value={filters.direction}
+                onChange={key => setFilters(f => ({ ...f, direction: key }))}
+              />
             </div>
             <div className={styles.filterRow}>
               {['ru', 'ua'].map(s => (
@@ -113,7 +109,7 @@ export function IntelStories({ timeRange, openStoryId, openDirection, navToken }
             </div>
           </div>
         </div>
-        {list.map(s => {
+        {list.filter(s => !filters.direction || s.direction === filters.direction).map(s => {
           const sp = spikeLevel(s.spike_pct);
           const cr = CREDIBILITY[s.credibility] || CREDIBILITY.unrated;
           return (

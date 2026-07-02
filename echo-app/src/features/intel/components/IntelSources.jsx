@@ -1,6 +1,6 @@
 // Источники (Sources) — screen for managing curated TG channels/chats.
 // Shows all /intel/sources grouped by side; allows add & delete.
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Icon } from '../../../core/components/icons';
 import { intelApi, SIDE, DIRECTION_NAMES } from '../api';
 import styles from '../intel.module.css';
@@ -49,6 +49,227 @@ function RadarBadge({ on, onToggle, busy }) {
   );
 }
 
+// ── Discovery Modal ──────────────────────────────────────────────────────────
+
+const SOURCE_LABEL = { search: 'Поиск', recommendation: 'Рекомендация', linked: 'Привязанный' };
+
+function DiscoveryModal({ open, onClose, onAdded }) {
+  const [step, setStep] = useState('pick');           // pick → search → results
+  const [dirs, setDirs] = useState([]);                // available directions from API
+  const [dirKey, setDirKey] = useState('');
+  const [candidates, setCandidates] = useState([]);
+  const [selected, setSelected] = useState(new Set());
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [accepting, setAccepting] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      intelApi.discoverDirections().then(d => setDirs(d || [])).catch(() => {});
+    }
+  }, [open]);
+
+  function reset() {
+    setStep('pick');
+    setDirKey('');
+    setCandidates([]);
+    setSelected(new Set());
+    setBusy(false);
+    setErr('');
+    setAccepting(false);
+  }
+
+  async function handleSearch() {
+    if (!dirKey) return;
+    setBusy(true);
+    setErr('');
+    setStep('search');
+    try {
+      const data = await intelApi.discover({ direction: dirKey });
+      setCandidates(data.candidates || []);
+      setStep('results');
+    } catch (e) {
+      setErr(e.message || 'Ошибка поиска');
+      setStep('pick');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggleAll() {
+    if (selected.size === candidates.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(candidates.map(c => c.handle)));
+    }
+  }
+
+  function toggleOne(handle) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(handle)) next.delete(handle); else next.add(handle);
+      return next;
+    });
+  }
+
+  async function handleAccept() {
+    if (selected.size === 0 || accepting) return;
+    setAccepting(true);
+    setErr('');
+    try {
+      const items = candidates
+        .filter(c => selected.has(c.handle))
+        .map(c => ({
+          handle: c.handle,
+          kind: c.kind,
+          subject: c.subject,
+          direction: c.direction,
+          side: c.direction ? (SIDE_MAP[c.direction] || 'ru') : 'ru',
+        }));
+      const data = await intelApi.discoverAccept({ items });
+      onAdded?.(data.accepted || 0);
+      reset();
+    } catch (e) {
+      setErr(e.message || 'Ошибка добавления');
+    } finally {
+      setAccepting(false);
+    }
+  }
+
+  if (!open) return null;
+
+  return (
+    <div className={styles.discOverlay} onClick={e => { if (e.target === e.currentTarget) { reset(); onClose(); } }}>
+      <div className={styles.discModal}>
+        {/* Header */}
+        <div className={styles.discHeader}>
+          <span className={styles.discTitle}>
+            <Icon name="search" size={14} color="#57D2E2" />
+            Найти TG-чаты
+          </span>
+          <button className={styles.discClose} onClick={() => { reset(); onClose(); }}>✕</button>
+        </div>
+
+        {/* Step: Pick direction */}
+        {step === 'pick' && (
+          <div className={styles.discBody}>
+            <label className={styles.discLabel}>Выберите направление</label>
+            <div className={styles.discPickRow}>
+              <select
+                className={styles.srcSelect}
+                value={dirKey}
+                onChange={e => setDirKey(e.target.value)}
+                style={{ flex: 1 }}
+              >
+                <option value="">— выбрать —</option>
+                {dirs.map(d => (
+                  <option key={d.key} value={d.key}>
+                    {DIRECTION_NAMES[d.key] || d.key} ({d.cities.join(', ')})
+                  </option>
+                ))}
+              </select>
+              <button
+                className={styles.discSearchBtn}
+                disabled={!dirKey || busy}
+                onClick={handleSearch}
+              >
+                {busy ? '…' : '🔍 Искать'}
+              </button>
+            </div>
+            {err && <div className={styles.discErr}>{err}</div>}
+          </div>
+        )}
+
+        {/* Step: Searching */}
+        {step === 'search' && (
+          <div className={styles.discBody} style={{ textAlign: 'center', padding: '40px 20px' }}>
+            <div className={styles.discSpinner} />
+            <div style={{ marginTop: 12, color: '#8DA3B8' }}>
+              Ищем чаты по направлению «{DIRECTION_NAMES[dirKey] || dirKey}»…
+            </div>
+            <div style={{ marginTop: 4, fontSize: 12, color: '#4A6378' }}>
+              Это может занять 10–30 секунд
+            </div>
+          </div>
+        )}
+
+        {/* Step: Results */}
+        {step === 'results' && (
+          <>
+            <div className={styles.discResults}>
+              <span>Найдено: <strong>{candidates.length}</strong></span>
+              <span style={{ color: '#57D2E2' }}>
+                Выбрано: <strong>{selected.size}</strong>
+              </span>
+            </div>
+
+            <div className={styles.discTableWrap}>
+              {/* Select all row */}
+              <div className={`${styles.discRow} ${styles.discRowHead}`}>
+                <input
+                  type="checkbox"
+                  checked={candidates.length > 0 && selected.size === candidates.length}
+                  onChange={toggleAll}
+                  disabled={accepting}
+                />
+                <span className={styles.discColHandle}>Канал/чат</span>
+                <span className={styles.discColTitle}>Название</span>
+                <span className={styles.discColCount}>Участников</span>
+                <span className={styles.discColSource}>Источник</span>
+              </div>
+              <div className={styles.discTableBody}>
+                {candidates.length === 0 ? (
+                  <div className={styles.discEmpty}>Ничего не найдено для этого направления</div>
+                ) : candidates.map(c => (
+                  <div key={c.handle} className={`${styles.discRow} ${selected.has(c.handle) ? styles.discRowSelected : ''}`}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(c.handle)}
+                      onChange={() => toggleOne(c.handle)}
+                      disabled={accepting}
+                    />
+                    <span className={styles.discColHandle}>{c.handle}</span>
+                    <span className={styles.discColTitle} title={c.title}>{c.title}</span>
+                    <span className={styles.discColCount}>{(c.participants || 0).toLocaleString('ru')}</span>
+                    <span className={styles.discColSource}>{SOURCE_LABEL[c.source] || c.source}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className={styles.discFooter}>
+              {err && <span className={styles.discErr}>{err}</span>}
+              <div className={styles.discFooterRight}>
+                <button className={styles.discSearchBtn} onClick={() => { reset(); onClose(); }}>
+                  Закрыть
+                </button>
+                <button
+                  className={styles.discAcceptBtn}
+                  disabled={selected.size === 0 || accepting}
+                  onClick={handleAccept}
+                >
+                  {accepting ? '…' : `Добавить ${selected.size}`}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Map direction key → default side for discovery accept
+const SIDE_MAP = {
+  bryansk: 'ru', belgorod: 'ru', kursk: 'ru', voronezh: 'ru', oryel: 'ru',
+  rostov: 'ru', crimea: 'ru', krasnodar: 'ru', smolensk: 'ru', pskov: 'ru',
+  moscow: 'ru', dnr: 'ru', lnr: 'ru',
+  kyiv: 'ua', kharkiv: 'ua', kherson: 'ua', zaporizhzhia: 'ua',
+  dnipropetrovsk: 'ua', odesa: 'ua', mykolaiv: 'ua', chernihiv: 'ua', sumy: 'ua',
+};
+
+
 export function IntelSources() {
   const [sources, setSources]     = useState([]);
   const [loading, setLoading]     = useState(true);
@@ -69,6 +290,7 @@ export function IntelSources() {
   const [editing, setEditing] = useState(null);   // {id, subject, direction} строки в режиме правки
   const [savingEdit, setSavingEdit] = useState(false);
   const [err, setErr]         = useState('');
+  const [showDiscover, setShowDiscover] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -141,7 +363,9 @@ export function IntelSources() {
     setDeleting(id);
     try {
       await intelApi.deleteSource(id);
-      await load();
+      // Убираем строку на месте, без load() — иначе список перерисуется
+      // и скролл прыгнет наверх, теряя позицию пользователя.
+      setSources(prev => prev.filter(s => s.id !== id));
     } catch (e) {
       setErr(e.message || 'Ошибка удаления');
     } finally {
@@ -184,6 +408,13 @@ export function IntelSources() {
             Источники
             <span className={styles.sectionCount}>{sources.length}</span>
           </span>
+          <button
+            className={styles.discTriggerBtn}
+            onClick={() => setShowDiscover(true)}
+            title="Автоматический поиск TG-чатов и каналов"
+          >
+            🔍 Найти чаты
+          </button>
           <div className={styles.srcFilters}>
             {sides.map(s => (
               <button
@@ -364,6 +595,13 @@ export function IntelSources() {
           )}
         </div>
       </div>
+
+      {/* Discovery modal */}
+      <DiscoveryModal
+        open={showDiscover}
+        onClose={() => setShowDiscover(false)}
+        onAdded={(count) => { if (count > 0) load(); }}
+      />
     </div>
   );
 }

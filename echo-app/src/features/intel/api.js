@@ -37,6 +37,11 @@ export const intelApi = {
   addSource: (body)           => request('/intel/sources', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }),
   deleteSource: (id)          => request('/intel/sources/' + id, { method: 'DELETE' }),
   updateSource: (id, body)    => request('/intel/sources/' + id, { method: 'PATCH', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }),
+
+  // ── Discovery (auto-find TG chats/channels) ───────────────────────────────────
+  discoverDirections: ()     => request('/intel/discover/directions'),
+  discover:        (body)     => request('/intel/discover', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }),
+  discoverAccept:  (body)     => request('/intel/discover/accept', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }),
   spamList:  (kind)           => passthrough('spam', kind ? { kind } : undefined),
   addSpam:   (body)           => request('/intel/spam', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }),
   deleteSpam:(id)             => request('/intel/spam/' + id, { method: 'DELETE' }),

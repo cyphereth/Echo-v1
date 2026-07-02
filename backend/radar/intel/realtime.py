@@ -164,15 +164,6 @@ def store_realtime_post(session, post, side, kind, lexicon_tiers,
         sp.rollback()
         return False
 
-    # Привязка к направлениям через m2m (intel_mention_directions) — ТАК ЖЕ, как поллер
-    # (collector._write_m2m_for_mention): direction_id поста = "source", совпавшие
-    # гео-термины = "geo". Без этого живые посты не попадают в колонки Ленты v2, которая
-    # читает именно m2m, а не одиночный mention.direction_id. Ошибки тут не валят запись.
-    try:
-        _write_m2m_for_mention(session, mention)
-    except Exception:
-        log.exception("realtime: m2m direction write failed for %s", mention.post_id)
-
     # Мгновенное обогащение треда: если родитель уже в БД, собираем цепочку прямо
     # сейчас (без сети) — кнопка «в ответ на» появляется в ту же секунду, не ждём
     # тика. Родителя нет локально → context_fetched остаётся False, подтянет

@@ -63,9 +63,11 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "hidden": "BOOLEAN NOT NULL DEFAULT 0",
         "media":  "TEXT",
         "subject": "TEXT",
+        "is_radar": "BOOLEAN NOT NULL DEFAULT 0",
     },
     "intel_probes": {
         "subject": "TEXT",
+        "is_radar": "BOOLEAN NOT NULL DEFAULT 0",
     },
     "intel_stories": {
         "muted": "BOOLEAN NOT NULL DEFAULT 0",

@@ -57,6 +57,9 @@ class IntelProbe(Base):
     # Stamped onto collected mentions as a fallback geo label when the post text
     # itself names no place. direction_id (above) is the oblast-level fallback.
     subject:      Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Радар-источник (каналы мониторинга ПВО/пусков). Его посты идут ТОЛЬКО в
+    # отдельную радарную ленту (ситуационный центр), не в основную ленту событий.
+    is_radar:     Mapped[bool]     = mapped_column(Boolean, default=False, server_default="0")
 
 
 class IntelMention(Base):
@@ -82,6 +85,7 @@ class IntelMention(Base):
     hidden:          Mapped[bool]          = mapped_column(Boolean, default=False, server_default="0")  # soft-hide: куратор скинул в спам
     media:           Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # "photo"|"video"|"file" если к посту приложено вложение
     subject:         Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # населённый пункт-ярлык, проставленный из источника при сборе
+    is_radar:        Mapped[bool]          = mapped_column(Boolean, default=False, server_default="0")  # пост радар-источника: только радарная лента
 
 
 class IntelIncident(Base):

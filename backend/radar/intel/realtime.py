@@ -37,8 +37,11 @@ from .collector import (
     _clean_handle,
     _is_invite_link,
     _geo_hit,
+    _write_m2m_for_mention,
     keyword_relevant,
     chat_message_relevant,
+    chat_reply_relevant,
+    parent_mention_stored,
     load_lexicon_tiers,
 )
 from .translate import maybe_translate
@@ -75,7 +78,8 @@ def build_source_map(session):
         if not handle:
             continue
         by_user[handle] = {"side": p.side, "kind": p.kind, "handle": "@" + handle,
-                           "subject": p.subject, "direction_id": p.direction_id}
+                           "subject": p.subject, "direction_id": p.direction_id,
+                           "is_radar": bool(getattr(p, "is_radar", False))}
         join_handles.append("@" + handle)
     return by_user, join_handles, invite_links
 
@@ -84,7 +88,7 @@ def build_source_map(session):
 
 def store_realtime_post(session, post, side, kind, lexicon_tiers,
                         spam_words=None, spam_examples=None, keywords=None,
-                        subject=None, src_direction_id=None) -> bool:
+                        subject=None, src_direction_id=None, is_radar=False) -> bool:
     """Persist one parsed Post as an IntelMention, or skip it.
 
     Applies the same gate the poller uses (chat_message_relevant for chats; length +
@@ -105,7 +109,11 @@ def store_realtime_post(session, post, side, kind, lexicon_tiers,
     if kind == "chat":
         if not chat_message_relevant(text, author, lexicon_tiers, keywords or (),
                                      geo_hit=geo_hit):
-            return False
+            # Ответ на уже сохранённое сообщение — продолжение живого обсуждения,
+            # допускаем и без лексикона (жёсткие гарды внутри chat_reply_relevant).
+            if not (chat_reply_relevant(text, author)
+                    and parent_mention_stored(session, post, post.platform or "telegram")):
+                return False
     else:
         # Curator-keyword hit overrides the length gate (short replies/comments), same as
         # the poller. Lexicon admission still requires the post to clear MIN_TEXT_LEN.
@@ -140,11 +148,16 @@ def store_realtime_post(session, post, side, kind, lexicon_tiers,
         created_at=post.created_at,
         reply_to_tg_id=getattr(post, "reply_to_tg_id", None),
         media=getattr(post, "media", None),
+        is_radar=bool(is_radar),
     )
     sp = session.begin_nested()
     try:
         session.add(mention)
         session.flush()
+        # m2m-теги направлений (source + geo-совпадения) — ровно как в поллере.
+        # Без них realtime-пост НИКОГДА не попадает в колонки Ленты v2: она читает
+        # только intel_mention_directions, а поллер повторно пост не пишет (дедуп).
+        _write_m2m_for_mention(session, mention)
         sp.commit()
     except IntegrityError:
         sp.rollback()
@@ -297,7 +310,7 @@ class IntelRealtime:
         try:
             stored = await loop.run_in_executor(
                 None, self._store_sync, post, side, kind,
-                info.get("subject"), info.get("direction_id"),
+                info.get("subject"), info.get("direction_id"), info.get("is_radar", False),
             )
         except Exception:
             log.exception("intel realtime: store failed for %s", post.post_id)
@@ -312,14 +325,15 @@ class IntelRealtime:
             if getattr(post, "reply_to_tg_id", None):
                 self._kick_enrich()
 
-    def _store_sync(self, post, side, kind, subject=None, src_direction_id=None) -> bool:
+    def _store_sync(self, post, side, kind, subject=None, src_direction_id=None,
+                    is_radar=False) -> bool:
         """Open a short-lived session, store the post (translate + gates + dedup),
         commit, and report whether a new row landed. Runs in an executor thread."""
         session = get_session()
         try:
             if store_realtime_post(session, post, side, kind, self._lexicon,
                                    self._spam_words, self._spam_examples, self._keywords,
-                                   subject, src_direction_id):
+                                   subject, src_direction_id, is_radar):
                 session.commit()
                 return True
             session.rollback()

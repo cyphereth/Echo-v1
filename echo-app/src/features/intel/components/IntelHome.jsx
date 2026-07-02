@@ -1,5 +1,5 @@
 // Situational Center (home) — «что горит сейчас».
-// KPI strip + Now hot + Alerts + Top stories + Event stream.
+// KPI strip + Now hot + Alerts + Radar feed + Event stream.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../../core/components/icons';
 import { IntelSparkline } from './IntelSparkline';
@@ -13,12 +13,81 @@ import styles from '../intel.module.css';
 const KPI_POLL_MS = 15000;
 const FLASH_MS    = 2600; // how long a freshly arrived row stays highlighted
 
+// Лента показывает ПОЛНЫЙ текст поста (без обрезки и без hover-всплывашки).
+// Длинные посты рендерим чуть мельче, чтобы они не разрывали ленту, оставаясь
+// полностью читаемыми. LONG_TEXT — порог, после которого включаем мелкий шрифт.
+const LONG_TEXT = 240;
+const cleanText = (t) => (t || '').replace(/\s+/g, ' ').trim();
+
+// Collapse verbatim cross-channel reposts: events sharing a content signature become
+// one row (the newest), with a count of how many channels carried it.
+function collapseBySig(stream, hiddenIds) {
+  const out = [];
+  const bySig = new Map();
+  for (const e of stream) {
+    if (hiddenIds.has(e.id)) continue;
+    const key = e.sig || `id:${e.id}`;
+    if (bySig.has(key)) {
+      const item = out[bySig.get(key)];
+      item._dups += 1;
+      if (e.author) item._srcs.add(e.author);
+      continue;
+    }
+    bySig.set(key, out.length);
+    out.push({ ...e, _dups: 1, _srcs: new Set(e.author ? [e.author] : []) });
+  }
+  return out;
+}
+
+function EventRow({ e, isNew, onSpam }) {
+  const sd = SIDE[e.side] || SIDE.ru;
+  const dups = e._dups || 1;
+  const text = cleanText(e.text);
+  const textClass = text.length > LONG_TEXT
+    ? `${styles.eventText} ${styles.eventTextLong}`
+    : styles.eventText;
+  return (
+    <div className={isNew ? `${styles.eventRow} ${styles.eventRowNew}` : styles.eventRow}>
+      <span className={styles.eventSide} style={{ color: sd.color, background: sd.color + '1A' }}>
+        {sd.label}
+      </span>
+      <div className={styles.eventBody}>
+        <div className={textClass}>
+          {e.media && (
+            <MediaPreview kind={e.media} url={`/intel/mention/${e.id}/media`} label={e.text} />
+          )}
+          {text}
+        </div>
+        <div className={styles.eventMeta}>
+          {e.subject && <span style={{ color: '#57D2E2' }}>📍 {e.subject} · </span>}
+          {e.author} · {DIRECTION_NAMES[e.direction]?.split(' ')[0] || e.direction}
+          {dups > 1 ? ` · ${dups} канал.` : ''}
+          {e.verified ? ' · ✓' : ''}
+          {e.url && (
+            <> · <a href={e.url} target="_blank" rel="noopener noreferrer"
+                   onClick={ev => ev.stopPropagation()}
+                   style={{ color: '#57D2E2', textDecoration: 'none' }}>↗ TG</a></>
+          )}
+        </div>
+        {e.is_reply && <ThreadContext mentionId={e.id} />}
+      </div>
+      <span className={styles.eventTime}>{agoStrShort(e.created_at)}</span>
+      <button
+        className={styles.eventSpam}
+        onClick={(ev) => onSpam(e, ev)}
+        title="В спам (скрыть и запомнить как мусор)"
+      >✕</button>
+    </div>
+  );
+}
+
 export function IntelHome({ timeRange, liveEvents = [], hiddenIds, hideEvent, seenIdsRef, onOpenStory }) {
-  const [data, setData]         = useState(null);
-  const [stream, setStream]     = useState([]);
-  const [flashIds, setFlashIds] = useState(() => new Set());
-  const [paused, setPaused]     = useState(false);  // наведение курсора замораживает ленту
-  const pausedRef               = useRef(false);     // чтобы merge-эффект читал актуальное значение
+  const [data, setData]           = useState(null);
+  const [stream, setStream]       = useState([]);      // основная лента (не-радары)
+  const [radarStream, setRadarStream] = useState([]);  // радарная лента
+  const [flashIds, setFlashIds]   = useState(() => new Set());
+  const [paused, setPaused]       = useState(false);  // наведение курсора замораживает ленту
+  const pausedRef                 = useRef(false);     // чтобы merge-эффект читал актуальное значение
 
   // Throw a post into the spam filter (kind="example") and hide it from the feed.
   // hiddenIds/hideEvent live in IntelApp so the hide survives switching tabs (this
@@ -44,17 +113,25 @@ export function IntelHome({ timeRange, liveEvents = [], hiddenIds, hideEvent, se
     let alive = true;
 
     setStream([]);
+    setRadarStream([]);
     setFlashIds(new Set());
     intelApi.overview(timeRange).then(d => { if (alive) setData(d); }).catch(() => {});
 
-    const streamParams = isCustom
+    const baseParams = isCustom
       ? { from_dt: timeRange.from_dt, to_dt: timeRange.to_dt, limit: 18 }
       : { window: win, limit: 18 };
-    intelApi.stream(streamParams).then(events => {
+    intelApi.stream(baseParams).then(events => {
       if (!alive) return;
       const arr = Array.isArray(events) ? events : [];
       arr.forEach(e => { if (e && e.id != null) seenIdsRef.current.add(e.id); });
       setStream(arr);
+    }).catch(() => {});
+    // Радарная лента — посты источников-радаров (ППО/пуски); в основную не попадают.
+    intelApi.stream({ ...baseParams, radar: 1 }).then(events => {
+      if (!alive) return;
+      const arr = Array.isArray(events) ? events : [];
+      arr.forEach(e => { if (e && e.id != null) seenIdsRef.current.add(e.id); });
+      setRadarStream(arr);
     }).catch(() => {});
 
     // Only poll KPIs in live mode; custom range is static
@@ -68,15 +145,15 @@ export function IntelHome({ timeRange, liveEvents = [], hiddenIds, hideEvent, se
     return () => { alive = false; clearInterval(kpiTimer); };
   }, [timeRange]);
 
-  // Merge live events arriving from IntelApp's unified stream into the feed.
+  // Merge live events arriving from IntelApp's unified stream into a feed list.
   // Filter by window so switching to 1h doesn't show 2-day-old posts that
   // were just ingested by the collector. Dedupes against what's already in the
-  // stream, so it's safe to call with the full (cumulative) liveEvents prop.
-  const mergeLive = useCallback((events) => {
+  // list, so it's safe to call with the full (cumulative) liveEvents prop.
+  const mergeInto = useCallback((setter, events) => {
     if (!events.length || isCustom) return;
     const windowMs = win === '1h' ? 3600000 : win === '7d' ? 7 * 86400000 : win === '30d' ? 30 * 86400000 : 86400000;
     const cutoff = Date.now() - windowMs;
-    setStream(prev => {
+    setter(prev => {
       const seen = new Set(prev.map(e => e.id));
       const add = events.filter(e =>
         e && e.id != null && !seen.has(e.id) &&
@@ -105,6 +182,12 @@ export function IntelHome({ timeRange, liveEvents = [], hiddenIds, hideEvent, se
     });
   }, [win, isCustom]);
 
+  const mergeLive = useCallback((events) => {
+    // Единый SSE несёт и радарные, и обычные события — раскладываем по лентам.
+    mergeInto(setStream, events.filter(e => !e?.is_radar));
+    mergeInto(setRadarStream, events.filter(e => e?.is_radar));
+  }, [mergeInto]);
+
   // While the cursor is over the feed (paused), don't fold new events in — they'd
   // shift rows under the user's pointer. liveEvents is cumulative, so on un-pause
   // we just re-merge the whole prop and dedup catches the backlog.
@@ -120,35 +203,12 @@ export function IntelHome({ timeRange, liveEvents = [], hiddenIds, hideEvent, se
     mergeLive(liveEvents);  // flush whatever arrived while paused
   }, [liveEvents, mergeLive]);
 
-  // Collapse verbatim cross-channel reposts: events sharing a content signature become
-  // one row (the newest), with a count of how many channels carried it. Keeps the feed
-  // readable instead of repeating the same post once per channel.
-  const feed = useMemo(() => {
-    const out = [];
-    const bySig = new Map();
-    for (const e of stream) {
-      if (hiddenIds.has(e.id)) continue;
-      const key = e.sig || `id:${e.id}`;
-      if (bySig.has(key)) {
-        const item = out[bySig.get(key)];
-        item._dups += 1;
-        if (e.author) item._srcs.add(e.author);
-        continue;
-      }
-      bySig.set(key, out.length);
-      out.push({ ...e, _dups: 1, _srcs: new Set(e.author ? [e.author] : []) });
-    }
-    return out;
-  }, [stream, hiddenIds]);
+  const feed      = useMemo(() => collapseBySig(stream, hiddenIds),      [stream, hiddenIds]);
+  const radarFeed = useMemo(() => collapseBySig(radarStream, hiddenIds), [radarStream, hiddenIds]);
 
   if (!data) return <div className={styles.workspace}><div className={styles.empty}>Загрузка обстановки…</div></div>;
 
-  const { kpis, hot, alerts, top_stories } = data;
-  // Лента показывает ПОЛНЫЙ текст поста (без обрезки и без hover-всплывашки).
-  // Длинные посты рендерим чуть мельче, чтобы они не разрывали ленту, оставаясь
-  // полностью читаемыми. LONG_TEXT — порог, после которого включаем мелкий шрифт.
-  const LONG_TEXT = 240;
-  const cleanText = (t) => (t || '').replace(/\s+/g, ' ').trim();
+  const { kpis, hot, alerts } = data;
 
   return (
     <div className={`${styles.workspace} ${styles.homeWorkspace}`}>
@@ -228,28 +288,34 @@ export function IntelHome({ timeRange, liveEvents = [], hiddenIds, hideEvent, se
         </div>
       </div>
 
-      {/* Top stories + Event stream */}
+      {/* Radar feed + Event stream */}
       <div className={`${styles.grid2} ${styles.feedRow}`}>
         <div className={styles.section}>
           <div className={styles.sectionHead}>
             <span className={styles.sectionTitle}>
-              <Icon name="bar3" size={13} color="#57D2E2" />
-              Крупнейшие сюжеты
-              <span className={styles.sectionCount}>{top_stories.length}</span>
+              <Icon name="activity" size={13} color="#FFB23E" />
+              Радары
+              <span className={styles.sectionCount}>{radarFeed.length}</span>
             </span>
+            {isCustom ? (
+              <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 10, color: '#6A8499' }}>
+                АРХИВ
+              </span>
+            ) : (
+              <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 10, color: '#FFB23E', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#FFB23E', animation: 'erpulse 2.4s var(--ease-in-out) infinite' }} />
+                LIVE
+              </span>
+            )}
           </div>
           <div className={styles.scrollBody}>
-          {top_stories.map(s => {
-            const cr = CREDIBILITY[s.credibility] || CREDIBILITY.unrated;
-            return (
-              <div key={s.id} className={styles.hotRow} onClick={() => onOpenStory(s.id)}>
-                <span className={styles.hotTitle}>{s.title}</span>
-                <IntelSparkline data={s.sparkline} color="#57D2E2" w={56} h={18} />
-                <span className={styles.hotMeta}>{s.post_count} упом.</span>
-                <span className={styles.hotMeta} style={{ color: cr.color }}>{s.source_count} ист.</span>
-              </div>
-            );
-          })}
+          {radarFeed.length === 0 ? (
+            <div className={styles.empty}>Нет событий от радар-источников. Пометьте источники флагом «Радар» во вкладке «Источники».</div>
+          ) : (
+            radarFeed.map(e => (
+              <EventRow key={e.id} e={e} isNew={flashIds.has(e.id)} onSpam={handleSpam} />
+            ))
+          )}
           </div>
         </div>
 
@@ -282,48 +348,9 @@ export function IntelHome({ timeRange, liveEvents = [], hiddenIds, hideEvent, se
             )}
           </div>
           <div className={styles.scrollBody}>
-          {feed.map(e => {
-            const sd = SIDE[e.side] || SIDE.ru;
-            const isNew = flashIds.has(e.id);
-            const dups = e._dups || 1;
-            const text = cleanText(e.text);
-            const textClass = text.length > LONG_TEXT
-              ? `${styles.eventText} ${styles.eventTextLong}`
-              : styles.eventText;
-            return (
-              <div key={e.id} className={isNew ? `${styles.eventRow} ${styles.eventRowNew}` : styles.eventRow}>
-                <span className={styles.eventSide} style={{ color: sd.color, background: sd.color + '1A' }}>
-                  {sd.label}
-                </span>
-                <div className={styles.eventBody}>
-                  <div className={textClass}>
-                    {e.media && (
-                      <MediaPreview kind={e.media} url={`/intel/mention/${e.id}/media`} label={e.text} />
-                    )}
-                    {text}
-                  </div>
-                  <div className={styles.eventMeta}>
-                    {e.subject && <span style={{ color: '#57D2E2' }}>📍 {e.subject} · </span>}
-                    {e.author} · {DIRECTION_NAMES[e.direction]?.split(' ')[0] || e.direction}
-                    {dups > 1 ? ` · ${dups} канал.` : ''}
-                    {e.verified ? ' · ✓' : ''}
-                    {e.url && (
-                      <> · <a href={e.url} target="_blank" rel="noopener noreferrer"
-                             onClick={ev => ev.stopPropagation()}
-                             style={{ color: '#57D2E2', textDecoration: 'none' }}>↗ TG</a></>
-                    )}
-                  </div>
-                  {e.is_reply && <ThreadContext mentionId={e.id} />}
-                </div>
-                <span className={styles.eventTime}>{agoStrShort(e.created_at)}</span>
-                <button
-                  className={styles.eventSpam}
-                  onClick={(ev) => handleSpam(e, ev)}
-                  title="В спам (скрыть и запомнить как мусор)"
-                >✕</button>
-              </div>
-            );
-          })}
+          {feed.map(e => (
+            <EventRow key={e.id} e={e} isNew={flashIds.has(e.id)} onSpam={handleSpam} />
+          ))}
           </div>
         </div>
       </div>

@@ -17,6 +17,7 @@ import styles from '../intel.module.css';
 
 const SIDES = [[null, '🇷🇺+🇺🇦'], ['ru', '🇷🇺'], ['ua', '🇺🇦']];
 const SOURCES_PAGE = 12;   // сколько источников в колонке показываем за раз
+const LS_KEY = 'echo.intel.timeframe.columns';   // свой расклад, отдельный от Ленты v2
 
 // timeRange → query-параметры для /intel/timeframe.
 function rangeParams(timeRange) {
@@ -91,16 +92,40 @@ export function IntelTimeframe({ timeRange }) {
   const [expandThreads, setExpandThreads] = useState(false);
   const [threadCtx, setThreadCtx] = useState(null);   // {mentionId: {reply_chain, siblings}}
   const [allDirs, setAllDirs]     = useState([]);     // каталог направлений для фильтра
-  const [pickDirs, setPickDirs]   = useState([]);     // выбранные ключи; пусто = все
+  const [pickDirs, setPickDirs]   = useState([]);     // выбранные колонки (как в Ленте v2)
 
-  useEffect(() => { intelApi.directions().then(setAllDirs).catch(() => {}); }, []);
+  // Каталог направлений + стартовый расклад колонок (localStorage → боевой дефолт).
+  useEffect(() => {
+    intelApi.directions().then(setAllDirs).catch(() => {});
+    const stored = localStorage.getItem(LS_KEY);
+    let parsed = null;
+    if (stored) { try { parsed = JSON.parse(stored); } catch { parsed = null; } }
+    if (parsed && parsed.length > 0) { setPickDirs(parsed); return; }
+    intelApi.getLayout().then(l => {
+      const keys = l.direction_keys || [];
+      setPickDirs(keys);
+      if (keys.length) localStorage.setItem(LS_KEY, JSON.stringify(keys));
+    }).catch(() => {});
+  }, []);
+
+  // Сохраняем расклад при изменении.
+  useEffect(() => {
+    if (pickDirs.length) localStorage.setItem(LS_KEY, JSON.stringify(pickDirs));
+  }, [pickDirs]);
 
   const dirByKey = useMemo(() => Object.fromEntries(allDirs.map(d => [d.key, d])), [allDirs]);
   const dirCsv = pickDirs.join(',');
+  const addColumn    = (d)   => setPickDirs(prev => prev.includes(d.key) ? prev : [...prev, d.key]);
+  const removeColumn = (key) => setPickDirs(prev => prev.filter(k => k !== key));
+  const resetLayout  = () => {
+    localStorage.removeItem(LS_KEY);
+    intelApi.getLayout().then(l => setPickDirs(l.direction_keys || [])).catch(() => {});
+  };
   useEffect(() => {
     let alive = true;
-    setLoading(true);
     setThreadCtx(null);   // новый срез — старые треды не валидны
+    if (!dirCsv) { setData({ columns: [], total: 0 }); setLoading(false); return; }
+    setLoading(true);
     intelApi.timeframe({ ...rangeParams(timeRange),
                          side: side || undefined,
                          include_radar: radar || undefined,
@@ -162,33 +187,24 @@ export function IntelTimeframe({ timeRange }) {
         </div>
       </div>
 
-      {/* Фильтр областей — тот же drawer-пикер, что в Ленте v2. Пусто = все области;
-          выбранные показываем чипами с ✕, «Все области» сбрасывает. */}
+      {/* Колонки — как в Ленте v2: чипы с ✕ удаляют, «+ колонки» добавляет. */}
       <div className={styles.feedColumnBar}>
-        {pickDirs.length === 0
-          ? <span className={styles.colChip} data-active="1"
-                  title="Фильтр не задан — показаны все области. Нажми «+ колонки», чтобы сузить.">
-              ✓ Все области
-            </span>
-          : (
-            <>
-              {pickDirs.map(k => (
-                <span key={k} className={styles.colChip}>
-                  ▶ {dirByKey[k]?.name || k}
-                  <button onClick={() => setPickDirs(prev => prev.filter(x => x !== k))}>✕</button>
-                </span>
-              ))}
-              <button className={styles.feedResetBtn} onClick={() => setPickDirs([])}>Все области</button>
-            </>
-          )}
-        <ColumnPicker
-          activeKeys={pickDirs}
-          onAdd={(d) => setPickDirs(prev => prev.includes(d.key) ? prev : [...prev, d.key])}
-          onRemove={(key) => setPickDirs(prev => prev.filter(k => k !== key))} />
+        {pickDirs.map(k => (
+          <span key={k} className={styles.colChip}>
+            ▶ {dirByKey[k]?.name || k}
+            <button onClick={() => removeColumn(k)}>✕</button>
+          </span>
+        ))}
+        <ColumnPicker activeKeys={pickDirs} onAdd={addColumn} onRemove={removeColumn} />
+        {pickDirs.length > 0 && (
+          <button className={styles.feedResetBtn} onClick={resetLayout}>Сбросить к боевому</button>
+        )}
       </div>
 
       <div className={styles.feedColumns}>
-        {loading && !data
+        {pickDirs.length === 0
+          ? <div className={styles.feedEmpty}>Добавьте колонки через «+ колонки».</div>
+          : loading && !data
           ? <div className={styles.feedEmpty}>Загрузка…</div>
           : columns.length === 0
             ? <div className={styles.feedEmpty}>Нет сообщений за выбранный период.</div>

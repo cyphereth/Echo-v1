@@ -256,7 +256,10 @@ class IntelRealtime:
 
     def _refresh_lexicon(self) -> None:
         """Reload the keyword lexicon AND spam lists from the DB if the TTL has elapsed,
-        so live edits to the filter/antispam take effect without restarting the backend."""
+        so live edits to the filter/antispam take effect without restarting the backend.
+        Also rebuilds the source map so live edits (new source, is_radar toggle) take
+        effect without a restart — otherwise a source flipped to radar keeps landing
+        in the main feed until the process restarts."""
         if time.monotonic() - self._lex_loaded_at < LEXICON_TTL_SEC:
             return
         session = get_session()
@@ -264,6 +267,9 @@ class IntelRealtime:
             self._lexicon = load_lexicon_tiers(session)
             self._spam_words, self._spam_examples = load_spam(session)
             self._keywords = load_keywords(session)
+            by_user, _join, _invite = build_source_map(session)
+            if by_user:
+                self._by_user = by_user
         finally:
             session.close()
         self._lex_loaded_at = time.monotonic()

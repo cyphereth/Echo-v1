@@ -200,7 +200,7 @@ def story_detail(session, story) -> dict:
         "summary_text": story.summary or "",
         "points": [{"bucket_start": _aware(p.bucket_start).isoformat(),
                     "mention_count": p.mention_count, "source_count": p.source_count} for p in pts],
-        "sources": list(src.values()),
+        "sources": sorted(src.values(), key=lambda e: e["last_at"] or "", reverse=True),
         "events": [event(m) for m in sorted(rows, key=lambda m: m.created_at, reverse=True)[:50]],
     })
     return base

@@ -18,10 +18,18 @@ function toInputVal(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-// datetime-local input value → ISO UTC string
+// datetime-local input value ("YYYY-MM-DDTHH:mm") → ISO UTC string.
+// Parse by components instead of `new Date(val)`: a bare local datetime with no
+// seconds/zone is parsed inconsistently across browsers (Safari returns Invalid
+// Date → .toISOString() throws, silently killing «Применить»). Building from parts
+// is deterministic and treats the value as LOCAL wall-clock time.
 function fromInputVal(val) {
   if (!val) return null;
-  return new Date(val).toISOString();
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(val);
+  if (!m) return null;
+  const [, y, mo, d, h, mi] = m.map(Number);
+  const dt = new Date(y, mo - 1, d, h, mi);
+  return isNaN(dt.getTime()) ? null : dt.toISOString();
 }
 
 export function DateRangePicker({ value, onChange }) {

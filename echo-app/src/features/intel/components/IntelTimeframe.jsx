@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { intelApi } from '../api';
 import { PostCard } from './PostCard';
+import { ColumnPicker } from './ColumnPicker';
 import styles from '../intel.module.css';
 
 const SIDES = [[null, '🇷🇺+🇺🇦'], ['ru', '🇷🇺'], ['ua', '🇺🇦']];
@@ -94,6 +95,7 @@ export function IntelTimeframe({ timeRange }) {
 
   useEffect(() => { intelApi.directions().then(setAllDirs).catch(() => {}); }, []);
 
+  const dirByKey = useMemo(() => Object.fromEntries(allDirs.map(d => [d.key, d])), [allDirs]);
   const dirCsv = pickDirs.join(',');
   useEffect(() => {
     let alive = true;
@@ -160,25 +162,27 @@ export function IntelTimeframe({ timeRange }) {
         </div>
       </div>
 
-      {allDirs.length > 0 && (
-        <div className={styles.feedColumnBar} style={{ flexWrap: 'wrap' }}>
-          <button className={styles.colChip}
-                  data-active={pickDirs.length === 0 ? '1' : '0'}
-                  style={{ opacity: pickDirs.length === 0 ? 1 : 0.55 }}
-                  onClick={() => setPickDirs([])}>Все области</button>
-          {allDirs.map(d => {
-            const on = pickDirs.includes(d.key);
-            return (
-              <button key={d.key} className={styles.colChip}
-                      style={{ opacity: on ? 1 : 0.55 }}
-                      onClick={() => setPickDirs(prev =>
-                        on ? prev.filter(k => k !== d.key) : [...prev, d.key])}>
-                {on ? '✓ ' : ''}{d.name}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {/* Фильтр областей — тот же drawer-пикер, что в Ленте v2. Пусто = все области;
+          выбранные показываем чипами с ✕, «Все области» сбрасывает. */}
+      <div className={styles.feedColumnBar}>
+        {pickDirs.length === 0
+          ? <span className={styles.colChip} style={{ opacity: 0.7 }}>Все области</span>
+          : (
+            <>
+              {pickDirs.map(k => (
+                <span key={k} className={styles.colChip}>
+                  ▶ {dirByKey[k]?.name || k}
+                  <button onClick={() => setPickDirs(prev => prev.filter(x => x !== k))}>✕</button>
+                </span>
+              ))}
+              <button className={styles.feedResetBtn} onClick={() => setPickDirs([])}>Все области</button>
+            </>
+          )}
+        <ColumnPicker
+          activeKeys={pickDirs}
+          onAdd={(d) => setPickDirs(prev => prev.includes(d.key) ? prev : [...prev, d.key])}
+          onRemove={(key) => setPickDirs(prev => prev.filter(k => k !== key))} />
+      </div>
 
       <div className={styles.feedColumns}>
         {loading && !data

@@ -15,7 +15,6 @@ export function ThreadContext({ mentionId, compact = false, forceOpen = false, d
   // Необратимо — предупреждаем. Ретро-скрытия нет, текущая карточка остаётся.
   function mute(ev) {
     ev.stopPropagation();
-    if (!window.confirm('Заглушить этот тред? Новые ответы в ветку перестанут попадать в ленту. Действие необратимо.')) return;
     setMuted(true);
     intelApi.muteThread(mentionId).catch(() => setMuted(false));
   }

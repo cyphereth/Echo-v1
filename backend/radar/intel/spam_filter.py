@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import time
 
 from sqlalchemy.orm import Session
 
@@ -26,6 +27,18 @@ LLM_API_URL = os.getenv("LLM_API_URL", "https://api.anthropic.com/v1/messages")
 # Cap how many example posts we ship as reference per classify call — keeps the
 # prompt bounded as the curator's example list grows. Newest examples win.
 MAX_EXAMPLES = 30
+
+# Circuit breaker for the LLM classifier. A dead endpoint (bad key → 403, outage,
+# timeout) must NOT freeze ingest: every poll/live-message called the classifier
+# synchronously, so a hard-down API meant thousands of failing HTTP calls that
+# pegged CPU, spammed the log, and — worst — held DB write transactions open
+# across the network wait, cascading into "database is locked" and a stalled feed.
+# After _CB_THRESHOLD consecutive failures we trip and fail-open (skip the call
+# entirely) for _CB_COOLDOWN_SEC, then let one probe through to re-test.
+_CB_THRESHOLD = 3
+_CB_COOLDOWN_SEC = 120.0
+_cb_fails = 0
+_cb_open_until = 0.0
 
 
 def load_spam(session: Session) -> tuple[list[str], list[str]]:
@@ -99,6 +112,12 @@ def classify_spam_batch(texts: list, examples: list) -> list:
     if not LLM_API_KEY or not examples:
         return [False] * n
 
+    # Circuit open → skip the dead endpoint, fail-open. One probe allowed through
+    # once the cooldown elapses (handled by _cb_open_until reset below on success).
+    global _cb_fails, _cb_open_until
+    if _cb_open_until and time.monotonic() < _cb_open_until:
+        return [False] * n
+
     import httpx
 
     numbered = "\n".join(f"{i}. {(t or '')[:200]}" for i, t in enumerate(texts))
@@ -137,9 +156,18 @@ def classify_spam_batch(texts: list, examples: list) -> list:
         try:
             data = _call()
         except Exception as e:
-            log.warning("classify_spam_batch failed: %s", e)
+            _cb_fails += 1
+            if _cb_fails >= _CB_THRESHOLD:
+                _cb_open_until = time.monotonic() + _CB_COOLDOWN_SEC
+                log.warning("classify_spam_batch tripped circuit after %d fails "
+                            "(cooldown %.0fs): %s", _cb_fails, _CB_COOLDOWN_SEC, e)
+            else:
+                log.warning("classify_spam_batch failed: %s", e)
             return [False] * n
 
+    # Success → reset the breaker.
+    _cb_fails = 0
+    _cb_open_until = 0.0
     flags = [False] * n
     try:
         for obj in data:

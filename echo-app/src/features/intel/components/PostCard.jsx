@@ -42,6 +42,19 @@ export function PostCard({ event, isNew, onSpam, expandThreads = false, threadDa
           )}
         </div>
         {event.is_reply && <ThreadContext mentionId={event.id} compact forceOpen={expandThreads} data={threadData} />}
+        {event._thread?.length > 0 && (
+          <div className={styles.threadLive}>
+            <div className={styles.threadLiveHead}>🧵 +{event._thread.length} в треде</div>
+            {event._thread.map((r, i) => (
+              <div key={r.id}
+                   className={i === event._thread.length - 1
+                     ? `${styles.threadLiveMsg} ${styles.threadLiveMsgNew}`
+                     : styles.threadLiveMsg}>
+                <span className={styles.threadLiveAuthor}>{r.author}</span>{cleanText(r.text)}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <span className={styles.eventTime}>{agoStrShort(event.created_at)}</span>
       {onSpam && (

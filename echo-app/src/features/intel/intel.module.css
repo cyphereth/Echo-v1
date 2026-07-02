@@ -425,6 +425,29 @@
   14%  { opacity: 1; transform: translateY(0); }
   100% { background: transparent; transform: translateY(0); }
 }
+/* Live-подклейка тредовых ответов под якорную карточку: новые ответы в тот же
+   тред не плодят строки, а копятся здесь. Последний — с cyan-миганием. */
+.threadLive {
+  margin-top: 4px;
+  border-left: 2px solid #2BB3C7;
+  padding: 3px 8px;
+  background: rgba(43, 179, 199, 0.06);
+  border-radius: 4px;
+}
+.threadLiveHead {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: #5FB6C7;
+  margin-bottom: 3px;
+}
+.threadLiveMsg { color: #CBD9E3; font-size: 10.5px; line-height: 1.4; margin-bottom: 3px; }
+.threadLiveMsg:last-child { margin-bottom: 0; }
+.threadLiveAuthor { color: #5FB6C7; font-weight: 600; margin-right: 4px; }
+.threadLiveMsgNew { animation: threadMsgFlash 1.4s var(--ease-out); border-radius: 3px; }
+@keyframes threadMsgFlash {
+  0%   { background: rgba(43,179,199,.28); }
+  100% { background: transparent; }
+}
 .eventSide {
   font-family: var(--font-mono);
   font-size: 9px;

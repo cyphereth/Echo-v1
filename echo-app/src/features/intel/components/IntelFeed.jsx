@@ -9,6 +9,26 @@ import { ColumnPicker } from './ColumnPicker';
 import styles from '../intel.module.css';
 
 const LS_KEY = 'echo.intel.feed.columns';
+
+// Ключ треда: настоящий корень (thread_root_id), иначе сам пост — свой корень.
+const threadKey = (e) => e.thread_root_id ?? e.id;
+
+// Свернуть плоский список событий (newest-first) в тредовые карточки.
+// Якорь = ПЕРВЫЙ увиденный пост треда (по времени), последующие ответы копятся
+// в _thread. Карточки сортируются по последней активности (свежие сверху).
+function groupThreads(events) {
+  const byKey = new Map();
+  for (const e of [...events].reverse()) {   // oldest → newest, чтобы якорь = первый
+    const k = threadKey(e);
+    const card = byKey.get(k);
+    if (!card) byKey.set(k, { ...e, _tkey: k, _thread: [], _last: e.created_at });
+    else if (card.id !== e.id && !card._thread.some(r => r.id === e.id)) {
+      card._thread.push(e);
+      card._last = e.created_at;
+    }
+  }
+  return [...byKey.values()].sort((a, b) => (b._last > a._last ? 1 : b._last < a._last ? -1 : 0));
+}
 const WINDOWS = [['1h', '1ч'], ['24h', '24ч'], ['7d', '7д']];
 const SIDES = [[null, '🇷🇺+🇺🇦'], ['ru', '🇷🇺'], ['ua', '🇺🇦']];
 
@@ -70,26 +90,39 @@ export function IntelFeed() {
     setEventsByKey({});
     let alive = true;
     Promise.all(activeKeys.map(k =>
-      intelApi.feed(k, { window: win, side, include_radar: showRadar || undefined }).then(rows => [k, rows]).catch(() => [k, []])
+      intelApi.feed(k, { window: win, side, include_radar: showRadar || undefined }).then(rows => [k, groupThreads(rows)]).catch(() => [k, []])
     )).then(pairs => { if (alive) setEventsByKey(Object.fromEntries(pairs)); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKeys.join(','), win, side, showRadar]);
 
-  // Влить одно событие в колонку с подсветкой; снять подсветку через 1с.
+  // Влить одно событие в колонку. Если тред уже в колонке — не плодим строку, а
+  // подклеиваем ответ к якорной карточке, поднимаем её наверх и мигаем. Иначе —
+  // новая карточка сверху. Подсветку снимаем через 1.2с.
   const applyEvent = useCallback((ev) => {
+    const k = threadKey(ev);
     setEventsByKey(prev => {
       const list = prev[ev.direction] || [];
-      if (list.some(e => e.id === ev.id)) return prev;
-      return { ...prev, [ev.direction]: [{ ...ev, _new: true }, ...list].slice(0, 200) };
+      const idx = list.findIndex(c => c._tkey === k);
+      if (idx >= 0) {
+        const card = list[idx];
+        // дубль: пост уже якорь или уже в подклейке треда
+        if (card.id === ev.id || (card._thread || []).some(r => r.id === ev.id)) return prev;
+        const updated = { ...card, _thread: [...(card._thread || []), ev],
+                          _last: ev.created_at, _new: true };
+        const rest = list.filter((_, i) => i !== idx);
+        return { ...prev, [ev.direction]: [updated, ...rest].slice(0, 200) };
+      }
+      return { ...prev, [ev.direction]:
+        [{ ...ev, _tkey: k, _thread: [], _last: ev.created_at, _new: true }, ...list].slice(0, 200) };
     });
     setTimeout(() => {
       setEventsByKey(prev => ({
         ...prev,
-        [ev.direction]: (prev[ev.direction] || []).map(e =>
-          e.id === ev.id ? { ...e, _new: false } : e),
+        [ev.direction]: (prev[ev.direction] || []).map(c =>
+          c._tkey === k ? { ...c, _new: false } : c),
       }));
-    }, 1000);
+    }, 1200);
   }, []);
 
   // SSE subscription — one connection for all columns.

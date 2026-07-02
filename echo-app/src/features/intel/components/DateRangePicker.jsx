@@ -36,15 +36,12 @@ export function DateRangePicker({ value, onChange }) {
   // value: { window: '24h' } or { from_dt: iso, to_dt: iso }
   const isCustom = !!(value && (value.from_dt || value.to_dt));
   const [open, setOpen] = useState(false);
-  const [fromVal, setFromVal] = useState(() => toInputVal(value?.from_dt));
-  const [toVal, setToVal]     = useState(() => toInputVal(value?.to_dt));
   const ref = useRef(null);
-
-  // Sync input fields when value is reset externally
-  useEffect(() => {
-    setFromVal(toInputVal(value?.from_dt));
-    setToVal(toInputVal(value?.to_dt));
-  }, [value?.from_dt, value?.to_dt]);
+  // Uncontrolled datetime inputs: read straight from the DOM on apply. A controlled
+  // value={state} fought the native datetime-local picker — the picked value never
+  // reached React state (stayed ""), so «Применить» always saw null and no-op'd.
+  const fromRef = useRef(null);
+  const toRef   = useRef(null);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -54,8 +51,8 @@ export function DateRangePicker({ value, onChange }) {
   }, []);
 
   function applyCustom() {
-    const from_dt = fromInputVal(fromVal);
-    const to_dt   = fromInputVal(toVal);
+    const from_dt = fromInputVal(fromRef.current?.value);
+    const to_dt   = fromInputVal(toRef.current?.value);
     if (!from_dt && !to_dt) return;
     onChange({ from_dt, to_dt });
     setOpen(false);
@@ -108,18 +105,18 @@ export function DateRangePicker({ value, onChange }) {
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <span>От</span>
               <input
+                ref={fromRef}
                 type="datetime-local"
-                value={fromVal}
-                onChange={e => setFromVal(e.target.value)}
+                defaultValue={toInputVal(value?.from_dt)}
                 style={inputStyle}
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <span>До</span>
               <input
+                ref={toRef}
                 type="datetime-local"
-                value={toVal}
-                onChange={e => setToVal(e.target.value)}
+                defaultValue={toInputVal(value?.to_dt)}
                 style={inputStyle}
               />
             </label>
@@ -132,7 +129,7 @@ export function DateRangePicker({ value, onChange }) {
               Применить
             </button>
             <button
-              onClick={() => { onChange({ window: '24h' }); setOpen(false); setFromVal(''); setToVal(''); }}
+              onClick={() => { onChange({ window: '24h' }); setOpen(false); }}
               style={{ ...btnStyle, color: '#6A8499' }}
             >
               Сброс

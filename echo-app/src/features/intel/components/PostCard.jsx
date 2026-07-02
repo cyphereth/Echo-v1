@@ -3,6 +3,7 @@
 // 📍местоположение + автор·направление + repost-счётчик + ✓ + ссылка TG +
 // контекст треда + время + ✕ удаление (в спам). Стили — те же классы eventRow*,
 // поэтому колонка выглядит так же, как ситуационная лента.
+import { useState } from 'react';
 import { SIDE, DIRECTION_NAMES, agoStrShort } from '../api';
 import { ThreadContext } from './ThreadContext';
 import MediaPreview from './MediaPreview';
@@ -12,6 +13,7 @@ const LONG_TEXT = 240;
 const cleanText = (t) => (t || '').replace(/\s+/g, ' ').trim();
 
 export function PostCard({ event, isNew, onSpam, expandThreads = false, threadData = null }) {
+  const [threadOpen, setThreadOpen] = useState(false);
   const sd = SIDE[event.side] || SIDE.ru;
   const dups = event._dups || 1;
   const text = cleanText(event.text);
@@ -44,8 +46,13 @@ export function PostCard({ event, isNew, onSpam, expandThreads = false, threadDa
         {event.is_reply && <ThreadContext mentionId={event.id} compact forceOpen={expandThreads} data={threadData} />}
         {event._thread?.length > 0 && (
           <div className={styles.threadLive}>
-            <div className={styles.threadLiveHead}>🧵 +{event._thread.length} в треде</div>
-            {event._thread.map((r, i) => (
+            <button type="button"
+                    className={styles.threadLiveHead}
+                    onClick={(ev) => { ev.stopPropagation(); setThreadOpen(o => !o); }}
+                    title={threadOpen ? 'Свернуть ответы' : 'Показать ответы'}>
+              🧵 {threadOpen ? '▾' : '▸'} +{event._thread.length} в треде
+            </button>
+            {threadOpen && event._thread.map((r, i) => (
               <div key={r.id}
                    className={i === event._thread.length - 1
                      ? `${styles.threadLiveMsg} ${styles.threadLiveMsgNew}`

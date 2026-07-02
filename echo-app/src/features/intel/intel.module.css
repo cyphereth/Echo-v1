@@ -439,7 +439,14 @@
   font-size: 9px;
   color: #5FB6C7;
   margin-bottom: 3px;
+  display: inline-block;
+  border: none;
+  background: none;
+  padding: 1px 0;
+  cursor: pointer;
+  letter-spacing: .3px;
 }
+.threadLiveHead:hover { color: #8FD4E2; }
 .threadLiveMsg { color: #CBD9E3; font-size: 10.5px; line-height: 1.4; margin-bottom: 3px; }
 .threadLiveMsg:last-child { margin-bottom: 0; }
 .threadLiveAuthor { color: #5FB6C7; font-weight: 600; margin-right: 4px; }

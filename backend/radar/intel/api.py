@@ -19,7 +19,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Header
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from ..core.db import get_session
@@ -136,8 +136,19 @@ def intel_stream(
             q = q.filter(IntelMention.direction_id == d.id)
     q = q.filter(IntelMention.hidden == False)  # noqa: E712  — soft-hidden (спам) не показываем
     # Радар-источники живут в отдельной радарной ленте: radar=true — только они,
-    # по умолчанию — только обычные (радары из основной ленты исключены).
-    q = q.filter(IntelMention.is_radar == radar)
+    # по умолчанию — только обычные (радары из основной ленты исключены). Матчим и
+    # по хэндлу радар-пробы: замороженный is_radar=0 у late-flagged источника иначе
+    # утёк бы в основную ленту (и не попал бы в радарную при radar=true).
+    handles = _radar_handles(session)
+    if radar:
+        if handles:
+            q = q.filter(or_(IntelMention.is_radar == True, IntelMention.author.in_(handles)))  # noqa: E712
+        else:
+            q = q.filter(IntelMention.is_radar == True)  # noqa: E712
+    else:
+        q = q.filter(IntelMention.is_radar == False)  # noqa: E712
+        if handles:
+            q = q.filter(IntelMention.author.notin_(handles))
     rows = q.order_by(IntelMention.created_at.desc()).limit(limit).all()
     return [aggregate.event(m) for m in rows]
 
@@ -194,12 +205,14 @@ async def intel_stream_live(
 
     async def event_gen():
         last_id = after_id
-        if last_id <= 0:
-            s = get_session()
-            try:
+        radar_handles: set = set()
+        s = get_session()
+        try:
+            if last_id <= 0:
                 last_id = s.query(func.max(IntelMention.id)).scalar() or 0
-            finally:
-                s.close()
+            radar_handles = _radar_handles(s)
+        finally:
+            s.close()
         last_alert_id = after_alert_id
         if last_alert_id < 0:
             s = get_session()
@@ -234,7 +247,15 @@ async def intel_stream_live(
                                 _resolve_locally(s, m)
                             except Exception:
                                 s.rollback()
-                    payloads = [(m.id, json.dumps(aggregate.event(m), ensure_ascii=False)) for m in rows]
+                    payloads = []
+                    for m in rows:
+                        ev = aggregate.event(m)
+                        # Замороженный is_radar может быть 0 у поста радар-источника,
+                        # помеченного после ingest → клиент положит его в основную
+                        # ленту вместо радарной. Правим по хэндлу источника.
+                        if not ev.get("is_radar") and m.author in radar_handles:
+                            ev["is_radar"] = True
+                        payloads.append((m.id, json.dumps(ev, ensure_ascii=False)))
                 finally:
                     s.close()
                 s = get_session()
@@ -430,6 +451,21 @@ def intel_create_direction(
 
 
 # ── Feed v2 ───────────────────────────────────────────────────────────────────
+
+def _radar_handles(session) -> set:
+    """Set of @handles for every source flagged «Радар».
+
+    The per-mention is_radar flag is frozen at ingest, so a source marked radar
+    AFTER its posts were collected (or via realtime before the source map knew the
+    flag) leaves mentions with is_radar=0. Matching by author handle makes the
+    radar split reliable regardless of the frozen flag. Shared by /intel/feed and
+    both SSE streams."""
+    from .collector import _clean_handle
+    return {
+        h for (raw,) in session.query(IntelProbe.query).filter(IntelProbe.is_radar == True)  # noqa: E712
+        for h in (_clean_handle(raw),) if h.startswith("@")
+    }
+
 
 @router.get("/intel/feed")
 def intel_feed(
@@ -1411,10 +1447,19 @@ async def intel_feed_stream(
 
     async def event_gen():
         last_id = after_id
+        radar_handles: set = set()
         if last_id <= 0:
             s = get_session()
             try:
                 last_id = s.query(func.max(IntelMention.id)).scalar() or 0
+                if not include_radar:
+                    radar_handles = _radar_handles(s)
+            finally:
+                s.close()
+        elif not include_radar:
+            s = get_session()
+            try:
+                radar_handles = _radar_handles(s)
             finally:
                 s.close()
         yield ": connected\n\n"
@@ -1433,7 +1478,11 @@ async def intel_feed_stream(
                                  IntelMention.created_at >= since,
                                  IntelMention.hidden == False))    # noqa: E712
                     if not include_radar:
+                        # Frozen is_radar flag AND author-handle match — a source
+                        # flagged radar after ingest still gets excluded from columns.
                         q = q.filter(IntelMention.is_radar == False)  # noqa: E712
+                        if radar_handles:
+                            q = q.filter(IntelMention.author.notin_(radar_handles))
                     if side:
                         q = q.filter(IntelMention.side == side)
                     rows = q.order_by(IntelMention.id.asc()).limit(300).all()

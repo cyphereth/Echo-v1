@@ -10,21 +10,46 @@ import styles from '../intel.module.css';
 
 const LS_KEY = 'echo.intel.feed.columns';
 
-// Ключ треда: настоящий корень (thread_root_id), иначе сам пост — свой корень.
-const threadKey = (e) => e.thread_root_id ?? e.id;
+// Ключ треда по ЦЕПОЧКЕ, а не только по корню. thread_root_id часто ещё null в
+// момент прихода (родитель не успел стать локальным), поэтому идём по запасным
+// связям: настоящий корень → прямой родитель (reply_to_id) → сиблинги по общему
+// родителю (reply_to_tg_id) → сам пост. `map` (member-id → канонический _tkey)
+// нормализует любую из этих связей к уже существующей карточке, чтобы ответы
+// одного треда не расползались по нескольким якорям (дубли треда в ленте).
+const sib = (e) => (e.reply_to_tg_id != null ? `rt:${e.reply_to_tg_id}` : null);
+
+function resolveKey(e, map) {
+  if (e.thread_root_id != null && map.has(e.thread_root_id)) return map.get(e.thread_root_id);
+  if (e.reply_to_id   != null && map.has(e.reply_to_id))   return map.get(e.reply_to_id);
+  const s = sib(e);
+  if (s && map.has(s)) return map.get(s);
+  return e.thread_root_id ?? e.id;   // новый якорь
+}
+// Запомнить якорь: все его связи → его _tkey.
+function registerAnchor(e, k, map) {
+  map.set(e.id, k); map.set(k, k);
+  if (e.thread_root_id != null) map.set(e.thread_root_id, k);
+  const s = sib(e); if (s) map.set(s, k);
+}
+// Запомнить свёрнутый ответ: его связи тоже ведут к тому же _tkey.
+function registerMember(e, k, map) {
+  map.set(e.id, k);
+  const s = sib(e); if (s) map.set(s, k);
+}
 
 // Свернуть плоский список событий (newest-first) в тредовые карточки.
 // Якорь = ПЕРВЫЙ увиденный пост треда (по времени), последующие ответы копятся
-// в _thread. Карточки сортируются по последней активности (свежие сверху).
-function groupThreads(events) {
+// в _thread. `map` заполняется связями для последующего live-долива (applyEvent).
+function groupThreads(events, map = new Map()) {
   const byKey = new Map();
   for (const e of [...events].reverse()) {   // oldest → newest, чтобы якорь = первый
-    const k = threadKey(e);
+    const k = resolveKey(e, map);
     const card = byKey.get(k);
-    if (!card) byKey.set(k, { ...e, _tkey: k, _thread: [], _last: e.created_at });
+    if (!card) { byKey.set(k, { ...e, _tkey: k, _thread: [], _last: e.created_at }); registerAnchor(e, k, map); }
     else if (card.id !== e.id && !card._thread.some(r => r.id === e.id)) {
       card._thread.push(e);
       card._last = e.created_at;
+      registerMember(e, k, map);
     }
   }
   return [...byKey.values()].sort((a, b) => (b._last > a._last ? 1 : b._last < a._last ? -1 : 0));
@@ -46,6 +71,7 @@ export function IntelFeed() {
   const esRef        = useRef(null);
   const pausedRef    = useRef(new Set()); // актуальное состояние для SSE-колбэка
   const bufferRef    = useRef({});        // {key: [событие,...]} — буфер на время паузы
+  const memberRef    = useRef({});        // {direction: Map(memberId → _tkey)} — цепочки тредов
 
   // В спам: оптимистично прячем пост во всех колонках + запоминаем как пример мусора.
   const handleSpam = useCallback((e, ev) => {
@@ -88,9 +114,12 @@ export function IntelFeed() {
   // Initial history per column when the set of columns or filters change.
   useEffect(() => {
     setEventsByKey({});
+    memberRef.current = {};
     let alive = true;
     Promise.all(activeKeys.map(k =>
-      intelApi.feed(k, { window: win, side, include_radar: showRadar || undefined }).then(rows => [k, groupThreads(rows)]).catch(() => [k, []])
+      intelApi.feed(k, { window: win, side, include_radar: showRadar || undefined })
+        .then(rows => { const map = new Map(); const cards = groupThreads(rows, map); memberRef.current[k] = map; return [k, cards]; })
+        .catch(() => [k, []])
     )).then(pairs => { if (alive) setEventsByKey(Object.fromEntries(pairs)); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -100,7 +129,8 @@ export function IntelFeed() {
   // подклеиваем ответ к якорной карточке, поднимаем её наверх и мигаем. Иначе —
   // новая карточка сверху. Подсветку снимаем через 1.2с.
   const applyEvent = useCallback((ev) => {
-    const k = threadKey(ev);
+    const map = (memberRef.current[ev.direction] ||= new Map());
+    const k = resolveKey(ev, map);
     setEventsByKey(prev => {
       const list = prev[ev.direction] || [];
       const idx = list.findIndex(c => c._tkey === k);
@@ -108,11 +138,13 @@ export function IntelFeed() {
         const card = list[idx];
         // дубль: пост уже якорь или уже в подклейке треда
         if (card.id === ev.id || (card._thread || []).some(r => r.id === ev.id)) return prev;
+        registerMember(ev, k, map);
         const updated = { ...card, _thread: [...(card._thread || []), ev],
                           _last: ev.created_at, _new: true };
         const rest = list.filter((_, i) => i !== idx);
         return { ...prev, [ev.direction]: [updated, ...rest].slice(0, 200) };
       }
+      registerAnchor(ev, k, map);
       return { ...prev, [ev.direction]:
         [{ ...ev, _tkey: k, _thread: [], _last: ev.created_at, _new: true }, ...list].slice(0, 200) };
     });

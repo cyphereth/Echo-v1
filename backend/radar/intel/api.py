@@ -32,7 +32,7 @@ from . import aggregate
 from . import credibility
 from . import media_cache
 from .spam_filter import _norm, is_exact_spam
-from .context_pass import _handle_for, _parse_handle_and_msg_id, _parent_post_id
+from .context_pass import _handle_for, _parse_handle_and_msg_id, _parent_post_id, _resolve_locally
 from ..brand.api import _get_tg_provider
 from .discovery import discover_for_direction, default_side, available_directions
 from ..core.providers.telegram import TelegramFloodWait
@@ -223,6 +223,17 @@ async def intel_stream_live(
                     if direction_id is not None:
                         q = q.filter(IntelMention.direction_id == direction_id)
                     rows = q.order_by(IntelMention.id.asc()).limit(100).all()
+                    # Реплай мог прилететь раньше, чем родитель стал локальным, — тогда
+                    # thread_root_id/reply_to_id ещё null и фронт заякорит его отдельной
+                    # карточкой (дубль треда). К моменту SSE-тика родитель из того же
+                    # всплеска обычно уже в БД → доразрешаем цепочку локально сейчас,
+                    # чтобы отдать ключ треда сразу. Сеть не дёргаем, ошибки не валят тик.
+                    for m in rows:
+                        if getattr(m, "reply_to_tg_id", None) and m.thread_root_id is None:
+                            try:
+                                _resolve_locally(s, m)
+                            except Exception:
+                                s.rollback()
                     payloads = [(m.id, json.dumps(aggregate.event(m), ensure_ascii=False)) for m in rows]
                 finally:
                     s.close()

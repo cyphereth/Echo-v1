@@ -168,6 +168,7 @@ def event(m) -> dict:
             "sig": content_sig(m.text),
             "is_reply": bool(getattr(m, "reply_to_tg_id", None)),
             "reply_to_tg_id": getattr(m, "reply_to_tg_id", None),
+            "reply_to_id": getattr(m, "reply_to_id", None),
             "thread_root_id": getattr(m, "thread_root_id", None),
             "media": getattr(m, "media", None),
             "is_radar": bool(getattr(m, "is_radar", False))}
